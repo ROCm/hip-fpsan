@@ -1,0 +1,2 @@
+# In-tree build directory (out-of-tree builds are preferred; see README)
+/build/

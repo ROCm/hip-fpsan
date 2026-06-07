@@ -1,0 +1,53 @@
+{
+  "version": 3,
+  "cmakeMinimumRequired": { "major": 3, "minor": 21, "patch": 0 },
+  "configurePresets": [
+    {
+      "name": "cxx",
+      "displayName": "Pure C++ (system clang++)",
+      "generator": "Ninja",
+      "binaryDir": "$env{HOME}/workspace/fpsan-cpp-build",
+      "cacheVariables": {
+        "CMAKE_CXX_COMPILER": "/usr/bin/clang++",
+        "CMAKE_BUILD_TYPE": "RelWithDebInfo",
+        "FPSAN_BUILD_TESTS": "ON",
+        "FPSAN_ENABLE_HIP": "OFF"
+      },
+      "description": "Pure-C++ build. FPSAN_ENABLE_HIP=OFF forces the C++ path even if a HIP toolchain happens to be discoverable on this machine."
+    },
+    {
+      "name": "hip",
+      "displayName": "HIP C++ (ROCm clang, gfx1201)",
+      "generator": "Ninja",
+      "binaryDir": "$env{HOME}/workspace/fpsan-hip-build",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "RelWithDebInfo",
+        "FPSAN_BUILD_TESTS": "ON",
+        "CMAKE_HIP_ARCHITECTURES": "gfx1201"
+      },
+      "description": "HIP build. The HIP path turns on automatically because a HIP toolchain is found (CMAKE_HIP_COMPILER auto-detected from ~/therock_venv by CMakeLists.txt); override with -DCMAKE_HIP_COMPILER / -DCMAKE_HIP_COMPILER_ROCM_ROOT if your install differs."
+    },
+    {
+      "name": "hip-gfx950",
+      "displayName": "HIP C++ (ROCm clang, gfx950 / CDNA4 / MI350)",
+      "generator": "Ninja",
+      "binaryDir": "$env{HOME}/workspace/fpsan-hip-gfx950-build",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "RelWithDebInfo",
+        "FPSAN_BUILD_TESTS": "ON",
+        "CMAKE_HIP_ARCHITECTURES": "gfx950"
+      },
+      "description": "Wave64 (CDNA4). Compile-checks the gfx950 wrappers (MFMA, smfmac, scaled cvt, ds_read_tr). Runtime requires real MI350 hardware (or the rocjitsu simulator)."
+    }
+  ],
+  "buildPresets": [
+    { "name": "cxx", "configurePreset": "cxx" },
+    { "name": "hip", "configurePreset": "hip" },
+    { "name": "hip-gfx950", "configurePreset": "hip-gfx950" }
+  ],
+  "testPresets": [
+    { "name": "cxx", "configurePreset": "cxx", "output": { "outputOnFailure": true } },
+    { "name": "hip", "configurePreset": "hip", "output": { "outputOnFailure": true } },
+    { "name": "hip-gfx950", "configurePreset": "hip-gfx950", "output": { "outputOnFailure": true } }
+  ]
+}

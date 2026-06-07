@@ -1,0 +1,353 @@
+// Copyright (c) 2026 Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
+//
+// fpsan/amdgcn_wave.hpp
+// ----------------------------------------------------------------------------
+// FPSan wrappers for AMDGPU wave-cooperative intrinsics (wave reductions,
+// cross-lane data movers, ...). Like amdgcn_matrix.hpp, this is GPU-only and
+// opt-in (not pulled by <fpsan/fpsan.hpp>).
+//
+// The wave-reduce family relies on two identities (see also [[mix.hpp]],
+// [[value.hpp]]):
+//   - FPSan addition is integer add mod 2^w on the payload, so a butterfly
+//     reduce produces the same payload as a sequential reduce. Strategy and
+//     tree shape are irrelevant in FPSan mode.
+//   - FPSan order is signed-int order on the payload, so fpsan::min /
+//   fpsan::max
+//     reduce to signed-int min / max on storage. Same butterfly works.
+//
+// The wrappers are emitted by the FPSAN_DEFINE_WAVE_REDUCE macro; new (op,
+// type) pairs are one-liners.
+// ----------------------------------------------------------------------------
+#ifndef FPSAN_AMDGCN_WAVE_HPP
+#define FPSAN_AMDGCN_WAVE_HPP
+
+#include "fpsan/amdgcn_matrix.hpp" // for detail::wave_lane + detail::wave_shfl
+#include "fpsan/math.hpp" // for fpsan::min / fpsan::max
+#include "fpsan/value.hpp"
+
+#if !defined(__HIP__) && !defined(__CUDACC__)
+#error "fpsan/amdgcn_wave.hpp is GPU-only; compile as HIP (or CUDA)."
+#endif
+
+namespace fpsan
+{
+
+// Define one fpsan::<name> wave-reduce wrapper. Float mode forwards to BUILTIN
+// (passes Strategy as the _Constant int32_t arg). FPSan mode runs a wave-size
+// correct XOR butterfly (wave32 on RDNA, wave64 on CDNA/gfx950) with
+// COMBINE_EXPR, where the names `r` and `other` are in
+// scope and resolve to per-stage Values. Strategy is ignored in FPSan mode
+// (for fadd/fmin/fmax: the combine op is associative + commutative on
+// payloads, so the tree shape doesn't matter; for fsub: we pick the same
+// butterfly shape as the rest of the family and document that the Float and
+// FPSan paths may differ in last-stage rounding -- the FPSan answer is the
+// one that matches an independent host scalar butterfly reference, which is
+// the only thing FPSan is asked to certify).
+#define FPSAN_DEFINE_WAVE_REDUCE(name, type, COMBINE_EXPR, BUILTIN)                   \
+    template <int         Strategy = 0,                                               \
+              Semantics   S        = Semantics::Float,                                \
+              Conversions C        = Conversions::Explicit>                           \
+    FPSAN_DEVICE Value<type, S, C> name(Value<type, S, C> v)                          \
+    {                                                                                 \
+        if constexpr(S == Semantics::Float)                                           \
+        {                                                                             \
+            return Value<type, S, C>(BUILTIN(v.to_float(), Strategy));                \
+        }                                                                             \
+        else                                                                          \
+        {                                                                             \
+            /* Wave-size-correct XOR butterfly: on CDNA (wave64) we must fold all   \
+       * 64 lanes, on RDNA wave32 only 32. wave_lane_full() gives the true    \
+       * 0..ws-1 lane id on both, and ds_bpermute (inside wave_shfl) is       \
+       * already 64-lane capable, so the only knobs are the lane id and the   \
+       * loop bound. The hardware wave_reduce folds the entire active wave and \
+       * broadcasts the result to every lane; this butterfly reproduces that  \
+       * exactly when the whole wave is active. */ \
+            const int         ws   = __builtin_amdgcn_wavefrontsize();                \
+            const int         lane = detail::wave_lane_full();                        \
+            Value<type, S, C> r    = v;                                               \
+            for(int off = 1; off < ws; off <<= 1)                                     \
+            {                                                                         \
+                auto other = detail::wave_shfl(r, lane ^ off);                        \
+                r          = (COMBINE_EXPR);                                          \
+            }                                                                         \
+            return r;                                                                 \
+        }                                                                             \
+    }
+
+// ---- f32 ---- (gfx10+: __builtin_amdgcn_wave_reduce_f* on RDNA)
+#if !defined(__HIP_DEVICE_COMPILE__) || __has_builtin(__builtin_amdgcn_wave_reduce_fadd_f32)
+    FPSAN_DEFINE_WAVE_REDUCE(amdgcn_wave_reduce_fadd_f32,
+                             float,
+                             r + other,
+                             __builtin_amdgcn_wave_reduce_fadd_f32)
+    FPSAN_DEFINE_WAVE_REDUCE(amdgcn_wave_reduce_fsub_f32,
+                             float,
+                             r - other,
+                             __builtin_amdgcn_wave_reduce_fsub_f32)
+    FPSAN_DEFINE_WAVE_REDUCE(amdgcn_wave_reduce_fmin_f32,
+                             float,
+                             fpsan::min(r, other),
+                             __builtin_amdgcn_wave_reduce_fmin_f32)
+    FPSAN_DEFINE_WAVE_REDUCE(amdgcn_wave_reduce_fmax_f32,
+                             float,
+                             fpsan::max(r, other),
+                             __builtin_amdgcn_wave_reduce_fmax_f32)
+#endif
+#undef FPSAN_DEFINE_WAVE_REDUCE
+
+    // ---- f64 ---- (LEFT OUT: no usable 64-bit wave-reduce instruction)
+    // __builtin_amdgcn_wave_reduce_f{add,sub,min,max}_f64 are visible to
+    // __has_builtin on both gfx12 and gfx950, but the AMDGPU backend fails to
+    // lower them: it expands the reduce via 32-bit DPP/swizzle and rejects the
+    // 64-bit VGPR operand class ("cannot select"). Verified on gfx950 with
+    // TheRock clang. Because there is no usable f64 wave-reduce *instruction* on
+    // gfx950, we deliberately do NOT ship Float-mode f64 wrappers (a wrapper that
+    // silently lowered to a hand-rolled butterfly would misrepresent itself as the
+    // intrinsic and corrupt the authoritative test baseline). Customers who need
+    // an f64 wave reduce can build one directly from fpsan::amdgcn_ds_bpermute /
+    // the XOR butterfly; that is a user-level reduction, not this intrinsic.
+
+    // =============================================================================
+    // Cross-lane data movers (readlane / readfirstlane / writelane / ds_bpermute /
+    // ds_permute / ds_swizzle / mov_dpp / update_dpp / permlane*).
+    //
+    // At the builtin level these all operate on i32 (or i64 for f64 storage); for
+    // FPSan they ARE pure bit movement -- the lane's payload (FPSan mode) or float
+    // bits (Float mode) is moved verbatim across lanes. Float-mode and FPSan-mode
+    // share the same implementation (bit-cast storage -> apply builtin -> bit-cast
+    // back). That's the whole identity the wrappers exploit: cross-lane moves
+    // don't observe values, just bits.
+    // =============================================================================
+
+    namespace detail
+    {
+
+        // Apply a 32-bit cross-lane operation to the storage bits of v and rebuild the
+        // Value. For 64-bit scalars (Value<double>), run the op on the lo/hi 32-bit
+        // halves and reassemble. `Op` is callable as op(std::uint32_t) ->
+        // std::uint32_t.
+        template <class FT, Semantics S, Conversions C, class Op>
+        FPSAN_DEVICE Value<FT, S, C> bit_move(Value<FT, S, C> v, Op op)
+        {
+            using B = typename Value<FT, S, C>::bits_type;
+            static_assert(!Value<FT, S, C>::is_vector, "bit_move requires a scalar Value");
+            const auto bits = v.to_storage_bits();
+            if constexpr(sizeof(B) <= 4)
+            {
+                const std::uint32_t w   = static_cast<std::uint32_t>(bits);
+                const std::uint32_t got = op(w);
+                return Value<FT, S, C>::from_storage_bits(static_cast<B>(got));
+            }
+            else
+            {
+                static_assert(sizeof(B) == 8, "bit_move supports up to 8-byte scalars (f64)");
+                const std::uint64_t b64 = static_cast<std::uint64_t>(bits);
+                const std::uint32_t lo  = static_cast<std::uint32_t>(b64);
+                const std::uint32_t hi  = static_cast<std::uint32_t>(b64 >> 32);
+                const std::uint32_t glo = op(lo);
+                const std::uint32_t ghi = op(hi);
+                const std::uint64_t g64
+                    = (static_cast<std::uint64_t>(ghi) << 32) | static_cast<std::uint64_t>(glo);
+                return Value<FT, S, C>::from_storage_bits(static_cast<B>(g64));
+            }
+        }
+
+    } // namespace detail
+
+    // ---- readlane / readfirstlane (broadcast from a chosen lane) ----------------
+    // The `lane` argument must be wave-uniform; behavior is undefined otherwise --
+    // see the LLVM intrinsic doc. Our wrapper passes it through unchanged.
+    template <class FT, Semantics S, Conversions C>
+    FPSAN_DEVICE Value<FT, S, C> amdgcn_readlane(Value<FT, S, C> v, int lane)
+    {
+        return detail::bit_move(v, [lane](std::uint32_t w) -> std::uint32_t {
+            return static_cast<std::uint32_t>(__builtin_amdgcn_readlane(static_cast<int>(w), lane));
+        });
+    }
+
+    template <class FT, Semantics S, Conversions C>
+    FPSAN_DEVICE Value<FT, S, C> amdgcn_readfirstlane(Value<FT, S, C> v)
+    {
+        return detail::bit_move(v, [](std::uint32_t w) -> std::uint32_t {
+            return static_cast<std::uint32_t>(__builtin_amdgcn_readfirstlane(static_cast<int>(w)));
+        });
+    }
+
+    // Note: __builtin_amdgcn_writelane is NOT exposed by Clang as a builtin (it is
+    // accessible via HIP runtime helpers and the LLVM IR intrinsic, but there is
+    // no Clang builtin for it). Customers needing writelane on FPSan Values can
+    // bit-cast via to_storage_bits()/from_storage_bits() and call the HIP
+    // runtime's __ockl_writelane_*; we omit a fpsan:: wrapper rather than pull in
+    // the HIP runtime.
+
+    // ---- ds_bpermute / ds_permute (indexed cross-lane gather/scatter) -----------
+    template <class FT, Semantics S, Conversions C>
+    FPSAN_DEVICE Value<FT, S, C> amdgcn_ds_bpermute(int addr, Value<FT, S, C> v)
+    {
+        return detail::bit_move(v, [addr](std::uint32_t w) -> std::uint32_t {
+            return static_cast<std::uint32_t>(
+                __builtin_amdgcn_ds_bpermute(addr, static_cast<int>(w)));
+        });
+    }
+
+    template <class FT, Semantics S, Conversions C>
+    FPSAN_DEVICE Value<FT, S, C> amdgcn_ds_permute(int addr, Value<FT, S, C> v)
+    {
+        return detail::bit_move(v, [addr](std::uint32_t w) -> std::uint32_t {
+            return static_cast<std::uint32_t>(
+                __builtin_amdgcn_ds_permute(addr, static_cast<int>(w)));
+        });
+    }
+
+    // ---- ds_swizzle (fixed permutation; pattern is a compile-time constant) -----
+    template <int Pattern, class FT, Semantics S, Conversions C>
+    FPSAN_DEVICE Value<FT, S, C> amdgcn_ds_swizzle(Value<FT, S, C> v)
+    {
+        return detail::bit_move(v, [](std::uint32_t w) -> std::uint32_t {
+            return static_cast<std::uint32_t>(
+                __builtin_amdgcn_ds_swizzle(static_cast<int>(w), Pattern));
+        });
+    }
+
+    // ---- mov_dpp / update_dpp (data parallel primitives) ------------------------
+    // Ctrl/RowMask/BankMask/BoundCtrl must be compile-time constants. update_dpp
+    // blends the result with `old` according to row_mask/bank_mask/bound_ctrl.
+    template <int  Ctrl,
+              int  RowMask,
+              int  BankMask,
+              bool BoundCtrl,
+              class FT,
+              Semantics   S,
+              Conversions C>
+    FPSAN_DEVICE Value<FT, S, C> amdgcn_mov_dpp(Value<FT, S, C> v)
+    {
+        return detail::bit_move(v, [](std::uint32_t w) -> std::uint32_t {
+            return static_cast<std::uint32_t>(
+                __builtin_amdgcn_mov_dpp(static_cast<int>(w), Ctrl, RowMask, BankMask, BoundCtrl));
+        });
+    }
+
+    template <int  Ctrl,
+              int  RowMask,
+              int  BankMask,
+              bool BoundCtrl,
+              class FT,
+              Semantics   S,
+              Conversions C>
+    FPSAN_DEVICE Value<FT, S, C> amdgcn_update_dpp(Value<FT, S, C> old, Value<FT, S, C> v)
+    {
+        using B = typename Value<FT, S, C>::bits_type;
+        static_assert(!Value<FT, S, C>::is_vector, "amdgcn_update_dpp requires a scalar Value");
+        const auto vbits = v.to_storage_bits();
+        const auto obits = old.to_storage_bits();
+        if constexpr(sizeof(B) <= 4)
+        {
+            const std::uint32_t w   = static_cast<std::uint32_t>(vbits);
+            const std::uint32_t o   = static_cast<std::uint32_t>(obits);
+            const std::uint32_t got = static_cast<std::uint32_t>(__builtin_amdgcn_update_dpp(
+                static_cast<int>(o), static_cast<int>(w), Ctrl, RowMask, BankMask, BoundCtrl));
+            return Value<FT, S, C>::from_storage_bits(static_cast<B>(got));
+        }
+        else
+        {
+            static_assert(sizeof(B) == 8);
+            const std::uint64_t vb  = static_cast<std::uint64_t>(vbits);
+            const std::uint64_t ob  = static_cast<std::uint64_t>(obits);
+            const std::uint32_t vlo = static_cast<std::uint32_t>(vb);
+            const std::uint32_t vhi = static_cast<std::uint32_t>(vb >> 32);
+            const std::uint32_t olo = static_cast<std::uint32_t>(ob);
+            const std::uint32_t ohi = static_cast<std::uint32_t>(ob >> 32);
+            const std::uint32_t glo = static_cast<std::uint32_t>(__builtin_amdgcn_update_dpp(
+                static_cast<int>(olo), static_cast<int>(vlo), Ctrl, RowMask, BankMask, BoundCtrl));
+            const std::uint32_t ghi = static_cast<std::uint32_t>(__builtin_amdgcn_update_dpp(
+                static_cast<int>(ohi), static_cast<int>(vhi), Ctrl, RowMask, BankMask, BoundCtrl));
+            const std::uint64_t g64
+                = (static_cast<std::uint64_t>(ghi) << 32) | static_cast<std::uint64_t>(glo);
+            return Value<FT, S, C>::from_storage_bits(static_cast<B>(g64));
+        }
+    }
+
+// ---- permlane16 / permlanex16 / permlane64 ----------------------------------
+// permlane16(old, src, sel0, sel1, fi, bc): permute within rows of 16. sel0
+// and sel1 are 32-bit lane-selector vectors (one nibble per lane); fi (fetch
+// invalid), bc (bound control) are bools. gfx10+ (not on CDNA gfx9 family).
+#if !defined(__HIP_DEVICE_COMPILE__) || __has_builtin(__builtin_amdgcn_permlane16)
+    template <bool FetchInvalid, bool BoundCtrl, class FT, Semantics S, Conversions C>
+    FPSAN_DEVICE Value<FT, S, C>
+                 amdgcn_permlane16(Value<FT, S, C> old, Value<FT, S, C> src, int sel0, int sel1)
+    {
+        return detail::bit_move(src, [&](std::uint32_t w) -> std::uint32_t {
+            const std::uint32_t o = static_cast<std::uint32_t>(old.to_storage_bits());
+            return static_cast<std::uint32_t>(
+                __builtin_amdgcn_permlane16(static_cast<int>(o),
+                                            static_cast<int>(w),
+                                            static_cast<unsigned>(sel0),
+                                            static_cast<unsigned>(sel1),
+                                            FetchInvalid,
+                                            BoundCtrl));
+        });
+    }
+
+    template <bool FetchInvalid, bool BoundCtrl, class FT, Semantics S, Conversions C>
+    FPSAN_DEVICE Value<FT, S, C>
+                 amdgcn_permlanex16(Value<FT, S, C> old, Value<FT, S, C> src, int sel0, int sel1)
+    {
+        return detail::bit_move(src, [&](std::uint32_t w) -> std::uint32_t {
+            const std::uint32_t o = static_cast<std::uint32_t>(old.to_storage_bits());
+            return static_cast<std::uint32_t>(
+                __builtin_amdgcn_permlanex16(static_cast<int>(o),
+                                             static_cast<int>(w),
+                                             static_cast<unsigned>(sel0),
+                                             static_cast<unsigned>(sel1),
+                                             FetchInvalid,
+                                             BoundCtrl));
+        });
+    }
+#endif // __has_builtin(__builtin_amdgcn_permlane16)
+
+// ---- permlane64: swap lane i with lane i+32 within a wave64. On wave32 (the
+// default RDNA4 mode) lanes 32..63 don't exist, so the swap has no observable
+// effect at the wave32 level; the wrapper is provided for completeness when
+// customers run wave64. gfx11+ only.
+#if !defined(__HIP_DEVICE_COMPILE__) || __has_builtin(__builtin_amdgcn_permlane64)
+    template <class FT, Semantics S, Conversions C>
+    FPSAN_DEVICE Value<FT, S, C> amdgcn_permlane64(Value<FT, S, C> v)
+    {
+        return detail::bit_move(
+            v, [](std::uint32_t w) -> std::uint32_t { return __builtin_amdgcn_permlane64(w); });
+    }
+#endif
+
+// ---- mov_dpp8: DPP variant with a per-lane selector encoded as a 32-bit
+// immediate (8 nibbles, one per lane within an 8-lane row). gfx10+ only.
+#if !defined(__HIP_DEVICE_COMPILE__) || __has_builtin(__builtin_amdgcn_mov_dpp8)
+    template <unsigned Sel, class FT, Semantics S, Conversions C>
+    FPSAN_DEVICE Value<FT, S, C> amdgcn_mov_dpp8(Value<FT, S, C> v)
+    {
+        return detail::bit_move(
+            v, [](std::uint32_t w) -> std::uint32_t { return __builtin_amdgcn_mov_dpp8(w, Sel); });
+    }
+#endif
+
+// ---- ballot: wave-wide bool ballot. The bool itself may come from any
+// source (an FPSan compare on payloads, a user predicate, ...) -- ballot
+// itself just collects one bit per active lane, so it has identical behavior
+// in Float and FPSan modes. w32 only on wave32 archs; w64 on every arch with
+// a 64-lane wave.
+#if !defined(__HIP_DEVICE_COMPILE__) || __has_builtin(__builtin_amdgcn_ballot_w32)
+    FPSAN_DEVICE inline std::uint32_t amdgcn_ballot_w32(bool b)
+    {
+        return static_cast<std::uint32_t>(__builtin_amdgcn_ballot_w32(b));
+    }
+#endif
+#if !defined(__HIP_DEVICE_COMPILE__) || __has_builtin(__builtin_amdgcn_ballot_w64)
+    FPSAN_DEVICE inline std::uint64_t amdgcn_ballot_w64(bool b)
+    {
+        return static_cast<std::uint64_t>(__builtin_amdgcn_ballot_w64(b));
+    }
+#endif
+
+} // namespace fpsan
+
+#endif // FPSAN_AMDGCN_WAVE_HPP
