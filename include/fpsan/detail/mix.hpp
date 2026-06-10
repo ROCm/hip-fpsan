@@ -41,6 +41,14 @@ namespace fpsan
             return x;
         }
 
+        FPSAN_HOST_DEVICE constexpr unsigned countr_zero_u64(u64 x)
+        {
+            unsigned n = 0;
+            while(((x >> n) & 1u) == 0u)
+                ++n;
+            return n;
+        }
+
         // The per-format mixing configuration. Pure function of fp_traits<T>; intended
         // to be held as a `static constexpr` so it costs nothing at run time.
         struct MixConfig
@@ -61,14 +69,16 @@ namespace fpsan
             using tr = fp_traits<T>;
             MixConfig c{};
             c.bit_width = tr::bit_width;
-            c.shift     = tr::mantissa_bits; // bias is odd, so 1.0's bits have exactly this
-            // many trailing zeros
             c.sign_mask = u64{1} << (tr::bit_width - 1);
             c.mag_mask  = c.sign_mask - 1;
             c.full_mask = c.sign_mask | c.mag_mask; // all bit_width bits (avoids <<64)
 
             // IEEE bit pattern of +1.0 is exp=bias, mantissa=0.
             const u64 one_bits = u64(static_cast<unsigned>(tr::bias)) << tr::mantissa_bits;
+            // Triton's usual formats have odd bias, so this equals mantissa_bits.
+            // AMD FNUZ fp8 uses an even bias; using the actual trailing-zero count
+            // keeps the +1.0 mixed value odd and therefore invertible.
+            c.shift = countr_zero_u64(one_bits);
 
             c.mul_a       = 922291u & c.mag_mask;
             u64 one_mixed = (one_bits * c.mul_a) & c.mag_mask;

@@ -37,6 +37,7 @@
 #include "fpsan/amdgcn_matrix.hpp" // detail::v8_fragment + native vec aliases
 #include "fpsan/cast.hpp"
 #include "fpsan/detail/fp8.hpp"
+#include "fpsan/detail/native_vec.hpp"
 #include "fpsan/detail/subbyte_widen.hpp"
 #include "fpsan/value.hpp"
 
@@ -92,6 +93,10 @@ namespace fpsan
     using v32e5m2_native = detail::v32_fragment<fp8_e5m2>; // bf8 scaled-MFMA operand
     using v16e4m3_native = detail::v16_fragment<fp8_e4m3>;
     using v16e5m2_native = detail::v16_fragment<fp8_e5m2>;
+    using v8amd_e4m3_native  = detail::v8_fragment<amd_fp8_e4m3>;
+    using v8amd_e5m2_native  = detail::v8_fragment<amd_fp8_e5m2>;
+    using v16amd_e4m3_native = detail::v16_fragment<amd_fp8_e4m3>;
+    using v16amd_e5m2_native = detail::v16_fragment<amd_fp8_e5m2>;
 
     namespace detail
     {
@@ -670,7 +675,7 @@ namespace fpsan
     } // namespace detail
 
 // =============================================================================
-// CDNA4 (gfx950) MFMA wrappers.
+// CDNA MFMA wrappers.
 //
 // Each wrapper:
 //   - Float mode: bit-casts the Value fragments to the native vector ABI and
@@ -688,13 +693,14 @@ namespace fpsan
 // HIP test source parsing even when device-pass is hidden.
 // =============================================================================
 
-// Helper: same-shape extractor for a vec8-of-FType fragment.
+// Helper: same-shape extractor for a vector-of-16-bit-fragment.
 // input_loc() returns (reg, sub) where `reg` is the 32-bit dword slot and
 // `sub` is the sub-element within that dword (for 16-bit operands, 2 elements
-// per dword). The element's index inside the per-lane v8 fragment is therefore
+// per dword). The element's index inside the per-lane fragment is therefore
 // 2*reg + sub -- ignoring `sub` would read only the low half of every dword
 // and silently drop half of the K elements.
-#define FPSAN_MFMA_EXTRACT_VEC8(Frag) [&](int reg, int sub) { return Frag.get(2 * reg + sub); }
+#define FPSAN_MFMA_EXTRACT_VEC16(Frag) [&](int reg, int sub) { return Frag.get(2 * reg + sub); }
+#define FPSAN_MFMA_EXTRACT_VEC8(Frag) FPSAN_MFMA_EXTRACT_VEC16(Frag)
 
 // Helper: 8-bit-packed extractor for a long-int (Wi) fragment containing 8
 // fp8/bf8 bytes per lane.  Returns a Value<FP8> built from the chosen byte.
@@ -797,9 +803,10 @@ namespace fpsan
 // MI350 (full-block random match of the builtin vs the input_loc/output_loc_32
 // reference); pinned by the LegacyMfmaF16_* golden tests.
 //
-// Note: the non-1k bf16 shapes (mfma_f32_*bf16 with a 2-element fragment) are
-// gfx908-only and cannot be selected on gfx950, so they are intentionally
-// omitted -- only the _1k bf16 variants exist here.
+// Note: Clang exposes non-1k bf16 shapes (mfma_f32_*bf16 with a 2-element
+// fragment) via __has_builtin on gfx942, but the backend cannot select them for
+// this target. They are intentionally omitted rather than exposing wrappers
+// that fail to lower.
 #define FPSAN_DEFINE_MFMA_F32_VEC4(NAME, M_, N_, K_, B_, AVec_, CVec_, BUILTIN)           \
     template <int         CBSZ = 0,                                                       \
               int         ABID = 0,                                                       \
@@ -910,11 +917,12 @@ namespace fpsan
 #undef FPSAN_DEFINE_MFMA_F32_VEC4
 
 // ---- FP8 / BF8 inputs, F32 accumulator (fp8-insts) --------------------------
-// A and B are each a v8 fragment of fp8/bf8 = 8 bytes per lane.  The LLVM
-// ABI takes them as 'long' (Wi); the wrapper bit_casts the fragment to long
-// at the call site.  Value carries them as Value<v8e4m3_native, ...> or
-// Value<v8e5m2_native, ...> so the FPSan payload-domain casts use the same
-// fp8 types already used by WMMA.
+// A and B are each a v8 fragment of fp8/bf8 = 8 bytes per lane.  The LLVM ABI
+// takes them as 'long' (Wi). CDNA3/gfx94x uses AMD FNUZ FP8/BF8 encodings
+// (amd_fp8_e4m3/e5m2); RDNA4/CDNA4 use the existing OCP encodings
+// (fp8_e4m3/e5m2). The wrapper names are the same, but the fragment types are
+// architecture-specific to prevent silently interpreting one byte format as the
+// other.
 #define FPSAN_DEFINE_MFMA_F32_FP8(NAME, M_, N_, K_, AVec_, BVec_, CFragVec_, BUILTIN) \
     template <int         CBSZ = 0,                                                   \
               int         ABID = 0,                                                   \
@@ -941,7 +949,9 @@ namespace fpsan
         }                                                                             \
     }
 
-#if !defined(__HIP_DEVICE_COMPILE__) || __has_builtin(__builtin_amdgcn_mfma_f32_16x16x32_fp8_fp8)
+#if !defined(__HIP_DEVICE_COMPILE__) \
+    || (__has_builtin(__builtin_amdgcn_mfma_f32_16x16x32_fp8_fp8) \
+        && !defined(__gfx940__) && !defined(__gfx941__) && !defined(__gfx942__))
     FPSAN_DEFINE_MFMA_F32_FP8(amdgcn_mfma_f32_16x16x32_fp8_fp8,
                               16,
                               16,
@@ -1004,6 +1014,75 @@ namespace fpsan
                               16,
                               v8e5m2_native,
                               v8e5m2_native,
+                              v16f_native,
+                              __builtin_amdgcn_mfma_f32_32x32x16_bf8_bf8)
+#endif
+
+#if !defined(__HIP_DEVICE_COMPILE__) \
+    || (__has_builtin(__builtin_amdgcn_mfma_f32_16x16x32_fp8_fp8) \
+        && (defined(__gfx940__) || defined(__gfx941__) || defined(__gfx942__)))
+    FPSAN_DEFINE_MFMA_F32_FP8(amdgcn_mfma_f32_16x16x32_fp8_fp8,
+                              16,
+                              16,
+                              32,
+                              v8amd_e4m3_native,
+                              v8amd_e4m3_native,
+                              v4f_native,
+                              __builtin_amdgcn_mfma_f32_16x16x32_fp8_fp8)
+    FPSAN_DEFINE_MFMA_F32_FP8(amdgcn_mfma_f32_16x16x32_fp8_bf8,
+                              16,
+                              16,
+                              32,
+                              v8amd_e4m3_native,
+                              v8amd_e5m2_native,
+                              v4f_native,
+                              __builtin_amdgcn_mfma_f32_16x16x32_fp8_bf8)
+    FPSAN_DEFINE_MFMA_F32_FP8(amdgcn_mfma_f32_16x16x32_bf8_fp8,
+                              16,
+                              16,
+                              32,
+                              v8amd_e5m2_native,
+                              v8amd_e4m3_native,
+                              v4f_native,
+                              __builtin_amdgcn_mfma_f32_16x16x32_bf8_fp8)
+    FPSAN_DEFINE_MFMA_F32_FP8(amdgcn_mfma_f32_16x16x32_bf8_bf8,
+                              16,
+                              16,
+                              32,
+                              v8amd_e5m2_native,
+                              v8amd_e5m2_native,
+                              v4f_native,
+                              __builtin_amdgcn_mfma_f32_16x16x32_bf8_bf8)
+    FPSAN_DEFINE_MFMA_F32_FP8(amdgcn_mfma_f32_32x32x16_fp8_fp8,
+                              32,
+                              32,
+                              16,
+                              v8amd_e4m3_native,
+                              v8amd_e4m3_native,
+                              v16f_native,
+                              __builtin_amdgcn_mfma_f32_32x32x16_fp8_fp8)
+    FPSAN_DEFINE_MFMA_F32_FP8(amdgcn_mfma_f32_32x32x16_fp8_bf8,
+                              32,
+                              32,
+                              16,
+                              v8amd_e4m3_native,
+                              v8amd_e5m2_native,
+                              v16f_native,
+                              __builtin_amdgcn_mfma_f32_32x32x16_fp8_bf8)
+    FPSAN_DEFINE_MFMA_F32_FP8(amdgcn_mfma_f32_32x32x16_bf8_fp8,
+                              32,
+                              32,
+                              16,
+                              v8amd_e5m2_native,
+                              v8amd_e4m3_native,
+                              v16f_native,
+                              __builtin_amdgcn_mfma_f32_32x32x16_bf8_fp8)
+    FPSAN_DEFINE_MFMA_F32_FP8(amdgcn_mfma_f32_32x32x16_bf8_bf8,
+                              32,
+                              32,
+                              16,
+                              v8amd_e5m2_native,
+                              v8amd_e5m2_native,
                               v16f_native,
                               __builtin_amdgcn_mfma_f32_32x32x16_bf8_bf8)
 #endif
@@ -1549,6 +1628,7 @@ namespace fpsan
 #endif
 
 #undef FPSAN_MFMA_EXTRACT_VEC8
+#undef FPSAN_MFMA_EXTRACT_VEC16
 #undef FPSAN_MFMA_EXTRACT_FP8
 
 } // namespace fpsan

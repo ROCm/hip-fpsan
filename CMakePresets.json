@@ -38,16 +38,30 @@
         "CMAKE_HIP_ARCHITECTURES": "gfx950"
       },
       "description": "Wave64 (CDNA4). Compile-checks the gfx950 wrappers (MFMA, smfmac, scaled cvt, ds_read_tr). Runtime requires real MI350 hardware (or the rocjitsu simulator)."
+    },
+    {
+      "name": "hip-gfx942",
+      "displayName": "HIP C++ (ROCm clang, gfx942 / CDNA3 / MI300)",
+      "generator": "Ninja",
+      "binaryDir": "$env{HOME}/workspace/fpsan-hip-gfx942-build",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "RelWithDebInfo",
+        "FPSAN_BUILD_TESTS": "ON",
+        "CMAKE_HIP_ARCHITECTURES": "gfx942"
+      },
+      "description": "Wave64 (CDNA3 / MI300). Builds and runs the gfx942-supported wrapper/test surface on MI300-class hardware."
     }
   ],
   "buildPresets": [
     { "name": "cxx", "configurePreset": "cxx" },
     { "name": "hip", "configurePreset": "hip" },
-    { "name": "hip-gfx950", "configurePreset": "hip-gfx950" }
+    { "name": "hip-gfx950", "configurePreset": "hip-gfx950" },
+    { "name": "hip-gfx942", "configurePreset": "hip-gfx942" }
   ],
   "testPresets": [
     { "name": "cxx", "configurePreset": "cxx", "output": { "outputOnFailure": true } },
     { "name": "hip", "configurePreset": "hip", "output": { "outputOnFailure": true } },
-    { "name": "hip-gfx950", "configurePreset": "hip-gfx950", "output": { "outputOnFailure": true } }
+    { "name": "hip-gfx950", "configurePreset": "hip-gfx950", "output": { "outputOnFailure": true } },
+    { "name": "hip-gfx942", "configurePreset": "hip-gfx942", "output": { "outputOnFailure": true } }
   ]
 }

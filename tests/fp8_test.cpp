@@ -3,9 +3,9 @@
 //
 // tests/fp8_test.cpp
 //
-// Exhaustive tests for the OCP fp8 element types (fp8_e4m3, fp8_e5m2) and
-// their interaction with Value/cast. Each fp8 format only has 256 bit patterns,
-// so we exhaustively cover every one of them.
+// Exhaustive tests for the fp8 element types and their interaction with
+// Value/cast. Each fp8 format only has 256 bit patterns, so we exhaustively
+// cover every one of them.
 //
 //  - Float-mode round trip and bit-cast identities (cast<fp8>(cast<f32>(b)) ==
 //  b
@@ -23,6 +23,8 @@
 #include <cstring>
 
 using fpsan::Conversions;
+using fpsan::amd_fp8_e4m3;
+using fpsan::amd_fp8_e5m2;
 using fpsan::fp8_e4m3;
 using fpsan::fp8_e5m2;
 using fpsan::Semantics;
@@ -77,6 +79,30 @@ TEST(Fp8, E5M2FixedPoints)
     EXPECT_TRUE(std::isnan(static_cast<float>(fp8_e5m2(std::uint8_t{0x7F}))));
 }
 
+TEST(Fp8, AmdE4M3FnuzFixedPoints)
+{
+    EXPECT_EQ(static_cast<float>(amd_fp8_e4m3(std::uint8_t{0x00})), 0.f);
+    EXPECT_TRUE(std::isnan(static_cast<float>(amd_fp8_e4m3(std::uint8_t{0x80}))));
+    EXPECT_EQ(static_cast<float>(amd_fp8_e4m3(std::uint8_t{0x40})), 1.0f);
+    EXPECT_EQ(static_cast<float>(amd_fp8_e4m3(std::uint8_t{0xC0})), -1.0f);
+    EXPECT_EQ(static_cast<float>(amd_fp8_e4m3(std::uint8_t{0x01})), 0x1p-10f);
+    EXPECT_EQ(static_cast<float>(amd_fp8_e4m3(std::uint8_t{0x08})), 0x1p-7f);
+    EXPECT_EQ(static_cast<float>(amd_fp8_e4m3(std::uint8_t{0x7F})), 240.f);
+    EXPECT_EQ(static_cast<float>(amd_fp8_e4m3(std::uint8_t{0xFF})), -240.f);
+}
+
+TEST(Fp8, AmdE5M2FnuzFixedPoints)
+{
+    EXPECT_EQ(static_cast<float>(amd_fp8_e5m2(std::uint8_t{0x00})), 0.f);
+    EXPECT_TRUE(std::isnan(static_cast<float>(amd_fp8_e5m2(std::uint8_t{0x80}))));
+    EXPECT_EQ(static_cast<float>(amd_fp8_e5m2(std::uint8_t{0x40})), 1.0f);
+    EXPECT_EQ(static_cast<float>(amd_fp8_e5m2(std::uint8_t{0xC0})), -1.0f);
+    EXPECT_EQ(static_cast<float>(amd_fp8_e5m2(std::uint8_t{0x01})), 0x1p-17f);
+    EXPECT_EQ(static_cast<float>(amd_fp8_e5m2(std::uint8_t{0x04})), 0x1p-15f);
+    EXPECT_EQ(static_cast<float>(amd_fp8_e5m2(std::uint8_t{0x7F})), 57344.f);
+    EXPECT_EQ(static_cast<float>(amd_fp8_e5m2(std::uint8_t{0xFF})), -57344.f);
+}
+
 // ---- Exhaustive f32 round trip via fp8 -------------------------------------
 // For every non-NaN bit pattern, fp8(f32(b)) == b. NaN patterns may not
 // round-trip (we round through std f32 NaN), so we exclude them.
@@ -104,6 +130,14 @@ TEST(Fp8, ExhaustiveFloatRoundTripE5M2)
 {
     exhaustive_float_roundtrip<fp8_e5m2>();
 }
+TEST(Fp8, ExhaustiveFloatRoundTripAmdE4M3)
+{
+    exhaustive_float_roundtrip<amd_fp8_e4m3>();
+}
+TEST(Fp8, ExhaustiveFloatRoundTripAmdE5M2)
+{
+    exhaustive_float_roundtrip<amd_fp8_e5m2>();
+}
 
 // ---- FPSan fixed points ----------------------------------------------------
 
@@ -123,6 +157,14 @@ TEST(Fp8, FpsanFixedPointsE4M3)
 TEST(Fp8, FpsanFixedPointsE5M2)
 {
     fpsan_fixed_points<fp8_e5m2>();
+}
+TEST(Fp8, FpsanFixedPointsAmdE4M3)
+{
+    fpsan_fixed_points<amd_fp8_e4m3>();
+}
+TEST(Fp8, FpsanFixedPointsAmdE5M2)
+{
+    fpsan_fixed_points<amd_fp8_e5m2>();
 }
 
 // ---- FPSan cast<fp8> <-> cast<float> round trip ----------------------------
@@ -154,6 +196,14 @@ TEST(Fp8, FpsanCastRoundTripE5M2)
 {
     fpsan_cast_roundtrip<fp8_e5m2>();
 }
+TEST(Fp8, FpsanCastRoundTripAmdE4M3)
+{
+    fpsan_cast_roundtrip<amd_fp8_e4m3>();
+}
+TEST(Fp8, FpsanCastRoundTripAmdE5M2)
+{
+    fpsan_cast_roundtrip<amd_fp8_e5m2>();
+}
 
 // ---- Float-mode cast matches native conversion -----------------------------
 // In Float mode, fpsan::cast<float>(Value<fp8>) must be
@@ -182,4 +232,12 @@ TEST(Fp8, FloatModeCastMatchesNativeE4M3)
 TEST(Fp8, FloatModeCastMatchesNativeE5M2)
 {
     float_mode_cast_matches_native<fp8_e5m2>();
+}
+TEST(Fp8, FloatModeCastMatchesNativeAmdE4M3)
+{
+    float_mode_cast_matches_native<amd_fp8_e4m3>();
+}
+TEST(Fp8, FloatModeCastMatchesNativeAmdE5M2)
+{
+    float_mode_cast_matches_native<amd_fp8_e5m2>();
 }

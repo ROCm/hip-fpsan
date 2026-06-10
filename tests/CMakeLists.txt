@@ -98,18 +98,32 @@ if(TARGET GTest::gtest_main)
     # mov_dpp8, ballot_w32, fdot2_f16_f16). Register them only when the
     # arch list contains a gfx12.
     set(_fpsan_has_gfx12 FALSE)
+    set(_fpsan_has_cdna3 FALSE)
     foreach(_arch IN LISTS CMAKE_HIP_ARCHITECTURES)
       if(_arch MATCHES "^gfx12")
         set(_fpsan_has_gfx12 TRUE)
       endif()
+      if(_arch MATCHES "^gfx94[0-2]$")
+        set(_fpsan_has_cdna3 TRUE)
+      endif()
     endforeach()
+    if(_fpsan_has_gfx12 OR _fpsan_has_cdna3)
+      # Baseline fp8/bf8 conversion builtins are shared by gfx12 and CDNA3.
+      # Register once so mixed-architecture HIP builds do not create duplicate
+      # CMake targets.
+      fpsan_add_test(fpsan_cvt_test cvt_test.cpp)
+    endif()
     if(_fpsan_has_gfx12)
       fpsan_add_test(fpsan_wmma_test wmma_test.cpp)
       fpsan_add_test(fpsan_xlane_test xlane_test.cpp)
       fpsan_add_test(fpsan_amdgcn_math_test amdgcn_math_test.cpp)
-      fpsan_add_test(fpsan_cvt_test cvt_test.cpp)
       fpsan_add_test(fpsan_global_load_tr_test global_load_tr_test.cpp)
       fpsan_add_test(fpsan_swmmac_gfx12_test swmmac_gfx12_test.cpp)
+    endif()
+    if(_fpsan_has_cdna3)
+      fpsan_add_test(fpsan_amdgcn_math_cdna3_test amdgcn_math_cdna3_test.cpp)
+      fpsan_add_test(fpsan_mfma_cdna3_test mfma_cdna3_test.cpp)
+      fpsan_add_test(fpsan_smfmac_cdna3_test smfmac_cdna3_test.cpp)
     endif()
     # gfx950 (CDNA4) MFMA / smfmac / scaled-cvt tests.
     set(_fpsan_has_gfx950 FALSE)
@@ -138,11 +152,11 @@ if(TARGET GTest::gtest_main)
     # assumption, these builtins exist AND lower on BOTH RDNA (gfx10+, wave32)
     # and CDNA4/gfx950 (wave64) -- verified on silicon. The test is wave-size
     # agnostic (one full wave, references reduced over warpSize lanes), so we
-    # register it whenever the arch list has a gfx12 or a gfx950. Registered
+    # register it whenever the arch list has a gfx12, CDNA3, or a gfx950. Registered
     # once to avoid a duplicate target when both are present.
-    if(_fpsan_has_gfx12 OR _fpsan_has_gfx950)
+    if(_fpsan_has_gfx12 OR _fpsan_has_cdna3 OR _fpsan_has_gfx950)
       fpsan_add_test(fpsan_wave_test wave_test.cpp)
-      # ldexp{f,,h} builtins exist + lower on both RDNA and CDNA4.
+      # ldexp{f,,h} builtins exist + lower on RDNA, CDNA3, and CDNA4.
       fpsan_add_test(fpsan_amdgcn_ldexp_test amdgcn_ldexp_test.cpp)
     endif()
   endif()

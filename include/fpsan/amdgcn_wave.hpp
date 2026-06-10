@@ -98,11 +98,11 @@ namespace fpsan
 
     // ---- f64 ---- (LEFT OUT: no usable 64-bit wave-reduce instruction)
     // __builtin_amdgcn_wave_reduce_f{add,sub,min,max}_f64 are visible to
-    // __has_builtin on both gfx12 and gfx950, but the AMDGPU backend fails to
+    // __has_builtin on gfx12, gfx942, and gfx950, but the AMDGPU backend fails to
     // lower them: it expands the reduce via 32-bit DPP/swizzle and rejects the
     // 64-bit VGPR operand class ("cannot select"). Verified on gfx950 with
     // TheRock clang. Because there is no usable f64 wave-reduce *instruction* on
-    // gfx950, we deliberately do NOT ship Float-mode f64 wrappers (a wrapper that
+    // these targets, we deliberately do NOT ship Float-mode f64 wrappers (a wrapper that
     // silently lowered to a hand-rolled butterfly would misrepresent itself as the
     // intrinsic and corrupt the authoritative test baseline). Customers who need
     // an f64 wave reduce can build one directly from fpsan::amdgcn_ds_bpermute /
