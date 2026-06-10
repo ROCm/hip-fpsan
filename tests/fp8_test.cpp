@@ -22,9 +22,9 @@
 #include <cstdint>
 #include <cstring>
 
-using fpsan::Conversions;
 using fpsan::amd_fp8_e4m3;
 using fpsan::amd_fp8_e5m2;
+using fpsan::Conversions;
 using fpsan::fp8_e4m3;
 using fpsan::fp8_e5m2;
 using fpsan::Semantics;

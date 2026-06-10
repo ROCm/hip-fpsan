@@ -711,9 +711,9 @@ namespace fpsan
         }                                                                                    \
     }
 
-#if !defined(__HIP_DEVICE_COMPILE__) \
-    || (__has_builtin(__builtin_amdgcn_smfmac_f32_16x16x64_fp8_fp8) \
-        && !defined(__gfx940__) && !defined(__gfx941__) && !defined(__gfx942__))
+#if !defined(__HIP_DEVICE_COMPILE__)                                                        \
+    || (__has_builtin(__builtin_amdgcn_smfmac_f32_16x16x64_fp8_fp8) && !defined(__gfx940__) \
+        && !defined(__gfx941__) && !defined(__gfx942__))
     // 16x16x64 (C = v4f).  A=v8 fp8, B=v16 fp8.
     FPSAN_DEFINE_SMFMAC_FP8(amdgcn_smfmac_f32_16x16x64_fp8_fp8,
                             v8e4m3_native,
@@ -782,7 +782,7 @@ namespace fpsan
                             __builtin_amdgcn_smfmac_f32_32x32x32_bf8_bf8)
 #endif
 
-#if !defined(__HIP_DEVICE_COMPILE__) \
+#if !defined(__HIP_DEVICE_COMPILE__)                                \
     || (__has_builtin(__builtin_amdgcn_smfmac_f32_16x16x64_fp8_fp8) \
         && (defined(__gfx940__) || defined(__gfx941__) || defined(__gfx942__)))
     // CDNA3 16x16x64 (C = v4f).  A=v8 AMD-FNUZ fp8, B=v16 AMD-FNUZ fp8.

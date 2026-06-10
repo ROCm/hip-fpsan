@@ -221,9 +221,9 @@ namespace fpsan
         }                                                                            \
     }
 
-#if !defined(__HIP_DEVICE_COMPILE__) \
-    || (__has_builtin(__builtin_amdgcn_dot4_f32_fp8_fp8) \
-        && !defined(__gfx940__) && !defined(__gfx941__) && !defined(__gfx942__))
+#if !defined(__HIP_DEVICE_COMPILE__)                                             \
+    || (__has_builtin(__builtin_amdgcn_dot4_f32_fp8_fp8) && !defined(__gfx940__) \
+        && !defined(__gfx941__) && !defined(__gfx942__))
     FPSAN_DEFINE_AMDGCN_DOT4_FP8(amdgcn_dot4_f32_fp8_fp8,
                                  v4e4m3_native,
                                  v4e4m3_native,
@@ -242,7 +242,7 @@ namespace fpsan
                                  __builtin_amdgcn_dot4_f32_bf8_bf8)
 #endif
 
-#if !defined(__HIP_DEVICE_COMPILE__) \
+#if !defined(__HIP_DEVICE_COMPILE__)                     \
     || (__has_builtin(__builtin_amdgcn_dot4_f32_fp8_fp8) \
         && (defined(__gfx940__) || defined(__gfx941__) || defined(__gfx942__)))
     FPSAN_DEFINE_AMDGCN_DOT4_FP8(amdgcn_dot4_f32_fp8_fp8,

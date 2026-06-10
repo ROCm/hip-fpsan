@@ -143,8 +143,7 @@ namespace fpsan
             {
                 int arith_exp = static_cast<int>(f32_exp >> f32_mantissa_bits) - f32_exp_bias;
                 const int max_arith_exp
-                    = ((1 << f.exp_bits) - 1 - static_cast<int>(f.have_infinity))
-                      - dst_exp_bias;
+                    = ((1 << f.exp_bits) - 1 - static_cast<int>(f.have_infinity)) - dst_exp_bias;
                 if(arith_exp > max_arith_exp)
                 {
                     gen_inf = true;
@@ -332,38 +331,38 @@ namespace fpsan
         }
     };
 
-#define FPSAN_DEFINE_FP8_SCALAR(NAME, FORMAT)                                  \
-    struct NAME                                                                \
-    {                                                                          \
-        std::uint8_t bits;                                                     \
-        FPSAN_HOST_DEVICE constexpr NAME()                                     \
-            : bits(0)                                                          \
-        {                                                                      \
-        }                                                                      \
-        FPSAN_HOST_DEVICE constexpr explicit NAME(std::uint8_t b)              \
-            : bits(b)                                                          \
-        {                                                                      \
-        }                                                                      \
-        FPSAN_HOST_DEVICE explicit NAME(float v)                               \
+#define FPSAN_DEFINE_FP8_SCALAR(NAME, FORMAT)                                   \
+    struct NAME                                                                 \
+    {                                                                           \
+        std::uint8_t bits;                                                      \
+        FPSAN_HOST_DEVICE constexpr NAME()                                      \
+            : bits(0)                                                           \
+        {                                                                       \
+        }                                                                       \
+        FPSAN_HOST_DEVICE constexpr explicit NAME(std::uint8_t b)               \
+            : bits(b)                                                           \
+        {                                                                       \
+        }                                                                       \
+        FPSAN_HOST_DEVICE explicit NAME(float v)                                \
             : bits(static_cast<std::uint8_t>(detail::f32_to_narrow(v, FORMAT))) \
-        {                                                                      \
-        }                                                                      \
-        FPSAN_HOST_DEVICE operator float() const                               \
-        {                                                                      \
-            return detail::narrow_to_f32(bits, FORMAT);                        \
-        }                                                                      \
-        FPSAN_HOST_DEVICE friend bool operator<(NAME a, NAME b)                \
-        {                                                                      \
-            return static_cast<float>(a) < static_cast<float>(b);              \
-        }                                                                      \
-        FPSAN_HOST_DEVICE friend bool operator==(NAME a, NAME b)               \
-        {                                                                      \
-            return a.bits == b.bits;                                           \
-        }                                                                      \
-        FPSAN_HOST_DEVICE friend bool operator!=(NAME a, NAME b)               \
-        {                                                                      \
-            return !(a == b);                                                  \
-        }                                                                      \
+        {                                                                       \
+        }                                                                       \
+        FPSAN_HOST_DEVICE operator float() const                                \
+        {                                                                       \
+            return detail::narrow_to_f32(bits, FORMAT);                         \
+        }                                                                       \
+        FPSAN_HOST_DEVICE friend bool operator<(NAME a, NAME b)                 \
+        {                                                                       \
+            return static_cast<float>(a) < static_cast<float>(b);               \
+        }                                                                       \
+        FPSAN_HOST_DEVICE friend bool operator==(NAME a, NAME b)                \
+        {                                                                       \
+            return a.bits == b.bits;                                            \
+        }                                                                       \
+        FPSAN_HOST_DEVICE friend bool operator!=(NAME a, NAME b)                \
+        {                                                                       \
+            return !(a == b);                                                   \
+        }                                                                       \
     };
 
     FPSAN_DEFINE_FP8_SCALAR(amd_fp8_e4m3, detail::kAmdFp8E4M3)

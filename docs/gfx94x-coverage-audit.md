@@ -32,22 +32,22 @@ Probe methodology -- same shape as the gfx12 and gfx950 audits:
 GPU commands must run outside the sandbox because the sandbox cannot access ROCm
 devices. Preprocess/compile probes do not need GPU access.
 
-## Status: gfx94x matrix support is closed; scalar-test gap remains
+## Status: gfx94x wrapped support is closed for the audited surface
 
-The CDNA3 matrix, sparse-matrix, baseline FP8/BF8 conversion, f32 scalar math,
-`fdot2`, wave-f32, `ldexp`, classify/compare, and atomic families claimed below
-are wrapped in both modes and silicon-verified on gfx942.
+The CDNA3 matrix, sparse-matrix, baseline FP8/BF8 conversion, shared scalar
+math, `fdot2`, wave-f32, `ldexp`, classify/compare, and atomic families claimed
+below are wrapped in both modes and silicon-verified on gfx942.
 
-The known open `xf32` MFMA implementation gap is closed. The remaining closeout
-item is a smaller test-coverage gap for already-wrapped half/double scalar math
-wrappers that are visible on gfx942 but do not yet have a CDNA3-specific
-direct-builtin-vs-wrapper test.
+The known open `xf32` MFMA implementation gap is closed. The already-wrapped
+half/double scalar math wrappers that lower on gfx942 now also have
+direct-builtin-vs-wrapper Float tests and FPSan payload-model tests through the
+shared `amdgcn_math_test.cpp` target.
 
 The last full gfx942 run for the claimed surface was clean:
 
 ```bash
 ctest --test-dir build_cdna3 --output-on-failure
-# 308/308 passed, 2 expected WaveFsubF32 skips
+# 332/332 passed, 2 expected WaveFsubF32 skips
 ```
 
 The same source passed after reconfiguring `build_hip` to
@@ -61,8 +61,8 @@ The same source passed after reconfiguring `build_hip` to
 |---|---|---|
 | CDNA3 AMD-FNUZ FP8/BF8 scalar formats | `fp8.hpp`, `mix.hpp` | `fp8_test.cpp` validates the AMD FNUZ encodings: E4M3 bias 8, E5M2 bias 16, no infinity, `0x80` NaN, fixed points, exhaustive float round-trips, FPSan fixed points, and cast round-trips. |
 | Baseline FP8/BF8 conversion | `amdgcn_cvt.hpp` | `cvt_test.cpp` passes on gfx942 for `cvt_f32_{fp8,bf8}`, `cvt_pk_{fp8,bf8}_f32`, `cvt_pk_f32_{fp8,bf8}`, `cvt_pkrtz`, and stochastic `cvt_sr_{fp8,bf8}_f32`; Float mode hits hardware, FPSan mode checks byte/payload plumbing. |
-| Scalar f32 math | `amdgcn_math.hpp` | `amdgcn_math_cdna3_test.cpp` passes for `rcpf`, `sqrtf`, `rsqf`, `rsq_clampf`, `sinf`, `cosf`, `logf`, `exp2f`, `fractf`, and `fmed3f`; Float bit-exact against the direct builtin, FPSan payload-exact against the scalar FPSan op. |
-| `fdot2` | `amdgcn_math.hpp` | `amdgcn_math_cdna3_test.cpp` passes for `fdot2` f16x2 dot into f32 accumulator; Float bit-exact against the builtin, FPSan expanded to `acc + a0*b0 + a1*b1`. |
+| Shared scalar math | `amdgcn_math.hpp` | `amdgcn_math_test.cpp` passes on gfx942 for f32 `rcpf`, `sqrtf`, `rsqf`, `rsq_clampf`, `sinf`, `cosf`, `logf`, `exp2f`, `fractf`, `fmed3f`; f64 `rcp`, `sqrt`, `rsq`, `rsq_clamp`, `fract`; and f16 `rcph`, `sqrth`, `rsqh`, `sinh`, `cosh`, `fracth`, `fmed3h`. Float mode is bit-exact against the direct builtin; FPSan mode is payload-exact against the scalar FPSan op. |
+| `fdot2` | `amdgcn_math.hpp` | `amdgcn_math_test.cpp` passes for `fdot2` f16x2 dot into f32 accumulator; Float bit-exact against the builtin, FPSan expanded to `acc + a0*b0 + a1*b1`. |
 | CDNA3 MFMA dense f16 / BF16-1K | `amdgcn_mfma.hpp` | `mfma_cdna3_test.cpp` passes layout and FPSan scalar-reference tests for f16 shapes plus BF16 `_1k` shapes. Layouts are anchored by `LayoutMatchesHardware` against the real builtin. |
 | CDNA3 MFMA AMD-FNUZ FP8/BF8 | `amdgcn_mfma.hpp` | `mfma_cdna3_test.cpp` passes `16x16x32` and `32x32x16` for all `fp8/bf8` operand combinations using `amd_fp8_e4m3` / `amd_fp8_e5m2`, not OCP FP8. |
 | CDNA3 MFMA xF32 | `amdgcn_mfma.hpp` | `mfma_cdna3_test.cpp` passes `16x16x8_xf32` and `32x32x4_xf32` layout and FPSan scalar-reference tests. xF32 uses FP32 storage in `v2f` A/B fragments and reduced-precision hardware multiply; the layout tests use exact small integer-valued inputs so hardware and scalar reference agree. |
@@ -87,24 +87,10 @@ Already implemented shared wrappers also pass the gfx942 suite:
 - Portable GPU dataflow helpers used by matrix/wave tests -- mbcnt,
   ds_bpermute, shfl/permutation helpers, and basic HIP device parity tests.
 
-### Existing wrappers visible on gfx942, not yet separately tested here
+### Existing scalar wrappers intentionally not tested on gfx942
 
-These are called by headers and are visible to `__has_builtin` on gfx942, but the
-CDNA3-specific math test currently covers only f32 scalar forms plus `fdot2`.
-Do not claim full CDNA3 scalar-math closure until these have direct builtin vs
-wrapper tests on real gfx942:
-
-| Op(s) | Current status |
-|---|---|
-| `rcp`, `rcph` | Wrapper exists; add gfx942 Float/FPSan tests. |
-| `sqrt`, `sqrth` | Wrapper exists; add gfx942 Float/FPSan tests. |
-| `rsq`, `rsqh`, `rsq_clamp` | Wrapper exists; add gfx942 Float/FPSan tests. |
-| `sinh`, `cosh` | Half-precision sin/cos builtins; wrapper exists; add gfx942 Float/FPSan tests. |
-| `fract`, `fracth` | Wrapper exists; add gfx942 Float/FPSan tests. |
-| `fmed3h` | Wrapper exists; add gfx942 Float/FPSan tests. |
-
-`log_clampf` is different: the wrapper exists and `__has_builtin` reports it on
-gfx942, but a direct gfx942 lowering probe rejects it as unsupported on the
+`log_clampf` is backend-deferred: the wrapper exists and `__has_builtin` reports
+it on gfx942, but a direct gfx942 lowering probe rejects it as unsupported on the
 subtarget. It is listed under backend deferrals below and should not be added to
 the CDNA3 runtime tests unless the backend behavior changes.
 
@@ -155,9 +141,7 @@ gfx942.
 
 No in-scope, lowering, policy-included gfx942 names are currently left
 unwrapped. The remaining 65 gfx942-visible names not called by wrappers are
-accounted for by the deferral and non-target-surface sections above/below, while
-the already-wrapped half/double scalar math names still need the CDNA3-specific
-tests listed earlier.
+accounted for by the deferral and non-target-surface sections above/below.
 
 ## Not a CDNA3 target surface
 
@@ -175,12 +159,7 @@ RDNA4/gfx12 or CDNA4/gfx950 features in this project.
 
 ## Path to close the gfx94x gaps
 
-1. **Finish scalar math silicon tests.** Extend `amdgcn_math_cdna3_test.cpp` for
-   the visible half/double wrappers listed above. Each test should match the
-   existing pattern: direct builtin in Float mode, wrapper in Float mode,
-   scalar FPSan reference, wrapper in FPSan mode.
-
-2. **Keep backend deferrals hard-gated.** Do not add `log_clampf`, f64 wave
+1. **Keep backend deferrals hard-gated.** Do not add `log_clampf`, f64 wave
    reductions, or non-1K BF16 MFMA to gfx94x tests until a direct gfx942 compile
    probe lowers cleanly.
 

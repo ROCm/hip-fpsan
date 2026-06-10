@@ -116,12 +116,10 @@ if(TARGET GTest::gtest_main)
     if(_fpsan_has_gfx12)
       fpsan_add_test(fpsan_wmma_test wmma_test.cpp)
       fpsan_add_test(fpsan_xlane_test xlane_test.cpp)
-      fpsan_add_test(fpsan_amdgcn_math_test amdgcn_math_test.cpp)
       fpsan_add_test(fpsan_global_load_tr_test global_load_tr_test.cpp)
       fpsan_add_test(fpsan_swmmac_gfx12_test swmmac_gfx12_test.cpp)
     endif()
     if(_fpsan_has_cdna3)
-      fpsan_add_test(fpsan_amdgcn_math_cdna3_test amdgcn_math_cdna3_test.cpp)
       fpsan_add_test(fpsan_mfma_cdna3_test mfma_cdna3_test.cpp)
       fpsan_add_test(fpsan_smfmac_cdna3_test smfmac_cdna3_test.cpp)
     endif()
@@ -158,6 +156,18 @@ if(TARGET GTest::gtest_main)
       fpsan_add_test(fpsan_wave_test wave_test.cpp)
       # ldexp{f,,h} builtins exist + lower on RDNA, CDNA3, and CDNA4.
       fpsan_add_test(fpsan_amdgcn_ldexp_test amdgcn_ldexp_test.cpp)
+      # Common scalar math builtins lower on RDNA4, CDNA3, and CDNA4. The same
+      # source also contains dot-product tests gated by compile definitions so
+      # the gfx12-only cases do not leak into CDNA builds.
+      fpsan_add_test(fpsan_amdgcn_math_test amdgcn_math_test.cpp)
+      if(_fpsan_has_gfx12 OR _fpsan_has_cdna3)
+        target_compile_definitions(fpsan_amdgcn_math_test
+                                   PRIVATE FPSAN_TEST_ENABLE_FDOT2=1)
+      endif()
+      if(_fpsan_has_gfx12)
+        target_compile_definitions(fpsan_amdgcn_math_test
+                                   PRIVATE FPSAN_TEST_ENABLE_GFX12_DOT_MATH=1)
+      endif()
     endif()
   endif()
 endif()

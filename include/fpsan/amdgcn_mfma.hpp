@@ -950,9 +950,9 @@ namespace fpsan
         }                                                                             \
     }
 
-#if !defined(__HIP_DEVICE_COMPILE__) \
-    || (__has_builtin(__builtin_amdgcn_mfma_f32_16x16x32_fp8_fp8) \
-        && !defined(__gfx940__) && !defined(__gfx941__) && !defined(__gfx942__))
+#if !defined(__HIP_DEVICE_COMPILE__)                                                      \
+    || (__has_builtin(__builtin_amdgcn_mfma_f32_16x16x32_fp8_fp8) && !defined(__gfx940__) \
+        && !defined(__gfx941__) && !defined(__gfx942__))
     FPSAN_DEFINE_MFMA_F32_FP8(amdgcn_mfma_f32_16x16x32_fp8_fp8,
                               16,
                               16,
@@ -1019,7 +1019,7 @@ namespace fpsan
                               __builtin_amdgcn_mfma_f32_32x32x16_bf8_bf8)
 #endif
 
-#if !defined(__HIP_DEVICE_COMPILE__) \
+#if !defined(__HIP_DEVICE_COMPILE__)                              \
     || (__has_builtin(__builtin_amdgcn_mfma_f32_16x16x32_fp8_fp8) \
         && (defined(__gfx940__) || defined(__gfx941__) || defined(__gfx942__)))
     FPSAN_DEFINE_MFMA_F32_FP8(amdgcn_mfma_f32_16x16x32_fp8_fp8,
@@ -1095,7 +1095,7 @@ namespace fpsan
 // 10 bits internally, and accumulates/output in FP32. FPSan mode models the
 // algebraic dataflow over f32 payloads; layout tests use exact small values so
 // the reduced-precision hardware path equals the scalar reference.
-#define FPSAN_DEFINE_MFMA_F32_XF32(NAME, M_, N_, K_, CVec_, BUILTIN)                     \
+#define FPSAN_DEFINE_MFMA_F32_XF32(NAME, M_, N_, K_, CVec_, BUILTIN)                      \
     template <int         CBSZ = 0,                                                       \
               int         ABID = 0,                                                       \
               int         BLGP = 0,                                                       \
@@ -1112,19 +1112,17 @@ namespace fpsan
         else                                                                              \
         {                                                                                 \
             return detail::mfma_software<M_, N_, K_, 1, /*InBits=*/32, float, S, Cv>(     \
-                a, b, c,                                                                  \
+                a,                                                                        \
+                b,                                                                        \
+                c,                                                                        \
                 [&](int reg, int /*sub*/) { return a.get(reg); },                         \
                 [&](int reg, int /*sub*/) { return b.get(reg); });                        \
         }                                                                                 \
     }
 
 #if !defined(__HIP_DEVICE_COMPILE__) || __has_builtin(__builtin_amdgcn_mfma_f32_16x16x8_xf32)
-    FPSAN_DEFINE_MFMA_F32_XF32(amdgcn_mfma_f32_16x16x8_xf32,
-                               16,
-                               16,
-                               8,
-                               v4f_native,
-                               __builtin_amdgcn_mfma_f32_16x16x8_xf32)
+    FPSAN_DEFINE_MFMA_F32_XF32(
+        amdgcn_mfma_f32_16x16x8_xf32, 16, 16, 8, v4f_native, __builtin_amdgcn_mfma_f32_16x16x8_xf32)
     FPSAN_DEFINE_MFMA_F32_XF32(amdgcn_mfma_f32_32x32x4_xf32,
                                32,
                                32,

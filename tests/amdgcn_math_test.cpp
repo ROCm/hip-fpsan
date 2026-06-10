@@ -3,12 +3,10 @@
 //
 // tests/amdgcn_math_test.cpp
 //
-// GPU tests for the AMD math intrinsic wrappers in fpsan/amdgcn_math.hpp.
-// Two properties per wrapper:
-//   - Float mode forwards to the builtin (the wrapper produces the same bits
-//     as __builtin_amdgcn_{rcp,rsq,...}f directly).
-//   - FPSan mode matches fpsan::{rcp,rsqrt,...} payload-for-payload (the
-//     wrapper just routes to the tagged op).
+// GPU tests for the AMD math intrinsic wrappers in fpsan/amdgcn_math.hpp. The
+// scalar math cases are shared across gfx12, gfx94x, and gfx950. Dot-product
+// cases remain gated to the architecture families where this test's operand
+// formats and builtins are known to lower.
 #include "fpsan/amdgcn_math.hpp"
 #include "fpsan/fpsan.hpp"
 
@@ -21,6 +19,8 @@
 
 #include <cstdint>
 #include <cstring>
+#include <random>
+#include <string>
 #include <vector>
 
 using fpsan::Conversions;
@@ -28,64 +28,70 @@ using fpsan::Semantics;
 using fpsan::Value;
 
 static constexpr Conversions kCC = Conversions::Explicit;
+static constexpr int         kScalarN = 32;
 
-// Each test launches a kernel that applies the wrapper to lane-input values
-// and compares against:
-//   Float mode: direct builtin call (in the same kernel) -- bit-exact equality.
-//   FPSan mode: fpsan::tagged_op called from FPSan (in the same kernel) --
-//   payload-for-payload equality.
+#ifndef FPSAN_TEST_ENABLE_FDOT2
+#define FPSAN_TEST_ENABLE_FDOT2 0
+#endif
 
-#define AMDGCN_MATH_UNARY_KERNEL(name, FT)                                        \
-    __global__ void k_##name##_pair(const FT*      in,                            \
-                                    FT*            direct,                        \
-                                    FT*            via_wrapper,                   \
-                                    std::uint32_t* pay_direct,                    \
-                                    std::uint32_t* pay_wrapper)                   \
-    {                                                                             \
-        int i = threadIdx.x;                                                      \
-        FT  x = in[i];                                                            \
-        /* Float-mode: direct builtin vs wrapper. */                              \
-        direct[i] = __builtin_##name(x);                                          \
-        Value<FT, Semantics::Float, kCC> vf{x};                                   \
-        via_wrapper[i] = static_cast<FT>(fpsan::name<Semantics::Float, kCC>(vf)); \
-        /* FPSan-mode: tagged op vs wrapper. */                                   \
-        Value<FT, Semantics::FPSan, kCC> vp{x};                                   \
-        pay_direct[i]  = fpsan::FPSAN_OP_FOR_##name(vp).fpsan_payload();          \
-        pay_wrapper[i] = fpsan::name<Semantics::FPSan, kCC>(vp).fpsan_payload();  \
-    }
+#ifndef FPSAN_TEST_ENABLE_GFX12_DOT_MATH
+#define FPSAN_TEST_ENABLE_GFX12_DOT_MATH 0
+#endif
 
-// Map each wrapper to its underlying fpsan:: tagged op.
-#define FPSAN_OP_FOR_amdgcn_rcpf rcp
-#define FPSAN_OP_FOR_amdgcn_sqrtf sqrt
-#define FPSAN_OP_FOR_amdgcn_rsqf rsqrt
-#define FPSAN_OP_FOR_amdgcn_sinf sin
-#define FPSAN_OP_FOR_amdgcn_cosf cos
-#define FPSAN_OP_FOR_amdgcn_logf log
-#define FPSAN_OP_FOR_amdgcn_exp2f exp2
-#define FPSAN_OP_FOR_amdgcn_fractf fract
-#define FPSAN_OP_FOR_amdgcn_tanhf tanh
-
-AMDGCN_MATH_UNARY_KERNEL(amdgcn_rcpf, float)
-AMDGCN_MATH_UNARY_KERNEL(amdgcn_sqrtf, float)
-AMDGCN_MATH_UNARY_KERNEL(amdgcn_rsqf, float)
-AMDGCN_MATH_UNARY_KERNEL(amdgcn_sinf, float)
-AMDGCN_MATH_UNARY_KERNEL(amdgcn_cosf, float)
-AMDGCN_MATH_UNARY_KERNEL(amdgcn_logf, float)
-AMDGCN_MATH_UNARY_KERNEL(amdgcn_exp2f, float)
-AMDGCN_MATH_UNARY_KERNEL(amdgcn_fractf, float)
-// tanhf needs "tanh-insts" feature; not on RDNA4. Wrapper still defined.
+#if defined(__gfx1200__) || defined(__gfx1201__) || defined(__gfx1202__) || defined(__gfx1250__)
+#define FPSAN_TEST_DEVICE_IS_GFX12 1
+#else
+#define FPSAN_TEST_DEVICE_IS_GFX12 0
+#endif
 
 namespace
 {
-
-    std::vector<float> make_inputs()
+    template <class FT>
+    std::vector<FT> make_positive_inputs()
     {
-        std::vector<float> v(32);
-        std::mt19937       rng = fpsan_test::make_rng();
-        // Positive, finite values for ops with restricted domain (log, sqrt, rsq).
+        std::vector<FT> v(kScalarN);
+        std::mt19937    rng = fpsan_test::make_rng();
         for(auto& x : v)
-            x = fpsan_test::pick_quarter<float>(rng, 4, 36); // 1.0 .. 9.0
+            x = fpsan_test::pick_quarter<FT>(rng, 4, 36);
         return v;
+    }
+
+    template <class FT>
+    std::vector<FT> make_signed_inputs()
+    {
+        std::vector<FT> v(kScalarN);
+        std::mt19937    rng = fpsan_test::make_rng();
+        for(auto& x : v)
+            x = fpsan_test::pick_quarter<FT>(rng, -16, 16);
+        return v;
+    }
+
+    std::string current_arch()
+    {
+        int device = 0;
+        if(hipGetDevice(&device) != hipSuccess)
+            return {};
+        hipDeviceProp_t prop{};
+        if(hipGetDeviceProperties(&prop, device) != hipSuccess)
+            return {};
+        return prop.gcnArchName;
+    }
+
+    bool starts_with(const std::string& value, const char* prefix)
+    {
+        return value.rfind(prefix, 0) == 0;
+    }
+
+    [[maybe_unused]] bool current_arch_is_gfx12()
+    {
+        return starts_with(current_arch(), "gfx12");
+    }
+
+    [[maybe_unused]] bool current_arch_supports_fdot2()
+    {
+        const auto arch = current_arch();
+        return starts_with(arch, "gfx12") || starts_with(arch, "gfx940")
+               || starts_with(arch, "gfx941") || starts_with(arch, "gfx942");
     }
 
     template <class T>
@@ -98,52 +104,207 @@ namespace
 
 } // namespace
 
-#define MATH_TESTS(name)                                                                        \
-    TEST(AmdgcnMath, name##_FloatMatchesBuiltin)                                                \
+#define AMDGCN_MATH_UNARY_KERNEL(NAME, FT, BUILTIN, FPSAN_OP)                                   \
+    __global__ void k_##NAME(const FT*                                             in,          \
+                             FT*                                                   direct,      \
+                             FT*                                                   wrapper,     \
+                             typename Value<FT, Semantics::FPSan, kCC>::bits_type* pay_direct,  \
+                             typename Value<FT, Semantics::FPSan, kCC>::bits_type* pay_wrapper) \
     {                                                                                           \
-        int ndev = 0;                                                                           \
-        if(hipGetDeviceCount(&ndev) != hipSuccess || ndev == 0)                                 \
-            GTEST_SKIP() << "no HIP device";                                                    \
-        auto           in  = make_inputs();                                                     \
-        const int      N   = static_cast<int>(in.size());                                       \
-        float*         dIn = to_dev(in);                                                        \
-        float *        dDirect, *dWrap;                                                         \
-        std::uint32_t *dPdir, *dPwrap;                                                          \
-        HIP_CHECK(hipMalloc(&dDirect, N * sizeof(float)));                                      \
-        HIP_CHECK(hipMalloc(&dWrap, N * sizeof(float)));                                        \
-        HIP_CHECK(hipMalloc(&dPdir, N * sizeof(std::uint32_t)));                                \
-        HIP_CHECK(hipMalloc(&dPwrap, N * sizeof(std::uint32_t)));                               \
-        k_##name##_pair<<<1, N>>>(dIn, dDirect, dWrap, dPdir, dPwrap);                          \
-        HIP_CHECK(hipDeviceSynchronize());                                                      \
-        std::vector<float>         direct(N), wrap(N);                                          \
-        std::vector<std::uint32_t> pdir(N), pwrap(N);                                           \
-        HIP_CHECK(hipMemcpy(direct.data(), dDirect, N * sizeof(float), hipMemcpyDeviceToHost)); \
-        HIP_CHECK(hipMemcpy(wrap.data(), dWrap, N * sizeof(float), hipMemcpyDeviceToHost));     \
-        HIP_CHECK(                                                                              \
-            hipMemcpy(pdir.data(), dPdir, N * sizeof(std::uint32_t), hipMemcpyDeviceToHost));   \
-        HIP_CHECK(                                                                              \
-            hipMemcpy(pwrap.data(), dPwrap, N * sizeof(std::uint32_t), hipMemcpyDeviceToHost)); \
-        for(int i = 0; i < N; ++i)                                                              \
-        {                                                                                       \
-            EXPECT_EQ(bits_u32(wrap[i]), bits_u32(direct[i])) << "Float lane " << i;            \
-            EXPECT_EQ(pwrap[i], pdir[i]) << "FPSan lane " << i;                                 \
-        }                                                                                       \
-        (void)hipFree(dIn);                                                                     \
-        (void)hipFree(dDirect);                                                                 \
-        (void)hipFree(dWrap);                                                                   \
-        (void)hipFree(dPdir);                                                                   \
-        (void)hipFree(dPwrap);                                                                  \
+        const int i = threadIdx.x;                                                              \
+        const FT  x = in[i];                                                                    \
+        direct[i]   = BUILTIN(x);                                                               \
+        Value<FT, Semantics::Float, kCC> vf{x};                                                 \
+        wrapper[i] = fpsan::NAME<Semantics::Float, kCC>(vf).to_float();                         \
+        Value<FT, Semantics::FPSan, kCC> vp{x};                                                 \
+        pay_direct[i]  = fpsan::FPSAN_OP(vp).fpsan_payload();                                   \
+        pay_wrapper[i] = fpsan::NAME<Semantics::FPSan, kCC>(vp).fpsan_payload();                \
     }
 
-MATH_TESTS(amdgcn_rcpf)
-MATH_TESTS(amdgcn_sqrtf)
-MATH_TESTS(amdgcn_rsqf)
-MATH_TESTS(amdgcn_sinf)
-MATH_TESTS(amdgcn_cosf)
-MATH_TESTS(amdgcn_logf)
-MATH_TESTS(amdgcn_exp2f)
-MATH_TESTS(amdgcn_fractf)
-// tanhf needs "tanh-insts" feature; not on RDNA4.
+AMDGCN_MATH_UNARY_KERNEL(amdgcn_rcpf, float, __builtin_amdgcn_rcpf, rcp)
+AMDGCN_MATH_UNARY_KERNEL(amdgcn_sqrtf, float, __builtin_amdgcn_sqrtf, sqrt)
+AMDGCN_MATH_UNARY_KERNEL(amdgcn_rsqf, float, __builtin_amdgcn_rsqf, rsqrt)
+AMDGCN_MATH_UNARY_KERNEL(amdgcn_rsq_clampf, float, __builtin_amdgcn_rsq_clampf, rsqrt)
+AMDGCN_MATH_UNARY_KERNEL(amdgcn_sinf, float, __builtin_amdgcn_sinf, sin)
+AMDGCN_MATH_UNARY_KERNEL(amdgcn_cosf, float, __builtin_amdgcn_cosf, cos)
+AMDGCN_MATH_UNARY_KERNEL(amdgcn_logf, float, __builtin_amdgcn_logf, log)
+AMDGCN_MATH_UNARY_KERNEL(amdgcn_exp2f, float, __builtin_amdgcn_exp2f, exp2)
+AMDGCN_MATH_UNARY_KERNEL(amdgcn_fractf, float, __builtin_amdgcn_fractf, fract)
+
+AMDGCN_MATH_UNARY_KERNEL(amdgcn_rcp, double, __builtin_amdgcn_rcp, rcp)
+AMDGCN_MATH_UNARY_KERNEL(amdgcn_sqrt, double, __builtin_amdgcn_sqrt, sqrt)
+AMDGCN_MATH_UNARY_KERNEL(amdgcn_rsq, double, __builtin_amdgcn_rsq, rsqrt)
+AMDGCN_MATH_UNARY_KERNEL(amdgcn_rsq_clamp, double, __builtin_amdgcn_rsq_clamp, rsqrt)
+AMDGCN_MATH_UNARY_KERNEL(amdgcn_fract, double, __builtin_amdgcn_fract, fract)
+
+AMDGCN_MATH_UNARY_KERNEL(amdgcn_rcph, _Float16, __builtin_amdgcn_rcph, rcp)
+AMDGCN_MATH_UNARY_KERNEL(amdgcn_sqrth, _Float16, __builtin_amdgcn_sqrth, sqrt)
+AMDGCN_MATH_UNARY_KERNEL(amdgcn_rsqh, _Float16, __builtin_amdgcn_rsqh, rsqrt)
+AMDGCN_MATH_UNARY_KERNEL(amdgcn_sinh, _Float16, __builtin_amdgcn_sinh, sin)
+AMDGCN_MATH_UNARY_KERNEL(amdgcn_cosh, _Float16, __builtin_amdgcn_cosh, cos)
+AMDGCN_MATH_UNARY_KERNEL(amdgcn_fracth, _Float16, __builtin_amdgcn_fracth, fract)
+#undef AMDGCN_MATH_UNARY_KERNEL
+
+#define AMDGCN_MATH_FMED3_KERNEL(NAME, FT, BUILTIN)                                             \
+    __global__ void k_##NAME(const FT*                                             a,           \
+                             const FT*                                             b,           \
+                             const FT*                                             c,           \
+                             FT*                                                   direct,      \
+                             FT*                                                   wrapper,     \
+                             typename Value<FT, Semantics::FPSan, kCC>::bits_type* pay_direct,  \
+                             typename Value<FT, Semantics::FPSan, kCC>::bits_type* pay_wrapper) \
+    {                                                                                           \
+        const int i = threadIdx.x;                                                              \
+        direct[i]   = BUILTIN(a[i], b[i], c[i]);                                                \
+        Value<FT, Semantics::Float, kCC> af{a[i]}, bf{b[i]}, cf{c[i]};                          \
+        wrapper[i] = fpsan::NAME<Semantics::Float, kCC>(af, bf, cf).to_float();                 \
+        Value<FT, Semantics::FPSan, kCC> ap{a[i]}, bp{b[i]}, cp{c[i]};                          \
+        pay_direct[i]  = fpsan::fmed3(ap, bp, cp).fpsan_payload();                              \
+        pay_wrapper[i] = fpsan::NAME<Semantics::FPSan, kCC>(ap, bp, cp).fpsan_payload();        \
+    }
+
+AMDGCN_MATH_FMED3_KERNEL(amdgcn_fmed3f, float, __builtin_amdgcn_fmed3f)
+AMDGCN_MATH_FMED3_KERNEL(amdgcn_fmed3h, _Float16, __builtin_amdgcn_fmed3h)
+#undef AMDGCN_MATH_FMED3_KERNEL
+
+template <class FT>
+void run_unary(void (*kernel)(const FT*,
+                              FT*,
+                              FT*,
+                              typename Value<FT, Semantics::FPSan, kCC>::bits_type*,
+                              typename Value<FT, Semantics::FPSan, kCC>::bits_type*),
+               const std::vector<FT>& inputs)
+{
+    if(!have_device())
+        GTEST_SKIP() << "no HIP device";
+
+    using Bits = typename Value<FT, Semantics::FPSan, kCC>::bits_type;
+    FT*   dIn  = to_dev(inputs);
+    FT *  dDirect, *dWrapper;
+    Bits *dPayDirect, *dPayWrapper;
+    HIP_CHECK(hipMalloc(&dDirect, kScalarN * sizeof(FT)));
+    HIP_CHECK(hipMalloc(&dWrapper, kScalarN * sizeof(FT)));
+    HIP_CHECK(hipMalloc(&dPayDirect, kScalarN * sizeof(Bits)));
+    HIP_CHECK(hipMalloc(&dPayWrapper, kScalarN * sizeof(Bits)));
+
+    kernel<<<1, kScalarN>>>(dIn, dDirect, dWrapper, dPayDirect, dPayWrapper);
+    HIP_CHECK(hipDeviceSynchronize());
+
+    std::vector<FT>   direct(kScalarN), wrapper(kScalarN);
+    std::vector<Bits> pay_direct(kScalarN), pay_wrapper(kScalarN);
+    HIP_CHECK(hipMemcpy(direct.data(), dDirect, kScalarN * sizeof(FT), hipMemcpyDeviceToHost));
+    HIP_CHECK(hipMemcpy(wrapper.data(), dWrapper, kScalarN * sizeof(FT), hipMemcpyDeviceToHost));
+    HIP_CHECK(
+        hipMemcpy(pay_direct.data(), dPayDirect, kScalarN * sizeof(Bits), hipMemcpyDeviceToHost));
+    HIP_CHECK(
+        hipMemcpy(pay_wrapper.data(), dPayWrapper, kScalarN * sizeof(Bits), hipMemcpyDeviceToHost));
+
+    for(int i = 0; i < kScalarN; ++i)
+    {
+        EXPECT_EQ(bits_of(wrapper[i]), bits_of(direct[i])) << "Float lane " << i;
+        EXPECT_EQ(pay_wrapper[i], pay_direct[i]) << "FPSan lane " << i;
+    }
+
+    (void)hipFree(dIn);
+    (void)hipFree(dDirect);
+    (void)hipFree(dWrapper);
+    (void)hipFree(dPayDirect);
+    (void)hipFree(dPayWrapper);
+}
+
+template <class FT>
+void run_fmed3(void (*kernel)(const FT*,
+                              const FT*,
+                              const FT*,
+                              FT*,
+                              FT*,
+                              typename Value<FT, Semantics::FPSan, kCC>::bits_type*,
+                              typename Value<FT, Semantics::FPSan, kCC>::bits_type*))
+{
+    if(!have_device())
+        GTEST_SKIP() << "no HIP device";
+
+    using Bits = typename Value<FT, Semantics::FPSan, kCC>::bits_type;
+    auto  a    = make_signed_inputs<FT>();
+    auto  b    = make_signed_inputs<FT>();
+    auto  c    = make_signed_inputs<FT>();
+    FT *  dA = to_dev(a), *dB = to_dev(b), *dC = to_dev(c);
+    FT *  dDirect, *dWrapper;
+    Bits *dPayDirect, *dPayWrapper;
+    HIP_CHECK(hipMalloc(&dDirect, kScalarN * sizeof(FT)));
+    HIP_CHECK(hipMalloc(&dWrapper, kScalarN * sizeof(FT)));
+    HIP_CHECK(hipMalloc(&dPayDirect, kScalarN * sizeof(Bits)));
+    HIP_CHECK(hipMalloc(&dPayWrapper, kScalarN * sizeof(Bits)));
+
+    kernel<<<1, kScalarN>>>(dA, dB, dC, dDirect, dWrapper, dPayDirect, dPayWrapper);
+    HIP_CHECK(hipDeviceSynchronize());
+
+    std::vector<FT>   direct(kScalarN), wrapper(kScalarN);
+    std::vector<Bits> pay_direct(kScalarN), pay_wrapper(kScalarN);
+    HIP_CHECK(hipMemcpy(direct.data(), dDirect, kScalarN * sizeof(FT), hipMemcpyDeviceToHost));
+    HIP_CHECK(hipMemcpy(wrapper.data(), dWrapper, kScalarN * sizeof(FT), hipMemcpyDeviceToHost));
+    HIP_CHECK(
+        hipMemcpy(pay_direct.data(), dPayDirect, kScalarN * sizeof(Bits), hipMemcpyDeviceToHost));
+    HIP_CHECK(
+        hipMemcpy(pay_wrapper.data(), dPayWrapper, kScalarN * sizeof(Bits), hipMemcpyDeviceToHost));
+
+    for(int i = 0; i < kScalarN; ++i)
+    {
+        EXPECT_EQ(bits_of(wrapper[i]), bits_of(direct[i])) << "Float lane " << i;
+        EXPECT_EQ(pay_wrapper[i], pay_direct[i]) << "FPSan lane " << i;
+    }
+
+    (void)hipFree(dA);
+    (void)hipFree(dB);
+    (void)hipFree(dC);
+    (void)hipFree(dDirect);
+    (void)hipFree(dWrapper);
+    (void)hipFree(dPayDirect);
+    (void)hipFree(dPayWrapper);
+}
+
+#define AMDGCN_MATH_UNARY_TEST(NAME, FT, INPUTS) \
+    TEST(AmdgcnMath, NAME)                       \
+    {                                            \
+        run_unary<FT>(k_##NAME, INPUTS<FT>());   \
+    }
+
+AMDGCN_MATH_UNARY_TEST(amdgcn_rcpf, float, make_positive_inputs)
+AMDGCN_MATH_UNARY_TEST(amdgcn_sqrtf, float, make_positive_inputs)
+AMDGCN_MATH_UNARY_TEST(amdgcn_rsqf, float, make_positive_inputs)
+AMDGCN_MATH_UNARY_TEST(amdgcn_rsq_clampf, float, make_positive_inputs)
+AMDGCN_MATH_UNARY_TEST(amdgcn_sinf, float, make_signed_inputs)
+AMDGCN_MATH_UNARY_TEST(amdgcn_cosf, float, make_signed_inputs)
+AMDGCN_MATH_UNARY_TEST(amdgcn_logf, float, make_positive_inputs)
+AMDGCN_MATH_UNARY_TEST(amdgcn_exp2f, float, make_signed_inputs)
+AMDGCN_MATH_UNARY_TEST(amdgcn_fractf, float, make_signed_inputs)
+
+AMDGCN_MATH_UNARY_TEST(amdgcn_rcp, double, make_positive_inputs)
+AMDGCN_MATH_UNARY_TEST(amdgcn_sqrt, double, make_positive_inputs)
+AMDGCN_MATH_UNARY_TEST(amdgcn_rsq, double, make_positive_inputs)
+AMDGCN_MATH_UNARY_TEST(amdgcn_rsq_clamp, double, make_positive_inputs)
+AMDGCN_MATH_UNARY_TEST(amdgcn_fract, double, make_signed_inputs)
+
+AMDGCN_MATH_UNARY_TEST(amdgcn_rcph, _Float16, make_positive_inputs)
+AMDGCN_MATH_UNARY_TEST(amdgcn_sqrth, _Float16, make_positive_inputs)
+AMDGCN_MATH_UNARY_TEST(amdgcn_rsqh, _Float16, make_positive_inputs)
+AMDGCN_MATH_UNARY_TEST(amdgcn_sinh, _Float16, make_signed_inputs)
+AMDGCN_MATH_UNARY_TEST(amdgcn_cosh, _Float16, make_signed_inputs)
+AMDGCN_MATH_UNARY_TEST(amdgcn_fracth, _Float16, make_signed_inputs)
+#undef AMDGCN_MATH_UNARY_TEST
+
+TEST(AmdgcnMath, amdgcn_fmed3f)
+{
+    run_fmed3<float>(k_amdgcn_fmed3f);
+}
+
+TEST(AmdgcnMath, amdgcn_fmed3h)
+{
+    run_fmed3<_Float16>(k_amdgcn_fmed3h);
+}
+
+// tanhf/tanhh need the tanh-insts feature and log_clampf is backend-deferred
+// on the audited targets, so this shared file intentionally leaves them out.
 
 // ============================================================================
 // fdot2 family.  Two properties per wrapper:
@@ -160,6 +321,8 @@ using v2bf  = __bf16 __attribute__((ext_vector_type(2)));
 using v2i16 = short __attribute__((ext_vector_type(2)));
 
 // ---- fdot2: v2h x v2h -> f32 -----------------------------------------------
+#if FPSAN_TEST_ENABLE_FDOT2 \
+    && (!defined(__HIP_DEVICE_COMPILE__) || __has_builtin(__builtin_amdgcn_fdot2))
 __global__ void k_fdot2_pair(const v2h*     a,
                              const v2h*     b,
                              const float*   c,
@@ -183,8 +346,11 @@ __global__ void k_fdot2_pair(const v2h*     a,
     pay_wrapper[i]
         = fpsan::amdgcn_fdot2<false, Semantics::FPSan, kCC>(vap, vbp, vcp).fpsan_payload();
 }
+#endif
 
 // ---- fdot2_f16_f16: v2h x v2h -> f16 ---------------------------------------
+#if FPSAN_TEST_ENABLE_GFX12_DOT_MATH \
+    && (!defined(__HIP_DEVICE_COMPILE__) || FPSAN_TEST_DEVICE_IS_GFX12)
 __global__ void k_fdot2_f16_f16_pair(const v2h*      a,
                                      const v2h*      b,
                                      const _Float16* c,
@@ -236,12 +402,13 @@ __global__ void k_fdot2_f32_bf16_pair(const v2bf*    a,
     pay_wrapper[i]
         = fpsan::amdgcn_fdot2_f32_bf16<false, Semantics::FPSan, kCC>(vap, vbp, vcp).fpsan_payload();
 }
+#endif
 
 namespace
 {
     constexpr int kFDot2N = 32;
 
-    std::vector<v2h> make_v2h()
+    [[maybe_unused]] std::vector<v2h> make_v2h()
     {
         std::vector<v2h> v(kFDot2N);
         std::mt19937     rng = fpsan_test::make_rng();
@@ -254,7 +421,7 @@ namespace
         return v;
     }
 
-    std::vector<v2bf> make_v2bf()
+    [[maybe_unused]] std::vector<v2bf> make_v2bf()
     {
         std::vector<v2bf> v(kFDot2N);
         std::mt19937      rng = fpsan_test::make_rng();
@@ -267,7 +434,7 @@ namespace
         return v;
     }
 
-    std::vector<float> make_acc_f32()
+    [[maybe_unused]] std::vector<float> make_acc_f32()
     {
         std::vector<float> v(kFDot2N);
         std::mt19937       rng = fpsan_test::make_rng();
@@ -276,7 +443,7 @@ namespace
         return v;
     }
 
-    std::vector<_Float16> make_acc_f16()
+    [[maybe_unused]] std::vector<_Float16> make_acc_f16()
     {
         std::vector<_Float16> v(kFDot2N);
         std::mt19937          rng = fpsan_test::make_rng();
@@ -286,11 +453,14 @@ namespace
     }
 } // namespace
 
+#if FPSAN_TEST_ENABLE_FDOT2 \
+    && (!defined(__HIP_DEVICE_COMPILE__) || __has_builtin(__builtin_amdgcn_fdot2))
 TEST(AmdgcnMath, fdot2_FloatAndFpsan)
 {
-    int ndev = 0;
-    if(hipGetDeviceCount(&ndev) != hipSuccess || ndev == 0)
+    if(!have_device())
         GTEST_SKIP() << "no HIP device";
+    if(!current_arch_supports_fdot2())
+        GTEST_SKIP() << "current device does not support fdot2";
     auto           a = make_v2h(), b = make_v2h();
     auto           c  = make_acc_f32();
     v2h *          dA = to_dev(a), *dB = to_dev(b);
@@ -324,12 +494,16 @@ TEST(AmdgcnMath, fdot2_FloatAndFpsan)
     (void)hipFree(dPdir);
     (void)hipFree(dPwrap);
 }
+#endif
 
+#if FPSAN_TEST_ENABLE_GFX12_DOT_MATH \
+    && (!defined(__HIP_DEVICE_COMPILE__) || FPSAN_TEST_DEVICE_IS_GFX12)
 TEST(AmdgcnMath, fdot2_f16_f16_FloatAndFpsan)
 {
-    int ndev = 0;
-    if(hipGetDeviceCount(&ndev) != hipSuccess || ndev == 0)
+    if(!have_device())
         GTEST_SKIP() << "no HIP device";
+    if(!current_arch_is_gfx12())
+        GTEST_SKIP() << "current device is not gfx12";
     auto           a = make_v2h(), b = make_v2h();
     auto           c  = make_acc_f16();
     v2h *          dA = to_dev(a), *dB = to_dev(b);
@@ -369,9 +543,10 @@ TEST(AmdgcnMath, fdot2_f16_f16_FloatAndFpsan)
 
 TEST(AmdgcnMath, fdot2_f32_bf16_FloatAndFpsan)
 {
-    int ndev = 0;
-    if(hipGetDeviceCount(&ndev) != hipSuccess || ndev == 0)
+    if(!have_device())
         GTEST_SKIP() << "no HIP device";
+    if(!current_arch_is_gfx12())
+        GTEST_SKIP() << "current device is not gfx12";
     auto           a = make_v2bf(), b = make_v2bf();
     auto           c  = make_acc_f32();
     v2bf *         dA = to_dev(a), *dB = to_dev(b);
@@ -405,6 +580,7 @@ TEST(AmdgcnMath, fdot2_f32_bf16_FloatAndFpsan)
     (void)hipFree(dPdir);
     (void)hipFree(dPwrap);
 }
+#endif
 
 // ============================================================================
 // dot4 fp8 / bf8 family (gfx12 dot11-insts): 4-element 8-bit dot product.
@@ -413,6 +589,8 @@ TEST(AmdgcnMath, fdot2_f32_bf16_FloatAndFpsan)
 // payload equals explicit ring expression `acc + sum cast<f32>(a[k]) *
 // cast<f32>(b[k])`.
 // ============================================================================
+#if FPSAN_TEST_ENABLE_GFX12_DOT_MATH \
+    && (!defined(__HIP_DEVICE_COMPILE__) || FPSAN_TEST_DEVICE_IS_GFX12)
 using v4e4 = fpsan::v4e4m3_native;
 using v4e5 = fpsan::v4e5m2_native;
 
@@ -475,45 +653,46 @@ namespace
     }
 } // namespace
 
-#define DOT4_TEST(NAME)                                                                          \
-    TEST(AmdgcnMath, NAME##_FloatAndFpsan)                                                       \
-    {                                                                                            \
-        int ndev = 0;                                                                            \
-        if(hipGetDeviceCount(&ndev) != hipSuccess || ndev == 0)                                  \
-            GTEST_SKIP() << "no HIP device";                                                     \
-        auto a = make_packed_u32();                                                              \
-        auto b = make_packed_u32();                                                              \
-        auto c = make_dot4_acc();                                                                \
-        unsigned *dA = to_dev(a), *dB = to_dev(b);                                               \
-        float*    dC = to_dev(c);                                                                \
-        float *   dDir, *dWrap;                                                                  \
-        std::uint32_t *dPdir, *dPwrap;                                                           \
-        HIP_CHECK(hipMalloc(&dDir, kDot4N * sizeof(float)));                                     \
-        HIP_CHECK(hipMalloc(&dWrap, kDot4N * sizeof(float)));                                    \
-        HIP_CHECK(hipMalloc(&dPdir, kDot4N * sizeof(std::uint32_t)));                            \
-        HIP_CHECK(hipMalloc(&dPwrap, kDot4N * sizeof(std::uint32_t)));                           \
-        k_##NAME##_pair<<<1, kDot4N>>>(dA, dB, dC, dDir, dWrap, dPdir, dPwrap);                  \
-        HIP_CHECK(hipDeviceSynchronize());                                                       \
-        std::vector<float>         dir(kDot4N), wrap(kDot4N);                                    \
-        std::vector<std::uint32_t> pdir(kDot4N), pwrap(kDot4N);                                  \
-        HIP_CHECK(hipMemcpy(dir.data(), dDir, kDot4N * sizeof(float), hipMemcpyDeviceToHost));   \
-        HIP_CHECK(hipMemcpy(wrap.data(), dWrap, kDot4N * sizeof(float), hipMemcpyDeviceToHost)); \
-        HIP_CHECK(hipMemcpy(                                                                     \
-            pdir.data(), dPdir, kDot4N * sizeof(std::uint32_t), hipMemcpyDeviceToHost));         \
-        HIP_CHECK(hipMemcpy(                                                                     \
-            pwrap.data(), dPwrap, kDot4N * sizeof(std::uint32_t), hipMemcpyDeviceToHost));       \
-        for(int i = 0; i < kDot4N; ++i)                                                          \
-        {                                                                                        \
-            EXPECT_EQ(bits_u32(wrap[i]), bits_u32(dir[i])) << "Float lane " << i;                \
-            EXPECT_EQ(pwrap[i], pdir[i]) << "FPSan lane " << i;                                  \
-        }                                                                                        \
-        (void)hipFree(dA);                                                                       \
-        (void)hipFree(dB);                                                                       \
-        (void)hipFree(dC);                                                                       \
-        (void)hipFree(dDir);                                                                     \
-        (void)hipFree(dWrap);                                                                    \
-        (void)hipFree(dPdir);                                                                    \
-        (void)hipFree(dPwrap);                                                                   \
+#define DOT4_TEST(NAME)                                                                            \
+    TEST(AmdgcnMath, NAME##_FloatAndFpsan)                                                         \
+    {                                                                                              \
+        if(!have_device())                                                                         \
+            GTEST_SKIP() << "no HIP device";                                                       \
+        if(!current_arch_is_gfx12())                                                               \
+            GTEST_SKIP() << "current device is not gfx12";                                         \
+        auto           a  = make_packed_u32();                                                     \
+        auto           b  = make_packed_u32();                                                     \
+        auto           c  = make_dot4_acc();                                                       \
+        unsigned *     dA = to_dev(a), *dB = to_dev(b);                                            \
+        float*         dC = to_dev(c);                                                             \
+        float *        dDir, *dWrap;                                                               \
+        std::uint32_t *dPdir, *dPwrap;                                                             \
+        HIP_CHECK(hipMalloc(&dDir, kDot4N * sizeof(float)));                                       \
+        HIP_CHECK(hipMalloc(&dWrap, kDot4N * sizeof(float)));                                      \
+        HIP_CHECK(hipMalloc(&dPdir, kDot4N * sizeof(std::uint32_t)));                              \
+        HIP_CHECK(hipMalloc(&dPwrap, kDot4N * sizeof(std::uint32_t)));                             \
+        k_##NAME##_pair<<<1, kDot4N>>>(dA, dB, dC, dDir, dWrap, dPdir, dPwrap);                    \
+        HIP_CHECK(hipDeviceSynchronize());                                                         \
+        std::vector<float>         dir(kDot4N), wrap(kDot4N);                                      \
+        std::vector<std::uint32_t> pdir(kDot4N), pwrap(kDot4N);                                    \
+        HIP_CHECK(hipMemcpy(dir.data(), dDir, kDot4N * sizeof(float), hipMemcpyDeviceToHost));     \
+        HIP_CHECK(hipMemcpy(wrap.data(), dWrap, kDot4N * sizeof(float), hipMemcpyDeviceToHost));   \
+        HIP_CHECK(                                                                                 \
+            hipMemcpy(pdir.data(), dPdir, kDot4N * sizeof(std::uint32_t), hipMemcpyDeviceToHost)); \
+        HIP_CHECK(hipMemcpy(                                                                       \
+            pwrap.data(), dPwrap, kDot4N * sizeof(std::uint32_t), hipMemcpyDeviceToHost));         \
+        for(int i = 0; i < kDot4N; ++i)                                                            \
+        {                                                                                          \
+            EXPECT_EQ(bits_u32(wrap[i]), bits_u32(dir[i])) << "Float lane " << i;                  \
+            EXPECT_EQ(pwrap[i], pdir[i]) << "FPSan lane " << i;                                    \
+        }                                                                                          \
+        (void)hipFree(dA);                                                                         \
+        (void)hipFree(dB);                                                                         \
+        (void)hipFree(dC);                                                                         \
+        (void)hipFree(dDir);                                                                       \
+        (void)hipFree(dWrap);                                                                      \
+        (void)hipFree(dPdir);                                                                      \
+        (void)hipFree(dPwrap);                                                                     \
     }
 
 DOT4_TEST(amdgcn_dot4_f32_fp8_fp8)
@@ -521,3 +700,4 @@ DOT4_TEST(amdgcn_dot4_f32_fp8_bf8)
 DOT4_TEST(amdgcn_dot4_f32_bf8_fp8)
 DOT4_TEST(amdgcn_dot4_f32_bf8_bf8)
 #undef DOT4_TEST
+#endif

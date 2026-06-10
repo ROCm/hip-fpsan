@@ -34,8 +34,7 @@ Architecture scope labels used below:
 
 | Test file | Scope | Area | Oracle quality |
 | --- | --- | --- | --- |
-| `amdgcn_math_test.cpp` | gfx12 | f32 scalar math, `fdot2`, `dot4` | Float mode is direct-builtin parity. FPSan mode checks wrapper algebra. |
-| `amdgcn_math_cdna3_test.cpp` | gfx94x/CDNA3 | f32 scalar math, `fmed3f`, `fdot2` | Float mode is direct-builtin parity. FPSan mode checks wrapper algebra. |
+| `amdgcn_math_test.cpp` | Shared gfx12/gfx94x/gfx950, with gated gfx12/CDNA3 dot cases | f32/f64/f16 scalar math, `fdot2`, gfx12 dot variants | Float mode is direct-builtin parity. FPSan mode checks wrapper algebra. |
 | `amdgcn_ldexp_test.cpp` | Shared gfx12/gfx94x/gfx950 | `ldexpf`, `ldexp`, `ldexph` | Behavioral oracle against host `std::ldexp` on exact inputs. |
 | `cvt_test.cpp` | Shared gfx12/gfx94x | baseline `pkrtz`, fp8/bf8 pack/unpack | `pkrtz` has a host oracle on exact f16 inputs. Other Float fp8/bf8 paths are mostly direct-builtin parity. |
 | `cvt_gfx950_test.cpp` | gfx950/CDNA4 | non-scaled fp8/bf8 conversions | Mostly behavioral: all-byte unpack checks and round-trip/host references. |
@@ -63,32 +62,24 @@ pass.
 
 Mapping-only Float coverage exists for these architecture scopes:
 
-- **gfx12 and gfx94x/CDNA3**: `amdgcn_rcpf`, `amdgcn_sqrtf`,
-  `amdgcn_rsqf`, `amdgcn_sinf`, `amdgcn_cosf`, `amdgcn_logf`,
-  `amdgcn_exp2f`, and `amdgcn_fractf`.
-- **gfx94x/CDNA3 only**: `amdgcn_rsq_clampf` and `amdgcn_fmed3f`.
+- **Shared gfx12/gfx94x/gfx950**: f32 `amdgcn_rcpf`, `amdgcn_sqrtf`,
+  `amdgcn_rsqf`, `amdgcn_rsq_clampf`, `amdgcn_sinf`, `amdgcn_cosf`,
+  `amdgcn_logf`, `amdgcn_exp2f`, `amdgcn_fractf`, `amdgcn_fmed3f`; f64
+  `amdgcn_rcp`, `amdgcn_sqrt`, `amdgcn_rsq`, `amdgcn_rsq_clamp`,
+  `amdgcn_fract`; and f16 `amdgcn_rcph`, `amdgcn_sqrth`, `amdgcn_rsqh`,
+  `amdgcn_sinh`, `amdgcn_cosh`, `amdgcn_fracth`, `amdgcn_fmed3h`.
 
 Wrappers that currently lack direct meaningful tests in any scanned suite:
 
-- `amdgcn_rcp`
-- `amdgcn_rcph`
-- `amdgcn_sqrt`
-- `amdgcn_sqrth`
-- `amdgcn_rsq`
-- `amdgcn_rsqh`
-- `amdgcn_rsq_clamp`
-- `amdgcn_sinh`
-- `amdgcn_cosh`
 - `amdgcn_log_clampf`
-- `amdgcn_fract`
-- `amdgcn_fracth`
 - `amdgcn_tanhf`
 - `amdgcn_tanhh`
-- `amdgcn_fmed3h`
 
-For the untested list, target availability is wrapper/builtin-specific; the gap
-is that no current architecture-specific test suite establishes either mapping
-or behavior.
+For the untested list, target availability is wrapper/builtin-specific.
+`log_clampf` is visible to `__has_builtin` on gfx942 but rejects in direct
+lowering probes; `tanhf`/`tanhh` need the `tanh-insts` feature in the audited
+toolchain/targets. Keep them out of runtime tests until direct compile probes
+lower cleanly on the intended targets.
 
 Closure:
 
@@ -110,8 +101,15 @@ Closure:
   to direct builtin, so a buggy unpack instruction can pass.
 - `amdgcn_cvt_pk_fp8_f32` and `amdgcn_cvt_pk_bf8_f32`: Float mode compares
   wrapper to direct builtin, so a buggy pack instruction can pass.
+- `amdgcn_cvt_pk_f32_fp8` and `amdgcn_cvt_pk_f32_bf8`: shared mapping/FPSan
+  plumbing tests cover word selection and lane payload placement, but Float
+  mode is still direct-builtin parity.
+- `amdgcn_cvt_sr_fp8_f32` and `amdgcn_cvt_sr_bf8_f32`: shared mapping/FPSan
+  plumbing tests cover byte selection, old-word splicing, and seed opacity on
+  exact inputs, but they are not numeric stochastic-rounding oracles.
 
-`cvt_gfx950_test.cpp` adds stronger **gfx950/CDNA4-only** coverage for:
+`cvt_gfx950_test.cpp` adds stronger behavioral **gfx950/CDNA4-only** coverage
+for the latter four wrappers:
 
 - `amdgcn_cvt_pk_f32_fp8`
 - `amdgcn_cvt_pk_f32_bf8`
@@ -121,6 +119,15 @@ Closure:
 Those gfx950 tests use all-byte host OCP decode checks, exact-input round trips,
 and byte/word placement invariants. That coverage does not automatically cover
 gfx12 or gfx94x behavior, especially where the FP8/BF8 encodings differ.
+
+Semantic-equivalence note from the RDNA4/CDNA4 doc audit: the baseline
+conversion mnemonic names are shared, but the numeric formats are not uniformly
+architecture-independent. CDNA3 documents AMD FNUZ FP8/BF8 encodings, CDNA4
+documents OCP FP8/BF8 encodings, and RDNA4 documents both bias modes. Therefore
+`cvt_test.cpp` is valid shared wrapper/plumbing coverage for builtin forwarding,
+byte/word selection, and FPSan payload splicing, but it must not be counted as a
+shared numeric FP8/BF8 oracle unless the expected encoding is selected per
+target.
 
 Additional **gfx950/CDNA4** conversion wrappers with no direct test found in the
 scanned suite:
@@ -285,6 +292,11 @@ order-independent exact inputs.
 Remaining limitations:
 
 - Float fmin/fmax edge behavior for NaN and signed zero is not covered.
+- Cross-architecture float atomic behavior is only validated for the current
+  exact normal input domain. The ISA docs differ on denormal handling for some
+  memory float atomics, especially `ADD_F32`, so these HIP-portable tests should
+  not be read as proving full IEEE edge-case equivalence across RDNA4,
+  gfx94x/CDNA3, and gfx950/CDNA4.
 - Contended returned-old behavior is not checked because it is inherently
   schedule-dependent.
 - Address-space variants are not separated; HIP selects the actual primitive

@@ -39,8 +39,8 @@ namespace
 
     SparseData make_sparse_data(int m, int n, int k)
     {
-        const int groups = k / 4;
-        const int ccols  = 2 * groups;
+        const int  groups = k / 4;
+        const int  ccols  = 2 * groups;
         SparseData d;
         d.A.resize(m * ccols);
         d.B.resize(k * n);
@@ -84,8 +84,8 @@ namespace
 
     SparseData make_sparse_fp8_data(int m, int k)
     {
-        const int groups = k / 4;
-        const int ccols  = 2 * groups;
+        const int  groups = k / 4;
+        const int  ccols  = 2 * groups;
         SparseData d;
         d.A.resize(m * ccols);
         d.B.resize(k * m);
@@ -123,18 +123,18 @@ namespace
             {
                 const int lane = ((q % half) / 2) * m + i;
                 const int nib  = 2 * (q / half) + (q % 2);
-                d.idxbuf[lane] |= (d.p0[i * groups + q] | (d.p1[i * groups + q] << 2))
-                                  << (4 * nib);
+                d.idxbuf[lane] |= (d.p0[i * groups + q] | (d.p1[i * groups + q] << 2)) << (4 * nib);
             }
         return d;
     }
 } // namespace
 
 template <class E, Semantics S, class Out>
-__global__ void k_smf_16x16x32(const float* A, const float* B, const float* C, const int* idx, Out* D)
+__global__ void
+    k_smf_16x16x32(const float* A, const float* B, const float* C, const int* idx, Out* D)
 {
-    using v4e = E __attribute__((ext_vector_type(4)));
-    using v8e = E __attribute__((ext_vector_type(8)));
+    using v4e       = E __attribute__((ext_vector_type(4)));
+    using v8e       = E __attribute__((ext_vector_type(8)));
     constexpr int N = 16, K = 32, Cc = K / 2;
 
     const int lane = threadIdx.x;
@@ -174,14 +174,15 @@ __global__ void k_smf_16x16x32(const float* A, const float* B, const float* C, c
 }
 
 template <class E, Semantics S, class Out>
-__global__ void k_smf_32x32x16(const float* A, const float* B, const float* C, const int* idx, Out* D)
+__global__ void
+    k_smf_32x32x16(const float* A, const float* B, const float* C, const int* idx, Out* D)
 {
-    using v4e = E __attribute__((ext_vector_type(4)));
-    using v8e = E __attribute__((ext_vector_type(8)));
+    using v4e       = E __attribute__((ext_vector_type(4)));
+    using v8e       = E __attribute__((ext_vector_type(8)));
     constexpr int M = 32, N = 32, K = 16, Cc = K / 2;
 
     const int lane = threadIdx.x;
-    v4e      an{};
+    v4e       an{};
     for(int h = 0; h < 4; ++h)
         an[h] = static_cast<E>(A[(lane % 32) * Cc + (lane / 32) * 4 + h]);
 
@@ -230,9 +231,9 @@ static void run_smf_layout(int m, int n, int k)
     if(!have_device())
         GTEST_SKIP() << "no HIP device";
 
-    const int   groups = k / 4;
-    const int   ccols  = 2 * groups;
-    SparseData  data   = make_sparse_data(m, n, k);
+    const int          groups = k / 4;
+    const int          ccols  = 2 * groups;
+    SparseData         data   = make_sparse_data(m, n, k);
     std::vector<float> ref(m * n);
     for(int i = 0; i < m; ++i)
         for(int j = 0; j < n; ++j)
@@ -240,12 +241,14 @@ static void run_smf_layout(int m, int n, int k)
             double acc = data.C[i * n + j];
             for(int q = 0; q < groups; ++q)
             {
-                acc += static_cast<double>(static_cast<float>(static_cast<E>(data.A[i * ccols + 2 * q])))
-                       * static_cast<double>(
-                           static_cast<float>(static_cast<E>(data.B[(4 * q + data.p0[i * groups + q]) * n + j])));
-                acc += static_cast<double>(static_cast<float>(static_cast<E>(data.A[i * ccols + 2 * q + 1])))
-                       * static_cast<double>(
-                           static_cast<float>(static_cast<E>(data.B[(4 * q + data.p1[i * groups + q]) * n + j])));
+                acc += static_cast<double>(
+                           static_cast<float>(static_cast<E>(data.A[i * ccols + 2 * q])))
+                       * static_cast<double>(static_cast<float>(
+                           static_cast<E>(data.B[(4 * q + data.p0[i * groups + q]) * n + j])));
+                acc += static_cast<double>(
+                           static_cast<float>(static_cast<E>(data.A[i * ccols + 2 * q + 1])))
+                       * static_cast<double>(static_cast<float>(
+                           static_cast<E>(data.B[(4 * q + data.p1[i * groups + q]) * n + j])));
             }
             ref[i * n + j] = static_cast<float>(acc);
         }
@@ -280,11 +283,11 @@ static void run_smf_fpsan(int m, int n, int k)
     if(!have_device())
         GTEST_SKIP() << "no HIP device";
 
-    const int   groups = k / 4;
-    const int   ccols  = 2 * groups;
-    SparseData  data   = make_sparse_data(m, n, k);
-    using VF           = Value<float, Semantics::FPSan, kCC>;
-    using VE           = Value<E, Semantics::FPSan, kCC>;
+    const int  groups = k / 4;
+    const int  ccols  = 2 * groups;
+    SparseData data   = make_sparse_data(m, n, k);
+    using VF          = Value<float, Semantics::FPSan, kCC>;
+    using VE          = Value<E, Semantics::FPSan, kCC>;
     std::vector<std::uint32_t> ref(m * n);
     for(int i = 0; i < m; ++i)
         for(int j = 0; j < n; ++j)
@@ -294,12 +297,12 @@ static void run_smf_fpsan(int m, int n, int k)
             {
                 acc = acc
                       + fpsan::cast<float>(VE(static_cast<E>(data.A[i * ccols + 2 * q])))
-                            * fpsan::cast<float>(
-                                VE(static_cast<E>(data.B[(4 * q + data.p0[i * groups + q]) * n + j])));
+                            * fpsan::cast<float>(VE(
+                                static_cast<E>(data.B[(4 * q + data.p0[i * groups + q]) * n + j])));
                 acc = acc
                       + fpsan::cast<float>(VE(static_cast<E>(data.A[i * ccols + 2 * q + 1])))
-                            * fpsan::cast<float>(
-                                VE(static_cast<E>(data.B[(4 * q + data.p1[i * groups + q]) * n + j])));
+                            * fpsan::cast<float>(VE(
+                                static_cast<E>(data.B[(4 * q + data.p1[i * groups + q]) * n + j])));
             }
             ref[i * n + j] = acc.fpsan_payload();
         }
@@ -329,14 +332,11 @@ static void run_smf_fpsan(int m, int n, int k)
 }
 
 template <class AE, class BE, Semantics S, class Out>
-__global__ void k_smf_fp8_16x16x64(const float* A,
-                                   const float* B,
-                                   const float* C,
-                                   const int*   idx,
-                                   Out*         D)
+__global__ void
+    k_smf_fp8_16x16x64(const float* A, const float* B, const float* C, const int* idx, Out* D)
 {
-    using AVec = fpsan::detail::v8_fragment<AE>;
-    using BVec = fpsan::detail::v16_fragment<BE>;
+    using AVec      = fpsan::detail::v8_fragment<AE>;
+    using BVec      = fpsan::detail::v16_fragment<BE>;
     constexpr int N = 16, K = 64, Cc = K / 2;
 
     const int lane = threadIdx.x;
@@ -387,14 +387,11 @@ __global__ void k_smf_fp8_16x16x64(const float* A,
 }
 
 template <class AE, class BE, Semantics S, class Out>
-__global__ void k_smf_fp8_32x32x32(const float* A,
-                                   const float* B,
-                                   const float* C,
-                                   const int*   idx,
-                                   Out*         D)
+__global__ void
+    k_smf_fp8_32x32x32(const float* A, const float* B, const float* C, const int* idx, Out* D)
 {
-    using AVec = fpsan::detail::v8_fragment<AE>;
-    using BVec = fpsan::detail::v16_fragment<BE>;
+    using AVec      = fpsan::detail::v8_fragment<AE>;
+    using BVec      = fpsan::detail::v16_fragment<BE>;
     constexpr int M = 32, N = 32, K = 32, Cc = K / 2;
 
     const int lane = threadIdx.x;
@@ -461,10 +458,10 @@ static void run_smf_fp8(int m, int k)
     if(!have_device())
         GTEST_SKIP() << "no HIP device";
 
-    const int   n      = m;
-    const int   groups = k / 4;
-    const int   ccols  = 2 * groups;
-    SparseData  data   = make_sparse_fp8_data(m, k);
+    const int                  n      = m;
+    const int                  groups = k / 4;
+    const int                  ccols  = 2 * groups;
+    SparseData                 data   = make_sparse_fp8_data(m, k);
     std::vector<float>         ref(m * n);
     std::vector<std::uint32_t> refp(m * n);
     using VF = Value<float, Semantics::FPSan, kCC>;
@@ -523,7 +520,8 @@ static void run_smf_fp8(int m, int k)
     std::vector<float>         got(ref.size());
     std::vector<std::uint32_t> gotp(refp.size());
     HIP_CHECK(hipMemcpy(got.data(), dDf, got.size() * sizeof(float), hipMemcpyDeviceToHost));
-    HIP_CHECK(hipMemcpy(gotp.data(), dDp, gotp.size() * sizeof(std::uint32_t), hipMemcpyDeviceToHost));
+    HIP_CHECK(
+        hipMemcpy(gotp.data(), dDp, gotp.size() * sizeof(std::uint32_t), hipMemcpyDeviceToHost));
     for(std::size_t i = 0; i < got.size(); ++i)
     {
         EXPECT_EQ(bits_of(got[i]), bits_of(ref[i])) << "float elem " << i;
