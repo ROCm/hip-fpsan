@@ -265,6 +265,7 @@ void run_dense_vec_fpsan()
     DENSE_VEC_TESTS(Name)
 
 using fpsan::v16f_native;
+using fpsan::v2f_native;
 using fpsan::v4bf_native;
 using fpsan::v4f_native;
 using fpsan::v4h_native;
@@ -292,6 +293,9 @@ DENSE_VEC_TRAITS(MfmaFP8_32x32x16_fp8_fp8, 32, 32, 16, 1, 8, v8amd_e4m3_native, 
 DENSE_VEC_TRAITS(MfmaFP8_32x32x16_fp8_bf8, 32, 32, 16, 1, 8, v8amd_e4m3_native, v8amd_e5m2_native, v16f_native, amdgcn_mfma_f32_32x32x16_fp8_bf8)
 DENSE_VEC_TRAITS(MfmaFP8_32x32x16_bf8_fp8, 32, 32, 16, 1, 8, v8amd_e5m2_native, v8amd_e4m3_native, v16f_native, amdgcn_mfma_f32_32x32x16_bf8_fp8)
 DENSE_VEC_TRAITS(MfmaFP8_32x32x16_bf8_bf8, 32, 32, 16, 1, 8, v8amd_e5m2_native, v8amd_e5m2_native, v16f_native, amdgcn_mfma_f32_32x32x16_bf8_bf8)
+
+DENSE_VEC_TRAITS(MfmaXF32_16x16x8, 16, 16, 8, 1, 32, v2f_native, v2f_native, v4f_native, amdgcn_mfma_f32_16x16x8_xf32)
+DENSE_VEC_TRAITS(MfmaXF32_32x32x4, 32, 32, 4, 1, 32, v2f_native, v2f_native, v16f_native, amdgcn_mfma_f32_32x32x4_xf32)
 
 #undef DENSE_VEC_TRAITS
 #undef DENSE_VEC_TESTS

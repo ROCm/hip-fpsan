@@ -56,6 +56,7 @@ namespace fpsan
     // shorthand: v<N><T>_native where N is the per-lane element count and T is
     // the element type.
     // =============================================================================
+    using v2f_native  = float __attribute__((ext_vector_type(2)));
     using v4f_native  = float __attribute__((ext_vector_type(4)));
     using v16f_native = float __attribute__((ext_vector_type(16)));
     using v32f_native = float __attribute__((ext_vector_type(32)));
@@ -1088,6 +1089,51 @@ namespace fpsan
 #endif
 
 #undef FPSAN_DEFINE_MFMA_F32_FP8
+
+// ---- XF32 inputs, F32 accumulator (cdna3 xf32-insts) -----------------------
+// xF32 takes FP32 storage in a v2f per-lane fragment, rounds A/B mantissas to
+// 10 bits internally, and accumulates/output in FP32. FPSan mode models the
+// algebraic dataflow over f32 payloads; layout tests use exact small values so
+// the reduced-precision hardware path equals the scalar reference.
+#define FPSAN_DEFINE_MFMA_F32_XF32(NAME, M_, N_, K_, CVec_, BUILTIN)                     \
+    template <int         CBSZ = 0,                                                       \
+              int         ABID = 0,                                                       \
+              int         BLGP = 0,                                                       \
+              Semantics   S    = Semantics::Float,                                        \
+              Conversions Cv   = Conversions::Explicit>                                   \
+    FPSAN_DEVICE Value<CVec_, S, Cv> NAME(                                                \
+        Value<v2f_native, S, Cv> a, Value<v2f_native, S, Cv> b, Value<CVec_, S, Cv> c)    \
+    {                                                                                     \
+        if constexpr(S == Semantics::Float)                                               \
+        {                                                                                 \
+            auto d = BUILTIN(a.to_float(), b.to_float(), c.to_float(), CBSZ, ABID, BLGP); \
+            return Value<CVec_, S, Cv>(d);                                                \
+        }                                                                                 \
+        else                                                                              \
+        {                                                                                 \
+            return detail::mfma_software<M_, N_, K_, 1, /*InBits=*/32, float, S, Cv>(     \
+                a, b, c,                                                                  \
+                [&](int reg, int /*sub*/) { return a.get(reg); },                         \
+                [&](int reg, int /*sub*/) { return b.get(reg); });                        \
+        }                                                                                 \
+    }
+
+#if !defined(__HIP_DEVICE_COMPILE__) || __has_builtin(__builtin_amdgcn_mfma_f32_16x16x8_xf32)
+    FPSAN_DEFINE_MFMA_F32_XF32(amdgcn_mfma_f32_16x16x8_xf32,
+                               16,
+                               16,
+                               8,
+                               v4f_native,
+                               __builtin_amdgcn_mfma_f32_16x16x8_xf32)
+    FPSAN_DEFINE_MFMA_F32_XF32(amdgcn_mfma_f32_32x32x4_xf32,
+                               32,
+                               32,
+                               4,
+                               v16f_native,
+                               __builtin_amdgcn_mfma_f32_32x32x4_xf32)
+#endif
+
+#undef FPSAN_DEFINE_MFMA_F32_XF32
 
 // ---- F64 input + F64 accumulator (mai-insts; available on CDNA3+) ----------
 // f64_16x16x4: 16x16x4 with scalar f64 inputs + v4d accumulator.
