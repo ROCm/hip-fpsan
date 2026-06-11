@@ -144,8 +144,8 @@ Notes on parity with Triton's surface:
 
 ## Caveats (matching FPSan's own docs)
 
-- This is **not** an IEEE simulator: no real ordering, rounding, NaN/Inf,
-  subnormals, or exceptions.
+- This is **not** an IEEE-754 reference implementation: no real ordering,
+  rounding, NaN/Inf, subnormals, or exceptions.
 - `x / x == 1` holds only for **odd** payloads; for even payloads `inv` is a
   parity-preserving involution, not a true inverse.
 - FPSan results are only meaningful when compared against *other* FPSan results.
@@ -158,51 +158,45 @@ whole compute kernel — not just its scalar math — can be ported. Each wrappe
 a **Float** path (forwards to the real `__builtin_amdgcn_*`) and an **FPSan** path
 (a payload-ring software dataflow using the hardware fragment layout).
 
-**Both CDNA4 / gfx950 (MI350) and RDNA4 / gfx12 are fully supported.**
-Every in-scope FP-relevant intrinsic LLVM tags for the arch is
-implemented in both Float and FPSan modes and silicon-verified, or
-deferred with explicit rationale (see
-[`docs/gfx12-coverage-audit.md`](docs/gfx12-coverage-audit.md) for the
-gfx12 inventory). Of-course-MFMA-doesn't-exist-on-RDNA-and-WMMA-doesn't-
-exist-on-CDNA aside, gfx12 now matches gfx950 in coverage.
+**Supported architectures:**
 
-| Intrinsic family (header) | RDNA4 / gfx12 | CDNA4 / gfx950 |
-|---|:---:|:---:|
-| Wave reduce / cross-lane (`amdgcn_wave.hpp`) | ✅ wave32 | ✅ wave64 |
-| Scalar math + `ldexp` (`amdgcn_math.hpp`) | ✅ | ✅ |
-| `dot4_f32_{fp8,bf8}` (`amdgcn_math.hpp`) | ✅ | — *(dot11-insts is RDNA)* |
-| FP atomics fadd/fmin/fmax (`amdgcn_atomic.hpp`) | ✅ | ✅ |
-| Classify / compare (`amdgcn_classify.hpp`) | ✅ | ✅ |
-| FP8/BF8 convert + stochastic-round (`amdgcn_cvt.hpp`) | ✅ | ✅ |
-| MX scaled convert `cvt_scalef32` (fp8/fp6/fp4) | — | ✅ (100%) |
-| Dense matrix MMA (`amdgcn_matrix.hpp` / `amdgcn_mfma.hpp`) | ✅ WMMA 16x16x16 | ✅ MFMA dense + legacy gfx9 |
-| Sparse 2:4 matrix MMA (`amdgcn_swmmac_gfx12.hpp` / `amdgcn_smfmac.hpp`) | ✅ SWMMAC all 7 shapes | ✅ SMFMAC f16/bf16/fp8 |
-| Scaled f8f6f4 MFMA — sub-byte, per-K-block scale | — | ✅ |
-| Global transpose load `global_load_tr_b128` (`amdgcn_global_load.hpp`) | ✅ wave32 | — |
-| LDS transpose `ds_read_tr*` (`amdgcn_ds.hpp`) | — | ✅ |
+- **RDNA4** — gfx1200 / gfx1201 (WMMA matrix path, K=16, wave32)
+- **CDNA3** — gfx942 (gfx9-family MFMA path, wave64)
+- **CDNA4** — gfx950 (MFMA + scaled / sub-byte matrix path, wave64)
+- **gfx1250** — distinct WMMA family, K=32/64/128 shapes (wave32)
 
-✅ = both modes implemented & tested · — =
-not applicable to that target. Integer MFMA/SMFMAC, graphics ops
-(cubemap, interp, image_bvh, fp→int format packs), and the IEEE
-bit-twiddling micro-ops (`frexp`/`div_scale`/`trig_preop`/…) are
-intentionally out of scope: a symbolic FPSan payload has no faithful
-image for them.
+The CDNA / gfx9-family targets carry the MFMA/SMFMAC matrix instructions; the
+RDNA / gfx12-family targets carry WMMA/SWMMAC — each family implements the
+matrix ops native to it. Every in-scope FP-relevant intrinsic the architecture
+exposes is wrapped in both Float and FPSan modes (or deferred with an explicit
+rationale).
+
+Integer MFMA/SMFMAC, graphics ops (cubemap, interp, image_bvh, fp→int format
+packs), and the IEEE bit-twiddling micro-ops (`frexp`/`div_scale`/`trig_preop`/…)
+are intentionally out of scope: a symbolic FPSan payload has no faithful image
+for them.
 
 ## Building the tests and examples
 
-Two CMake presets are provided:
+CMake presets are provided:
 
 ```bash
 # pure C++ (system clang++)
 cmake --preset cxx && cmake --build --preset cxx && ctest --preset cxx
 
-# HIP C++ (ROCm clang; compiles the same tests as device code, gfx1201)
+# HIP C++ (ROCm clang; compiles the same tests as device code, gfx1201 / RDNA4)
 cmake --preset hip && cmake --build --preset hip && ctest --preset hip
+
+# HIP C++ for CDNA4 (gfx950) or gfx1250 -- compile-checks the arch wrappers;
+# running the tests needs the matching hardware.
+cmake --preset hip-gfx950   && cmake --build --preset hip-gfx950
+cmake --preset hip-gfx1250  && cmake --build --preset hip-gfx1250
 ```
 
-The HIP preset auto-detects the ROCm toolchain; override with
-`-DCMAKE_HIP_COMPILER=...`, `-DCMAKE_HIP_COMPILER_ROCM_ROOT=...`,
-`-DCMAKE_HIP_ARCHITECTURES=...` if your install differs.
+The HIP presets find the ROCm toolchain under `ROCM_PATH` (default `/opt/rocm`);
+point them at a different install with `-DROCM_PATH=...` (or `$ENV{ROCM_PATH}`),
+or override the pieces directly with `-DCMAKE_HIP_COMPILER=...`,
+`-DCMAKE_HIP_COMPILER_ROCM_ROOT=...`, `-DCMAKE_HIP_ARCHITECTURES=...`.
 
 ### GoogleTest
 
@@ -214,10 +208,11 @@ at a local checkout with
 
 CMake options: `FPSAN_BUILD_TESTS` (ON), `FPSAN_BUILD_EXAMPLES` (ON),
 `FPSAN_ENABLE_HIP`. The latter defaults to ON when a HIP toolchain is available
-and OFF otherwise: it follows the standard `CMAKE_HIP_COMPILER` variable (set
-explicitly, auto-detected from a TheRock/therock-venv install, or found on
-`PATH` by `check_language(HIP)`). Set `-DFPSAN_ENABLE_HIP=OFF` to force a
-pure-C++ build even where a HIP toolchain exists.
+and OFF otherwise: it follows the standard `CMAKE_HIP_COMPILER` variable, which
+is derived from `ROCM_PATH` (default `/opt/rocm`, overridable with
+`-DROCM_PATH=...` or `$ENV{ROCM_PATH}`), set explicitly, or found on `PATH` by
+`check_language(HIP)`. Set `-DFPSAN_ENABLE_HIP=OFF` to force a pure-C++ build
+even where a HIP toolchain exists.
 
 ## Layout
 

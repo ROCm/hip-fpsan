@@ -96,6 +96,26 @@ namespace fpsan
     FPSAN_DEFINE_AMDGCN_UNARY(amdgcn_tanhf, float, tanh, __builtin_amdgcn_tanhf)
     FPSAN_DEFINE_AMDGCN_UNARY(amdgcn_tanhh, _Float16, tanh, __builtin_amdgcn_tanhh)
 
+    // ---- bf16 transcendentals (gfx1250 "bf16-trans-insts") ----
+    // gfx1250 adds native bf16 rcp / rsq / sqrt / sin / cos / exp2 / log / tanh
+    // (each is __bf16(__bf16)). These features are exclusive to gfx1250: RDNA4
+    // and CDNA have no bf16 transcendental unit. Float mode calls the builtin;
+    // FPSan mode routes to the SAME tagged op as the f16/f32 variants -- in the
+    // FPSan ring it is the op identity (sin vs cos vs rsqrt ...), not the element
+    // type, that determines the payload, so the bf16 wrapper is just another
+    // entry point to the existing tagged op. One representative __has_builtin
+    // gate covers the whole block (all eight share bf16-trans-insts).
+#if !defined(__HIP_DEVICE_COMPILE__) || __has_builtin(__builtin_amdgcn_rcp_bf16)
+    FPSAN_DEFINE_AMDGCN_UNARY(amdgcn_rcp_bf16, __bf16, rcp, __builtin_amdgcn_rcp_bf16)
+    FPSAN_DEFINE_AMDGCN_UNARY(amdgcn_rsq_bf16, __bf16, rsqrt, __builtin_amdgcn_rsq_bf16)
+    FPSAN_DEFINE_AMDGCN_UNARY(amdgcn_sqrt_bf16, __bf16, sqrt, __builtin_amdgcn_sqrt_bf16)
+    FPSAN_DEFINE_AMDGCN_UNARY(amdgcn_sin_bf16, __bf16, sin, __builtin_amdgcn_sin_bf16)
+    FPSAN_DEFINE_AMDGCN_UNARY(amdgcn_cos_bf16, __bf16, cos, __builtin_amdgcn_cos_bf16)
+    FPSAN_DEFINE_AMDGCN_UNARY(amdgcn_exp2_bf16, __bf16, exp2, __builtin_amdgcn_exp2_bf16)
+    FPSAN_DEFINE_AMDGCN_UNARY(amdgcn_log_bf16, __bf16, log, __builtin_amdgcn_log_bf16)
+    FPSAN_DEFINE_AMDGCN_UNARY(amdgcn_tanh_bf16, __bf16, tanh, __builtin_amdgcn_tanh_bf16)
+#endif
+
     // ---- fmed3 (median of three) ----
     FPSAN_DEFINE_AMDGCN_TERNARY(amdgcn_fmed3f, float, fmed3, __builtin_amdgcn_fmed3f)
     FPSAN_DEFINE_AMDGCN_TERNARY(amdgcn_fmed3h, _Float16, fmed3, __builtin_amdgcn_fmed3h)
@@ -201,24 +221,24 @@ namespace fpsan
 // RDNA4 uses OCP encodings. Gated by __has_builtin so the header still compiles
 // on archs that don't have the dot11-insts feature (e.g. gfx950).
 // =============================================================================
-#define FPSAN_DEFINE_AMDGCN_DOT4_FP8(NAME, AVec, BVec, BUILTIN)                  \
-    template <Semantics S = Semantics::Float, Conversions C = Conversions::Explicit> \
-    FPSAN_DEVICE Value<float, S, C> NAME(                                            \
-        Value<AVec, S, C> a, Value<BVec, S, C> b, Value<float, S, C> c)              \
-    {                                                                                \
-        if constexpr(S == Semantics::Float)                                          \
-        {                                                                            \
-            const unsigned ai = __builtin_bit_cast(unsigned, a.to_float());          \
-            const unsigned bi = __builtin_bit_cast(unsigned, b.to_float());          \
-            return Value<float, S, C>(BUILTIN(ai, bi, c.to_float()));                \
-        }                                                                            \
-        else                                                                         \
-        {                                                                            \
-            auto acc = c;                                                            \
-            for(int k = 0; k < 4; ++k)                                               \
+#define FPSAN_DEFINE_AMDGCN_DOT4_FP8(NAME, AVec, BVec, BUILTIN)                          \
+    template <Semantics S = Semantics::Float, Conversions C = Conversions::Explicit>     \
+    FPSAN_DEVICE Value<float, S, C> NAME(                                                \
+        Value<AVec, S, C> a, Value<BVec, S, C> b, Value<float, S, C> c)                  \
+    {                                                                                    \
+        if constexpr(S == Semantics::Float)                                              \
+        {                                                                                \
+            const unsigned ai = __builtin_bit_cast(unsigned, a.to_float());              \
+            const unsigned bi = __builtin_bit_cast(unsigned, b.to_float());              \
+            return Value<float, S, C>(BUILTIN(ai, bi, c.to_float()));                    \
+        }                                                                                \
+        else                                                                             \
+        {                                                                                \
+            auto acc = c;                                                                \
+            for(int k = 0; k < 4; ++k)                                                   \
                 acc = acc + fpsan::cast<float>(a.get(k)) * fpsan::cast<float>(b.get(k)); \
-            return acc;                                                              \
-        }                                                                            \
+            return acc;                                                                  \
+        }                                                                                \
     }
 
 #if !defined(__HIP_DEVICE_COMPILE__)                                             \

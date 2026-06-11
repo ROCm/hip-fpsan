@@ -12,8 +12,8 @@
 //   v6u32 (d) cvt_scalef32_sr_pk_fp4_{f16,bf16} -- SR pack to an fp4 nibble
 //   pair
 //
-// Two independent oracles per op (so a divergent emulator fails even though
-// these pass on real gfx950):
+// Two independent oracles per op (so any implementation that diverges from the
+// spec fails):
 //   Float : wrapper == hardware, checked against the INDEPENDENT host OCP
 //           reference (detail::narrow_to_f32 / f32_to_narrow), NOT the builtin.
 //   FPSan : wrapper == an independent payload-domain reference built from the

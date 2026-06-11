@@ -231,6 +231,21 @@ namespace fpsan
                                                  /*have_nan=*/true,
                                                  /*bias_tweak=*/1,
                                                  /*nan_as_neg_zero=*/true};
+        // gfx1250 "E5M3" scale format (per the gfx1250 numeric spec): an
+        // 8-bit UNSIGNED magnitude format -- 5 exponent bits (bias 15), 3 mantissa
+        // bits, NO sign bit, no infinity, the single all-ones byte 0xFF is NaN,
+        // 0x00 is zero, denormals supported. Modeled here as exp_bits=5,
+        // mantissa_bits=3: the generic routines put the (never-set) sign bit at bit
+        // 8, outside the byte, so an 8-bit input/output is treated as non-negative.
+        // Verified against the guide's table: 0x08->2^-14 (min normal),
+        // 0xFE->114688 (max normal), 0x07->0.875*2^-14 (max denorm), 0x01->2^-17
+        // (min denorm), 0xFF->NaN. Used by cvt_{f32_fp8,pk_fp8_f32,sr_fp8_f32}_e5m3.
+        inline constexpr FpFormat kFp8E5M3 = {/*exp_bits=*/5,
+                                              /*mantissa_bits=*/3,
+                                              /*have_infinity=*/false,
+                                              /*have_nan=*/true,
+                                              /*bias_tweak=*/0,
+                                              /*nan_as_neg_zero=*/false};
 
         // OCP MX sub-byte formats (gfx950 cvt_scalef32_* operands). None has inf or
         // NaN: overflow saturates to max-finite and f32 NaN/Inf maps to 0. The generic
@@ -376,6 +391,13 @@ namespace fpsan
         FPSAN_DEFINE_FP_TRAITS(::fpsan::fp8_e5m2, 2, 5, 15);
         FPSAN_DEFINE_FP_TRAITS(::fpsan::amd_fp8_e4m3, 3, 4, 8);
         FPSAN_DEFINE_FP_TRAITS(::fpsan::amd_fp8_e5m2, 2, 5, 16);
+        // Note: there is intentionally NO fp_traits for the gfx1250 "E5M3" scale
+        // format. E5M3 is an 8-bit UNSIGNED magnitude format (5 exp bits bias 15,
+        // 3 mantissa bits, no sign bit -- per the gfx1250 numeric spec), so
+        // 1 + exp + mant = 9 != 8 and it cannot be a signed-fp Value element type.
+        // Its decode/encode is reachable via narrow_to_f32 / f32_to_narrow with
+        // kFp8E5M3 below (sign bit lands outside the byte -> effectively unsigned);
+        // its FPSan payload model is a plain width-8 resize (see amdgcn_cvt.hpp).
 // Defined in detail/traits.hpp; fp8 holds the last expansions, so retire the
 // generator here rather than leak it into translation units that pull fpsan.hpp.
 #undef FPSAN_DEFINE_FP_TRAITS

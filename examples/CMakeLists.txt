@@ -22,10 +22,10 @@ fpsan_add_example(fpsan_example_authoring authoring_example.cpp)
 fpsan_add_example(fpsan_example_porting porting_example.cpp)
 
 # GPU demo: reduction three ways via CPU naive / wave reduce / matrix bf16.
-# The matrix path is single-source with a device-arch `#if` -- WMMA on gfx12,
-# MFMA on gfx950 -- and is a hard compile error on architectures without a
-# matrix code path. No arch is selected here; that choice lives in the source
-# and follows CMAKE_HIP_ARCHITECTURES.
+# The matrix path is single-source with a device-arch `#if` -- K=16 WMMA on
+# gfx12 (RDNA4), K=32 WMMA on gfx1250, MFMA on gfx950 -- and is a hard compile
+# error on architectures without a matrix code path. No arch is selected here;
+# that choice lives in the source and follows CMAKE_HIP_ARCHITECTURES.
 if(FPSAN_ENABLE_HIP)
   fpsan_add_example(fpsan_example_reduction_demo reduction_demo.cpp)
 endif()

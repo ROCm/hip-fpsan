@@ -31,6 +31,27 @@ namespace fpsan
             const std::int32_t e = static_cast<std::int32_t>(field << (32 - Width)) >> (32 - Width);
             return Value<float, S, C>::from_fpsan_payload(static_cast<std::uint32_t>(e));
         }
+
+        // Element bit width of an f8f6f4 format immediate: fp8/bf8 (0,1) -> 8,
+        // fp6/bf6 (2,3) -> 6, fp4 (4) -> 4. Shared by the gfx950 MFMA and gfx1250
+        // WMMA f8f6f4 paths (both decode the same packed sub-byte fragments).
+        FPSAN_HOST_DEVICE constexpr int f8f6f4_width(int code)
+        {
+            return (code <= 1) ? 8 : (code <= 3) ? 6 : 4;
+        }
+
+        // OCP-MX E8M0 block-scale -> float. E8M0 stores only an exponent (bias
+        // 127): byte b -> 2^(b-127); 0xFF is NaN. Built by bit construction so it
+        // is exact (no libm) and host/device safe. Shared by the gfx950 MFMA and
+        // gfx1250 WMMA block-scaled paths.
+        FPSAN_HOST_DEVICE inline float e8m0_to_float(unsigned byte)
+        {
+            if(byte == 0xFFu)
+                return __builtin_nanf("");
+            if(byte == 0u)
+                return __builtin_bit_cast(float, std::uint32_t(0x00400000u)); // 2^-127
+            return __builtin_bit_cast(float, static_cast<std::uint32_t>(byte) << 23);
+        }
     } // namespace detail
 } // namespace fpsan
 
