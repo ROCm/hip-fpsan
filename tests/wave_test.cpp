@@ -42,6 +42,9 @@ using fpsan::Semantics;
 using fpsan::Value;
 
 static constexpr Conversions kCC = Conversions::Explicit;
+#ifndef FPSAN_TEST_ENABLE_WAVE_F64
+#define FPSAN_TEST_ENABLE_WAVE_F64 0
+#endif
 // Upper bound on lanes in one wave (wave64). Host reference scratch is sized
 // to this; the active count is the runtime warp size.
 static constexpr int kMaxLanes = 64;
@@ -100,6 +103,12 @@ WAVE_TRAITS(WaveFaddF32, float, amdgcn_wave_reduce_fadd_f32, a + b, true)
 WAVE_TRAITS(WaveFsubF32, float, amdgcn_wave_reduce_fsub_f32, a - b, false)
 WAVE_TRAITS(WaveFminF32, float, amdgcn_wave_reduce_fmin_f32, fpsan::min(a, b), true)
 WAVE_TRAITS(WaveFmaxF32, float, amdgcn_wave_reduce_fmax_f32, fpsan::max(a, b), true)
+#if FPSAN_TEST_ENABLE_WAVE_F64
+WAVE_TRAITS(WaveFaddF64, double, amdgcn_wave_reduce_fadd_f64, a + b, true)
+WAVE_TRAITS(WaveFsubF64, double, amdgcn_wave_reduce_fsub_f64, a - b, false)
+WAVE_TRAITS(WaveFminF64, double, amdgcn_wave_reduce_fmin_f64, fpsan::min(a, b), true)
+WAVE_TRAITS(WaveFmaxF64, double, amdgcn_wave_reduce_fmax_f64, fpsan::max(a, b), true)
+#endif
 
 // ---------------------------------------------------------------------------
 // Kernels. One full wave; lane reads in[lane], lane 0 writes the result.
@@ -306,6 +315,9 @@ WAVE_TESTS(WaveFaddF32)
 WAVE_TESTS(WaveFsubF32)
 WAVE_TESTS(WaveFminF32)
 WAVE_TESTS(WaveFmaxF32)
-// f64 wave reduces are LEFT OUT: the builtins are visible to __has_builtin but
-// fail to lower on both gfx12 and gfx950 (see amdgcn_wave.hpp). No usable
-// instruction => no wrapper => nothing to test here.
+#if FPSAN_TEST_ENABLE_WAVE_F64
+WAVE_TESTS(WaveFaddF64)
+WAVE_TESTS(WaveFsubF64)
+WAVE_TESTS(WaveFminF64)
+WAVE_TESTS(WaveFmaxF64)
+#endif

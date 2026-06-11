@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 //
-// tests/wmma_test.cpp
+// tests/wmma_gfx12_test.cpp
 //
 // Deep tests for the gfx12 (RDNA4 / gfx1250) 16x16x16 WMMA FPSan wrappers. Two
 // independent properties, run for every variant:

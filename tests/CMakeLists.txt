@@ -110,40 +110,66 @@ if(TARGET GTest::gtest_main)
     fpsan_add_test(fpsan_hip_device_test hip_device_test.cpp)
     fpsan_add_test(fpsan_atomic_test atomic_test.cpp)
     fpsan_add_test(fpsan_classify_test classify_test.cpp)
-    # gfx12 family detection.  Two tiers behave differently and must not be
-    # conflated:
-    #   _fpsan_has_gfx12  -- any gfx12* (RDNA4 gfx1200/1201 OR gfx1250). Used for
-    #                        the builtins shared across the whole family
-    #                        (permlane64, mov_dpp8, ballot_w32, scalar math,
-    #                        gfx12 cvt/swmmac/global_load_tr).
-    #   _fpsan_has_rdna4  -- only gfx1200/gfx1201. These have the K=16 WMMA
-    #                        (wmma-128b-insts) and the dot9-12 fdot2/dot4 families
-    #                        that gfx1250 dropped, so the tests that exercise
-    #                        those builtins are RDNA4-only.
+    # Architecture-family detection. gfx1250 is in the gfx12 family for shared
+    # builtins, but is not RDNA4: it has a distinct WMMA/SWMMAC family and no
+    # dot9-12 fdot2/dot4 instructions.
     set(_fpsan_has_gfx12 FALSE)
+    set(_fpsan_gfx12_arches)
+    set(_fpsan_has_gfx11 FALSE)
+    set(_fpsan_gfx11_arches)
+    set(_fpsan_has_non_gfx11 FALSE)
     set(_fpsan_has_cdna3 FALSE)
     set(_fpsan_has_rdna4 FALSE)
+    set(_fpsan_rdna4_arches)
+    set(_fpsan_fp8_cvt_arches)
+    set(_fpsan_xlane_arches)
     foreach(_arch IN LISTS CMAKE_HIP_ARCHITECTURES)
       if(_arch MATCHES "^gfx12")
         set(_fpsan_has_gfx12 TRUE)
+        list(APPEND _fpsan_gfx12_arches ${_arch})
+        list(APPEND _fpsan_fp8_cvt_arches ${_arch})
+        list(APPEND _fpsan_xlane_arches ${_arch})
+      endif()
+      if(_arch MATCHES "^gfx11")
+        set(_fpsan_has_gfx11 TRUE)
+        list(APPEND _fpsan_gfx11_arches ${_arch})
+        list(APPEND _fpsan_xlane_arches ${_arch})
+      else()
+        set(_fpsan_has_non_gfx11 TRUE)
       endif()
       if(_arch MATCHES "^gfx94[0-2]$")
         set(_fpsan_has_cdna3 TRUE)
+        list(APPEND _fpsan_fp8_cvt_arches ${_arch})
       endif()
       if(_arch MATCHES "^gfx120")
         set(_fpsan_has_rdna4 TRUE)
+        list(APPEND _fpsan_rdna4_arches ${_arch})
       endif()
     endforeach()
-    if(_fpsan_has_gfx12 OR _fpsan_has_cdna3)
-      # Baseline fp8/bf8 conversion builtins are shared by gfx12 and CDNA3.
-      # Register once so mixed-architecture HIP builds do not create duplicate
-      # CMake targets.
+    if(_fpsan_has_gfx11 OR _fpsan_has_gfx12 OR _fpsan_has_cdna3)
+      # cvt_pkrtz is a portable AMDGPU FP conversion and should run on gfx11 as
+      # well. FP8/BF8 conversion cases are a separate target restricted to the
+      # architecture subset where those builtins lower.
       fpsan_add_test(fpsan_cvt_test cvt_test.cpp)
+      if(_fpsan_has_gfx12 OR _fpsan_has_cdna3)
+        fpsan_add_test(fpsan_cvt_fp8_test cvt_test.cpp)
+        target_compile_definitions(fpsan_cvt_fp8_test
+                                   PRIVATE FPSAN_TEST_ENABLE_PKRTZ_CVT=0
+                                           FPSAN_TEST_ENABLE_FP8_CVT=1)
+        set_target_properties(fpsan_cvt_fp8_test
+                              PROPERTIES HIP_ARCHITECTURES "${_fpsan_fp8_cvt_arches}")
+      endif()
+    endif()
+    if(_fpsan_has_gfx11 OR _fpsan_has_gfx12)
+      fpsan_add_test(fpsan_xlane_test xlane_test.cpp)
+      set_target_properties(fpsan_xlane_test
+                            PROPERTIES HIP_ARCHITECTURES "${_fpsan_xlane_arches}")
     endif()
     # Shared across the gfx12 family (build on RDNA4 and gfx1250).
     if(_fpsan_has_gfx12)
-      fpsan_add_test(fpsan_xlane_test xlane_test.cpp)
       fpsan_add_test(fpsan_global_load_tr_test global_load_tr_test.cpp)
+      set_target_properties(fpsan_global_load_tr_test
+                            PROPERTIES HIP_ARCHITECTURES "${_fpsan_gfx12_arches}")
     endif()
     # RDNA4-only: K=16 WMMA, the fdot2/dot4 (dot9-12) families, and the K=32
     # SWMMAC shapes (swmmac_*_16x16x32_*_w32). gfx1250 has a different WMMA family
@@ -152,8 +178,21 @@ if(TARGET GTest::gtest_main)
     # K=32 builtin emits an instruction gfx1250 cannot decode, so it is excluded
     # on gfx1250.
     if(_fpsan_has_rdna4)
-      fpsan_add_test(fpsan_wmma_test wmma_test.cpp)
+      fpsan_add_test(fpsan_wmma_gfx12_test wmma_gfx12_test.cpp)
       fpsan_add_test(fpsan_swmmac_gfx12_test swmmac_gfx12_test.cpp)
+      set_target_properties(fpsan_wmma_gfx12_test
+                            fpsan_swmmac_gfx12_test
+                            PROPERTIES HIP_ARCHITECTURES "${_fpsan_rdna4_arches}")
+    endif()
+    if(_fpsan_has_gfx11)
+      fpsan_add_test(fpsan_wmma_gfx11_test wmma_gfx11_test.cpp)
+      fpsan_add_test(fpsan_wmma_gfx11_w64_test wmma_gfx11_test.cpp)
+      set_target_properties(fpsan_wmma_gfx11_test fpsan_wmma_gfx11_w64_test
+                            PROPERTIES HIP_ARCHITECTURES "${_fpsan_gfx11_arches}")
+      target_compile_definitions(fpsan_wmma_gfx11_w64_test
+                                 PRIVATE FPSAN_TEST_GFX11_WAVE64=1)
+      target_compile_options(fpsan_wmma_gfx11_w64_test
+                             PRIVATE $<$<COMPILE_LANGUAGE:HIP>:-mwavefrontsize64>)
     endif()
     if(_fpsan_has_cdna3)
       fpsan_add_test(fpsan_mfma_cdna3_test mfma_cdna3_test.cpp)
@@ -209,7 +248,7 @@ if(TARGET GTest::gtest_main)
       endif()
     endforeach()
     if(_fpsan_has_gfx950)
-      fpsan_add_test(fpsan_mfma_test mfma_test.cpp)
+      fpsan_add_test(fpsan_mfma_gfx950_test mfma_gfx950_test.cpp)
       fpsan_add_test(fpsan_ds_read_tr_test ds_read_tr_test.cpp)
       fpsan_add_test(fpsan_cvt_gfx950_test cvt_gfx950_test.cpp)
       fpsan_add_test(fpsan_cvt_scalef32_mx_gfx950_test
@@ -223,27 +262,29 @@ if(TARGET GTest::gtest_main)
       fpsan_add_test(fpsan_cvt_scalef32_sr_gfx950_test
                      cvt_scalef32_sr_gfx950_test.cpp)
     endif()
-    # wave_test exercises the f32 wave-reduce wrappers
-    # (amdgcn_wave_reduce_f{add,sub,min,max}_f32). Contrary to an earlier
-    # assumption, these builtins exist AND lower on BOTH RDNA (gfx10+, wave32)
-    # and CDNA4/gfx950 (wave64) -- verified on silicon. The test is wave-size
-    # agnostic (one full wave, references reduced over warpSize lanes), so we
-    # register it whenever the arch list has a gfx12, CDNA3, or a gfx950. Registered
-    # once to avoid a duplicate target when both are present.
-    if(_fpsan_has_gfx12 OR _fpsan_has_cdna3 OR _fpsan_has_gfx950)
+    # wave_test exercises the f32 wave-reduce wrappers on RDNA/CDNA and, for
+    # gfx11-only builds, the f64 wave-reduce wrappers that lower on gfx1100. The
+    # test is wave-size agnostic (one full wave, references reduced over warpSize
+    # lanes), so register it whenever the arch list contains one of those families.
+    # Registered once to avoid duplicate targets in mixed-arch builds.
+    if(_fpsan_has_gfx11 OR _fpsan_has_gfx12 OR _fpsan_has_cdna3 OR _fpsan_has_gfx950)
       fpsan_add_test(fpsan_wave_test wave_test.cpp)
+      if(_fpsan_has_gfx11 AND NOT _fpsan_has_non_gfx11)
+        target_compile_definitions(fpsan_wave_test PRIVATE FPSAN_TEST_ENABLE_WAVE_F64=1)
+      endif()
       # ldexp{f,,h} builtins exist + lower on RDNA, CDNA3, and CDNA4.
       fpsan_add_test(fpsan_amdgcn_ldexp_test amdgcn_ldexp_test.cpp)
-      # Common scalar math builtins lower on RDNA4, CDNA3, and CDNA4. The same
+      # Common scalar math builtins lower on RDNA3, RDNA4, CDNA3, and CDNA4. The same
       # source also contains dot-product tests gated by compile definitions so
-      # the gfx12-only cases do not leak into CDNA builds.
+      # the gfx12-only cases do not leak into CDNA/gfx1250 builds.
       fpsan_add_test(fpsan_amdgcn_math_test amdgcn_math_test.cpp)
-      # fdot2 / dot4 (dot9-12) exist on RDNA4 and CDNA3 but NOT gfx1250, which
-      # dropped the dot families. Gate on rdna4/cdna3 (not the whole gfx12
-      # family) so the gfx1250 build of this shared file stays scalar-only.
-      if(_fpsan_has_rdna4 OR _fpsan_has_cdna3)
+      if(_fpsan_has_gfx11 OR _fpsan_has_rdna4 OR _fpsan_has_cdna3)
         target_compile_definitions(fpsan_amdgcn_math_test
                                    PRIVATE FPSAN_TEST_ENABLE_FDOT2=1)
+      endif()
+      if(_fpsan_has_gfx11 OR _fpsan_has_rdna4)
+        target_compile_definitions(fpsan_amdgcn_math_test
+                                   PRIVATE FPSAN_TEST_ENABLE_FDOT2_EXTENDED=1)
       endif()
       if(_fpsan_has_rdna4)
         target_compile_definitions(fpsan_amdgcn_math_test

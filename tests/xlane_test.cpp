@@ -667,6 +667,8 @@ void test_ds_bpermute_fi_xor(int off)
     int ndev = 0;
     if(hipGetDeviceCount(&ndev) != hipSuccess || ndev == 0)
         GTEST_SKIP() << "no HIP device";
+    if(!device_is_gfx12())
+        GTEST_SKIP() << "ds_bpermute_fi_b32 requires gfx12-insts";
     using Out = std::conditional_t<S == Semantics::Float, float, std::uint32_t>;
     Out* d_out;
     HIP_CHECK(hipMalloc(&d_out, LANES * sizeof(Out)));

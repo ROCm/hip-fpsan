@@ -25,6 +25,14 @@ using fpsan::Value;
 
 static constexpr Conversions kCC = Conversions::Explicit;
 
+#ifndef FPSAN_TEST_ENABLE_FP8_CVT
+#define FPSAN_TEST_ENABLE_FP8_CVT 0
+#endif
+#ifndef FPSAN_TEST_ENABLE_PKRTZ_CVT
+#define FPSAN_TEST_ENABLE_PKRTZ_CVT 1
+#endif
+
+#if FPSAN_TEST_ENABLE_PKRTZ_CVT
 __global__ void k_cvt_pkrtz_float(const float* a, const float* b, std::uint32_t* out)
 {
     int                                 i = threadIdx.x;
@@ -124,10 +132,12 @@ TEST(Cvt, PkrtzFpsanMatchesPerLaneCast)
     (void)hipFree(dB);
     (void)hipFree(dOut);
 }
+#endif // FPSAN_TEST_ENABLE_PKRTZ_CVT
 
 // ============================================================================
 // FP8 conversion intrinsic wrappers.
 // ============================================================================
+#if FPSAN_TEST_ENABLE_FP8_CVT
 
 namespace
 {
@@ -593,3 +603,5 @@ CVT_SR_FP8_TEST(cvt_sr_bf8_f32, 0)
 CVT_SR_FP8_TEST(cvt_sr_bf8_f32, 1)
 CVT_SR_FP8_TEST(cvt_sr_bf8_f32, 2)
 CVT_SR_FP8_TEST(cvt_sr_bf8_f32, 3)
+
+#endif // FPSAN_TEST_ENABLE_FP8_CVT

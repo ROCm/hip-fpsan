@@ -94,19 +94,32 @@ namespace fpsan
                              fpsan::max(r, other),
                              __builtin_amdgcn_wave_reduce_fmax_f32)
 #endif
-#undef FPSAN_DEFINE_WAVE_REDUCE
 
-    // ---- f64 ---- (LEFT OUT: no usable 64-bit wave-reduce instruction)
-    // __builtin_amdgcn_wave_reduce_f{add,sub,min,max}_f64 are visible to
-    // __has_builtin on gfx12, gfx942, and gfx950, but the AMDGPU backend fails to
-    // lower them: it expands the reduce via 32-bit DPP/swizzle and rejects the
-    // 64-bit VGPR operand class ("cannot select"). Verified on gfx950 with
-    // ROCm clang. Because there is no usable f64 wave-reduce *instruction* on
-    // these targets, we deliberately do NOT ship Float-mode f64 wrappers (a wrapper that
-    // silently lowered to a hand-rolled butterfly would misrepresent itself as the
-    // intrinsic and corrupt the authoritative test baseline). Customers who need
-    // an f64 wave reduce can build one directly from fpsan::amdgcn_ds_bpermute /
-    // the XOR butterfly; that is a user-level reduction, not this intrinsic.
+// ---- f64 ----
+// Visible on several targets, but direct probes only lowered cleanly for gfx1100
+// in the current audited set. Keep these wrappers gfx11-only so gfx12/gfx94x/
+// gfx950 do not accidentally instantiate a Float path that their backends still
+// reject.
+#if !defined(__HIP_DEVICE_COMPILE__) \
+    || (defined(__GFX11__) && __has_builtin(__builtin_amdgcn_wave_reduce_fadd_f64))
+    FPSAN_DEFINE_WAVE_REDUCE(amdgcn_wave_reduce_fadd_f64,
+                             double,
+                             r + other,
+                             __builtin_amdgcn_wave_reduce_fadd_f64)
+    FPSAN_DEFINE_WAVE_REDUCE(amdgcn_wave_reduce_fsub_f64,
+                             double,
+                             r - other,
+                             __builtin_amdgcn_wave_reduce_fsub_f64)
+    FPSAN_DEFINE_WAVE_REDUCE(amdgcn_wave_reduce_fmin_f64,
+                             double,
+                             fpsan::min(r, other),
+                             __builtin_amdgcn_wave_reduce_fmin_f64)
+    FPSAN_DEFINE_WAVE_REDUCE(amdgcn_wave_reduce_fmax_f64,
+                             double,
+                             fpsan::max(r, other),
+                             __builtin_amdgcn_wave_reduce_fmax_f64)
+#endif
+#undef FPSAN_DEFINE_WAVE_REDUCE
 
     // =============================================================================
     // Cross-lane data movers (readlane / readfirstlane / writelane / ds_bpermute /
