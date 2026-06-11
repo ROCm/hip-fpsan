@@ -124,16 +124,27 @@ namespace fpsan_generic
         return c;
     }
 
-    // Memoized lookup so repeated ops on a format don't rebuild the config.  Relies
-    // on FPFormat objects having stable addresses (the predefined `formats::` ones
-    // do; pass long-lived FPFormat values if you define your own).
+    // Two formats yield the same MixConfig iff their layout fields agree (the
+    // `name` is descriptive only and make_mix_config ignores it).
+    inline bool same_layout(const FPFormat& a, const FPFormat& b)
+    {
+        return a.bitWidth == b.bitWidth && a.expBits == b.expBits
+               && a.mantBits == b.mantBits && a.bias == b.bias
+               && a.hasInfNan == b.hasInfNan;
+    }
+
+    // Memoized lookup so repeated ops on a format don't rebuild the config.  Keyed
+    // by layout *value*, not by address: callers routinely pass short-lived
+    // FPFormat temporaries, and distinct temporaries can reuse the same stack
+    // address -- an address key then returns a stale, wrong-format config (and the
+    // dangling pointer is only compared, never dereferenced, so ASan stays silent).
     inline const MixConfig& mix_config_for(const FPFormat& fmt)
     {
-        static std::vector<std::pair<const FPFormat*, MixConfig>> cache;
+        static std::vector<std::pair<FPFormat, MixConfig>> cache;
         for(auto& e : cache)
-            if(e.first == &fmt)
+            if(same_layout(e.first, fmt))
                 return e.second;
-        cache.emplace_back(&fmt, make_mix_config(fmt));
+        cache.emplace_back(fmt, make_mix_config(fmt));
         return cache.back().second;
     }
 
