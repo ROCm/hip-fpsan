@@ -19,7 +19,7 @@
 #ifndef FPSAN_AMDGCN_MATH_HPP
 #define FPSAN_AMDGCN_MATH_HPP
 
-#include "fpsan/amdgcn_matrix.hpp" // v4e4m3_native / v4e5m2_native (dot4 fp8)
+#include "fpsan/amdgcn_matrix.hpp" // v4* fp8 native aliases (dot4 fp8)
 #include "fpsan/cast.hpp"
 #include "fpsan/detail/native_vec.hpp"
 #include "fpsan/math.hpp"
@@ -111,8 +111,8 @@ namespace fpsan
     // is integer add/mul mod 2^w on the accumulator type's payload.
     // =============================================================================
 
-    // v2h_native / v2bf_native come from fpsan/detail/native_vec.hpp.
-    using v2i16_native = short __attribute__((ext_vector_type(2)));
+    // v2h_native / v2bf_native / v2i16_native come from
+    // fpsan/detail/native_vec.hpp.
 
 // fdot2 family: each builtin needs a specific dotN-insts target feature
 // (dot7-insts / dot9-insts / etc.).  __has_builtin gates each variant so
@@ -192,13 +192,14 @@ namespace fpsan
 
 // =============================================================================
 // dot4: 4-element dot product of packed 8-bit FP vectors (fp8 e4m3 / bf8 e5m2)
-// accumulated into f32. The gfx12 8-bit micro-MMA: same shape as fdot2 but
-// twice the K and a per-lane fp8/bf8 byte-vector instead of a v2 half. In
+// accumulated into f32. The 8-bit micro-MMA: same shape as fdot2 but twice the
+// K and a per-lane fp8/bf8 byte-vector instead of a v2 half. In
 // FPSan mode the result is the explicit ring expression
 //   acc + sum_{k=0..3} cast<f32>(a[k]) * cast<f32>(b[k]),
 // which is exact in the payload ring (integer add/mul mod 2^32 on the
-// accumulator's f32 payload).  Gated by __has_builtin so the header still
-// compiles on archs that don't have the dot11-insts feature (e.g. gfx950).
+// accumulator's f32 payload). CDNA3/gfx94x uses AMD FNUZ FP8/BF8 encodings;
+// RDNA4 uses OCP encodings. Gated by __has_builtin so the header still compiles
+// on archs that don't have the dot11-insts feature (e.g. gfx950).
 // =============================================================================
 #define FPSAN_DEFINE_AMDGCN_DOT4_FP8(NAME, AVec, BVec, BUILTIN)                  \
     template <Semantics S = Semantics::Float, Conversions C = Conversions::Explicit> \
@@ -220,7 +221,9 @@ namespace fpsan
         }                                                                            \
     }
 
-#if !defined(__HIP_DEVICE_COMPILE__) || __has_builtin(__builtin_amdgcn_dot4_f32_fp8_fp8)
+#if !defined(__HIP_DEVICE_COMPILE__)                                             \
+    || (__has_builtin(__builtin_amdgcn_dot4_f32_fp8_fp8) && !defined(__gfx940__) \
+        && !defined(__gfx941__) && !defined(__gfx942__))
     FPSAN_DEFINE_AMDGCN_DOT4_FP8(amdgcn_dot4_f32_fp8_fp8,
                                  v4e4m3_native,
                                  v4e4m3_native,
@@ -236,6 +239,27 @@ namespace fpsan
     FPSAN_DEFINE_AMDGCN_DOT4_FP8(amdgcn_dot4_f32_bf8_bf8,
                                  v4e5m2_native,
                                  v4e5m2_native,
+                                 __builtin_amdgcn_dot4_f32_bf8_bf8)
+#endif
+
+#if !defined(__HIP_DEVICE_COMPILE__)                     \
+    || (__has_builtin(__builtin_amdgcn_dot4_f32_fp8_fp8) \
+        && (defined(__gfx940__) || defined(__gfx941__) || defined(__gfx942__)))
+    FPSAN_DEFINE_AMDGCN_DOT4_FP8(amdgcn_dot4_f32_fp8_fp8,
+                                 v4amd_e4m3_native,
+                                 v4amd_e4m3_native,
+                                 __builtin_amdgcn_dot4_f32_fp8_fp8)
+    FPSAN_DEFINE_AMDGCN_DOT4_FP8(amdgcn_dot4_f32_fp8_bf8,
+                                 v4amd_e4m3_native,
+                                 v4amd_e5m2_native,
+                                 __builtin_amdgcn_dot4_f32_fp8_bf8)
+    FPSAN_DEFINE_AMDGCN_DOT4_FP8(amdgcn_dot4_f32_bf8_fp8,
+                                 v4amd_e5m2_native,
+                                 v4amd_e4m3_native,
+                                 __builtin_amdgcn_dot4_f32_bf8_fp8)
+    FPSAN_DEFINE_AMDGCN_DOT4_FP8(amdgcn_dot4_f32_bf8_bf8,
+                                 v4amd_e5m2_native,
+                                 v4amd_e5m2_native,
                                  __builtin_amdgcn_dot4_f32_bf8_bf8)
 #endif
 #undef FPSAN_DEFINE_AMDGCN_DOT4_FP8

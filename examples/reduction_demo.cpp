@@ -20,6 +20,7 @@
 // The matrix path is SINGLE-SOURCE but uses different hardware instructions per
 // GPU architecture, selected by a device-arch `#if` (not a build flag):
 //   * RDNA4 / gfx12  -> WMMA  (amdgcn_wmma_f32_16x16x16_bf16_w32, wave32)
+//   * CDNA3 / gfx942 -> MFMA  (amdgcn_mfma_f32_16x16x16bf16_1k,   wave64)
 //   * CDNA4 / gfx950 -> MFMA  (amdgcn_mfma_f32_16x16x16bf16_1k,   wave64)
 // An architecture with no matrix code path here is a hard compile error. The
 // host launches every kernel at the device's runtime `warpSize`, so the same
@@ -65,13 +66,13 @@
 // ever runs on the arch it was compiled for. A device arch with no matrix path
 // is a hard error rather than a silent omission.
 // ---------------------------------------------------------------------------
-#if defined(__gfx950__)
+#if defined(__gfx940__) || defined(__gfx941__) || defined(__gfx942__) || defined(__gfx950__)
 #define DEMO_PATH_MFMA 1
 #elif defined(__gfx1200__) || defined(__gfx1201__) || !defined(__HIP_DEVICE_COMPILE__)
 #define DEMO_PATH_WMMA 1
 #else
 #error \
-    "reduction_demo: no matrix code path for this GPU architecture (have: gfx12 WMMA, gfx950 MFMA)"
+    "reduction_demo: no matrix code path for this GPU architecture (have: gfx12 WMMA, gfx94x/gfx950 MFMA)"
 #endif
 
 using fpsan::Conversions;
@@ -138,7 +139,7 @@ __global__ void k_wfred(const float* x, Out* out)
 // ---------------------------------------------------------------------------
 // (3) matrix: column sums of B (16x16 inputs as bf16) via D = A*B with A=ones.
 //     With A all-ones, D[m][n] = sum_k B[k][n] = column-n sum (same for all m).
-//     For both WMMA (gfx12) and MFMA (gfx950) the 16x16x16 output places D[0][n]
+//     For both WMMA (gfx12) and MFMA (gfx94x/gfx950) the 16x16x16 output places D[0][n]
 //     on lane n, register 0 -- so the read-back is identical across archs; only
 //     the fragment layout/fill and the instruction differ.
 // ---------------------------------------------------------------------------
@@ -157,7 +158,7 @@ __global__ void k_matrix_column_sums(const float* x, Out* col_out)
 {
     const int lane = threadIdx.x;
 #if defined(DEMO_PATH_MFMA)
-    // CDNA4 / gfx950: MFMA 16x16x16 bf16 (wave64, 4 bf16/lane). Fill A=ones and
+    // CDNA3 / CDNA4: MFMA 16x16x16 bf16 (wave64, 4 bf16/lane). Fill A=ones and
     // B=inputs by walking the logical (outer, k) indices through the MFMA layout
     // helper input_loc; A[o][k] and B[k][o] share a fragment slot (M==N).
     using V4B = Value<fpsan::v4bf_native, S, kCC>;

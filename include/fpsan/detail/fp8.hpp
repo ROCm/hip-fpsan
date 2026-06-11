@@ -142,7 +142,9 @@ namespace fpsan
             else
             {
                 int arith_exp = static_cast<int>(f32_exp >> f32_mantissa_bits) - f32_exp_bias;
-                if(arith_exp > (1 << (f.exp_bits - 1)) - static_cast<int>(f.have_infinity))
+                const int max_arith_exp
+                    = ((1 << f.exp_bits) - 1 - static_cast<int>(f.have_infinity)) - dst_exp_bias;
+                if(arith_exp > max_arith_exp)
                 {
                     gen_inf = true;
                 }
@@ -213,6 +215,22 @@ namespace fpsan
                                               /*have_nan=*/true,
                                               /*bias_tweak=*/0,
                                               /*nan_as_neg_zero=*/false};
+        // CDNA3's "FP8"/"BF8" formats are AMD FNUZ encodings: the exponent
+        // bias is one greater than OCP E4M3/E5M2, there is no infinity, and
+        // negative zero (0x80) encodes NaN. See the MI300 ISA, BF8 and FP8
+        // Formats and Conversions.
+        inline constexpr FpFormat kAmdFp8E4M3 = {/*exp_bits=*/4,
+                                                 /*mantissa_bits=*/3,
+                                                 /*have_infinity=*/false,
+                                                 /*have_nan=*/true,
+                                                 /*bias_tweak=*/1,
+                                                 /*nan_as_neg_zero=*/true};
+        inline constexpr FpFormat kAmdFp8E5M2 = {/*exp_bits=*/5,
+                                                 /*mantissa_bits=*/2,
+                                                 /*have_infinity=*/false,
+                                                 /*have_nan=*/true,
+                                                 /*bias_tweak=*/1,
+                                                 /*nan_as_neg_zero=*/true};
 
         // OCP MX sub-byte formats (gfx950 cvt_scalef32_* operands). None has inf or
         // NaN: overflow saturates to max-finite and f32 NaN/Inf maps to 0. The generic
@@ -313,10 +331,51 @@ namespace fpsan
         }
     };
 
+#define FPSAN_DEFINE_FP8_SCALAR(NAME, FORMAT)                                   \
+    struct NAME                                                                 \
+    {                                                                           \
+        std::uint8_t bits;                                                      \
+        FPSAN_HOST_DEVICE constexpr NAME()                                      \
+            : bits(0)                                                           \
+        {                                                                       \
+        }                                                                       \
+        FPSAN_HOST_DEVICE constexpr explicit NAME(std::uint8_t b)               \
+            : bits(b)                                                           \
+        {                                                                       \
+        }                                                                       \
+        FPSAN_HOST_DEVICE explicit NAME(float v)                                \
+            : bits(static_cast<std::uint8_t>(detail::f32_to_narrow(v, FORMAT))) \
+        {                                                                       \
+        }                                                                       \
+        FPSAN_HOST_DEVICE operator float() const                                \
+        {                                                                       \
+            return detail::narrow_to_f32(bits, FORMAT);                         \
+        }                                                                       \
+        FPSAN_HOST_DEVICE friend bool operator<(NAME a, NAME b)                 \
+        {                                                                       \
+            return static_cast<float>(a) < static_cast<float>(b);               \
+        }                                                                       \
+        FPSAN_HOST_DEVICE friend bool operator==(NAME a, NAME b)                \
+        {                                                                       \
+            return a.bits == b.bits;                                            \
+        }                                                                       \
+        FPSAN_HOST_DEVICE friend bool operator!=(NAME a, NAME b)                \
+        {                                                                       \
+            return !(a == b);                                                   \
+        }                                                                       \
+    };
+
+    FPSAN_DEFINE_FP8_SCALAR(amd_fp8_e4m3, detail::kAmdFp8E4M3)
+    FPSAN_DEFINE_FP8_SCALAR(amd_fp8_e5m2, detail::kAmdFp8E5M2)
+
+#undef FPSAN_DEFINE_FP8_SCALAR
+
     namespace detail
     {
         FPSAN_DEFINE_FP_TRAITS(::fpsan::fp8_e4m3, 3, 4, 7);
         FPSAN_DEFINE_FP_TRAITS(::fpsan::fp8_e5m2, 2, 5, 15);
+        FPSAN_DEFINE_FP_TRAITS(::fpsan::amd_fp8_e4m3, 3, 4, 8);
+        FPSAN_DEFINE_FP_TRAITS(::fpsan::amd_fp8_e5m2, 2, 5, 16);
 // Defined in detail/traits.hpp; fp8 holds the last expansions, so retire the
 // generator here rather than leak it into translation units that pull fpsan.hpp.
 #undef FPSAN_DEFINE_FP_TRAITS

@@ -147,6 +147,8 @@ namespace fpsan
     } // namespace detail
     using v4e4m3_native = detail::v4_fragment<fp8_e4m3>;
     using v4e5m2_native = detail::v4_fragment<fp8_e5m2>;
+    using v4amd_e4m3_native = detail::v4_fragment<amd_fp8_e4m3>;
+    using v4amd_e5m2_native = detail::v4_fragment<amd_fp8_e5m2>;
 
     // The builtin ABI packs the 8-byte fp8 fragment into a 2-element i32 vector.
     using v2i32_native = int __attribute__((ext_vector_type(2)));

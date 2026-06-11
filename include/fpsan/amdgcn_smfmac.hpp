@@ -679,10 +679,10 @@ namespace fpsan
 
 #undef FPSAN_DEFINE_SMFMAC_F16_GFX950
 
-    // FP8 SMFMAC.  AMD's "fp8" = OCP E4M3, "bf8" = OCP E5M2.  The builtin ABI
-    // passes A/B as packed i32 vectors (the byte storage is opaque); the wrapper
-    // bit-casts the Value fp8 fragment to that ABI.  FPSan mode runs the per-shape
-    // software dataflow.
+    // FP8 SMFMAC.  The builtin ABI passes A/B as packed i32 vectors (the byte
+    // storage is opaque); the wrapper bit-casts the Value fp8 fragment to that
+    // ABI.  FPSan mode runs the per-shape software dataflow.  CDNA3/gfx94x uses
+    // AMD FNUZ FP8/BF8 encodings, while gfx950 uses the OCP encodings.
     //
     // CDNA3 fp8-insts (K=64 16x16, K=32 32x32): A = v8 fp8 (=v2i), B = v16 fp8
     // (=v4i).  Both shapes are silicon-verified (smfmac_software_*_fp8).
@@ -711,7 +711,9 @@ namespace fpsan
         }                                                                                    \
     }
 
-#if !defined(__HIP_DEVICE_COMPILE__) || __has_builtin(__builtin_amdgcn_smfmac_f32_16x16x64_fp8_fp8)
+#if !defined(__HIP_DEVICE_COMPILE__)                                                        \
+    || (__has_builtin(__builtin_amdgcn_smfmac_f32_16x16x64_fp8_fp8) && !defined(__gfx940__) \
+        && !defined(__gfx941__) && !defined(__gfx942__))
     // 16x16x64 (C = v4f).  A=v8 fp8, B=v16 fp8.
     FPSAN_DEFINE_SMFMAC_FP8(amdgcn_smfmac_f32_16x16x64_fp8_fp8,
                             v8e4m3_native,
@@ -773,6 +775,77 @@ namespace fpsan
     FPSAN_DEFINE_SMFMAC_FP8(amdgcn_smfmac_f32_32x32x32_bf8_bf8,
                             v8e5m2_native,
                             v16e5m2_native,
+                            v16f_native,
+                            v2i32_smf,
+                            v4i32_smf,
+                            smfmac_software_32x32x32_fp8,
+                            __builtin_amdgcn_smfmac_f32_32x32x32_bf8_bf8)
+#endif
+
+#if !defined(__HIP_DEVICE_COMPILE__)                                \
+    || (__has_builtin(__builtin_amdgcn_smfmac_f32_16x16x64_fp8_fp8) \
+        && (defined(__gfx940__) || defined(__gfx941__) || defined(__gfx942__)))
+    // CDNA3 16x16x64 (C = v4f).  A=v8 AMD-FNUZ fp8, B=v16 AMD-FNUZ fp8.
+    FPSAN_DEFINE_SMFMAC_FP8(amdgcn_smfmac_f32_16x16x64_fp8_fp8,
+                            v8amd_e4m3_native,
+                            v16amd_e4m3_native,
+                            v4f_native,
+                            v2i32_smf,
+                            v4i32_smf,
+                            smfmac_software_16x16x64_fp8,
+                            __builtin_amdgcn_smfmac_f32_16x16x64_fp8_fp8)
+    FPSAN_DEFINE_SMFMAC_FP8(amdgcn_smfmac_f32_16x16x64_fp8_bf8,
+                            v8amd_e4m3_native,
+                            v16amd_e5m2_native,
+                            v4f_native,
+                            v2i32_smf,
+                            v4i32_smf,
+                            smfmac_software_16x16x64_fp8,
+                            __builtin_amdgcn_smfmac_f32_16x16x64_fp8_bf8)
+    FPSAN_DEFINE_SMFMAC_FP8(amdgcn_smfmac_f32_16x16x64_bf8_fp8,
+                            v8amd_e5m2_native,
+                            v16amd_e4m3_native,
+                            v4f_native,
+                            v2i32_smf,
+                            v4i32_smf,
+                            smfmac_software_16x16x64_fp8,
+                            __builtin_amdgcn_smfmac_f32_16x16x64_bf8_fp8)
+    FPSAN_DEFINE_SMFMAC_FP8(amdgcn_smfmac_f32_16x16x64_bf8_bf8,
+                            v8amd_e5m2_native,
+                            v16amd_e5m2_native,
+                            v4f_native,
+                            v2i32_smf,
+                            v4i32_smf,
+                            smfmac_software_16x16x64_fp8,
+                            __builtin_amdgcn_smfmac_f32_16x16x64_bf8_bf8)
+    // CDNA3 32x32x32 (C = v16f).  A=v8 AMD-FNUZ fp8, B=v16 AMD-FNUZ fp8.
+    FPSAN_DEFINE_SMFMAC_FP8(amdgcn_smfmac_f32_32x32x32_fp8_fp8,
+                            v8amd_e4m3_native,
+                            v16amd_e4m3_native,
+                            v16f_native,
+                            v2i32_smf,
+                            v4i32_smf,
+                            smfmac_software_32x32x32_fp8,
+                            __builtin_amdgcn_smfmac_f32_32x32x32_fp8_fp8)
+    FPSAN_DEFINE_SMFMAC_FP8(amdgcn_smfmac_f32_32x32x32_fp8_bf8,
+                            v8amd_e4m3_native,
+                            v16amd_e5m2_native,
+                            v16f_native,
+                            v2i32_smf,
+                            v4i32_smf,
+                            smfmac_software_32x32x32_fp8,
+                            __builtin_amdgcn_smfmac_f32_32x32x32_fp8_bf8)
+    FPSAN_DEFINE_SMFMAC_FP8(amdgcn_smfmac_f32_32x32x32_bf8_fp8,
+                            v8amd_e5m2_native,
+                            v16amd_e4m3_native,
+                            v16f_native,
+                            v2i32_smf,
+                            v4i32_smf,
+                            smfmac_software_32x32x32_fp8,
+                            __builtin_amdgcn_smfmac_f32_32x32x32_bf8_fp8)
+    FPSAN_DEFINE_SMFMAC_FP8(amdgcn_smfmac_f32_32x32x32_bf8_bf8,
+                            v8amd_e5m2_native,
+                            v16amd_e5m2_native,
                             v16f_native,
                             v2i32_smf,
                             v4i32_smf,
