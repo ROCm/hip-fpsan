@@ -3,12 +3,15 @@
 //
 // tests/mfma_cdna3_test.cpp
 //
-// GPU tests for the CDNA3 / gfx94x MFMA wrappers. Each dense shape gets two
-// checks: Float mode against the real hardware layout, and FPSan mode against
-// an independent scalar payload-ring reference.
+// GPU tests for the CDNA3 / gfx94x MFMA wrappers. Matrix tests are split into
+// three phases: Float mode against a host scalar reference to validate the
+// helper layout, Float mode against persisted raw-builtin hardware goldens, and
+// FPSan mode against an independent scalar payload-ring reference.
 #include "fpsan/amdgcn_mfma.hpp"
 #include "fpsan/fpsan.hpp"
 
+#include "golden_cdna3_matrix.hpp"
+#include "golden_cdna3_matrix_registry.hpp"
 #include "hip_test_utils.hpp"
 #include "test_random.hpp"
 
@@ -17,6 +20,7 @@
 #include <gtest/gtest.h>
 
 #include <cstdint>
+#include <cstring>
 #include <random>
 #include <type_traits>
 #include <vector>
@@ -27,6 +31,23 @@ using fpsan::Value;
 
 static constexpr Conversions kCC  = Conversions::Explicit;
 static constexpr int         WAVE = 64;
+
+template <class T>
+T value_from_bits(std::uint64_t bits)
+{
+    T v{};
+    std::memcpy(&v, &bits, sizeof v);
+    return v;
+}
+
+template <class T>
+std::vector<T> vector_from_bits(const std::uint64_t* bits, std::size_t count)
+{
+    std::vector<T> out(count);
+    for(std::size_t i = 0; i < count; ++i)
+        out[i] = value_from_bits<T>(bits[i]);
+    return out;
+}
 
 // ---------------------------------------------------------------------------
 // Dense vector-input MFMA shapes: f16, bf16, fp8/bf8. A/B are per-lane vector
@@ -203,6 +224,45 @@ void run_dense_vec_layout()
 }
 
 template <class Traits>
+void run_dense_vec_golden()
+{
+    using H = DenseVecHarness<Traits>;
+    if(!have_device())
+        GTEST_SKIP() << "no HIP device";
+    for(int case_id = 0; case_id < fpsan_test::golden_cdna3::kCaseCount; ++case_id)
+    {
+        const auto* gold = fpsan_test::golden_cdna3::find_case(Traits::golden_name, case_id);
+        ASSERT_NE(gold, nullptr) << Traits::golden_name << " case " << case_id;
+        ASSERT_EQ(gold->a_count, static_cast<std::size_t>(H::Bk * H::M * H::K));
+        ASSERT_EQ(gold->b_count, static_cast<std::size_t>(H::Bk * H::K * H::N));
+        ASSERT_EQ(gold->c_count, static_cast<std::size_t>(H::Bk * H::M * H::N));
+        ASSERT_EQ(gold->d_count, static_cast<std::size_t>(H::Bk * H::M * H::N));
+
+        DenseVecData<Traits> d;
+        d.A                   = vector_from_bits<typename H::AElem>(gold->a, gold->a_count);
+        d.B                   = vector_from_bits<typename H::BElem>(gold->b, gold->b_count);
+        d.C                   = vector_from_bits<typename H::CElem>(gold->c, gold->c_count);
+        auto*              dA = to_dev(d.A);
+        auto*              dB = to_dev(d.B);
+        auto*              dC = to_dev(d.C);
+        typename H::CElem* dD;
+        HIP_CHECK(hipMalloc(&dD, gold->d_count * sizeof(typename H::CElem)));
+        k_dense_vec_float<Traits><<<1, WAVE>>>(dA, dB, dC, dD);
+        HIP_CHECK(hipDeviceSynchronize());
+        std::vector<typename H::CElem> got(gold->d_count);
+        HIP_CHECK(hipMemcpy(
+            got.data(), dD, got.size() * sizeof(typename H::CElem), hipMemcpyDeviceToHost));
+        for(std::size_t i = 0; i < got.size(); ++i)
+            EXPECT_EQ(bits_of(got[i]), gold->d[i])
+                << Traits::golden_name << " case " << case_id << " elem " << i;
+        (void)hipFree(dA);
+        (void)hipFree(dB);
+        (void)hipFree(dC);
+        (void)hipFree(dD);
+    }
+}
+
+template <class Traits>
 void run_dense_vec_fpsan()
 {
     using H = DenseVecHarness<Traits>;
@@ -248,26 +308,31 @@ void run_dense_vec_fpsan()
     {                                       \
         run_dense_vec_layout<Name>();       \
     }                                       \
+    TEST(Name, CompareGoldenValues)         \
+    {                                       \
+        run_dense_vec_golden<Name>();       \
+    }                                       \
     TEST(Name, FpsanMatchesScalarReference) \
     {                                       \
         run_dense_vec_fpsan<Name>();        \
     }
 
-#define DENSE_VEC_TRAITS(Name, M_, N_, K_, Bk_, InBits_, AV_, BV_, CV_, WRAP_)              \
-    struct Name                                                                             \
-    {                                                                                       \
-        using AVec             = AV_;                                                       \
-        using BVec             = BV_;                                                       \
-        using CVec             = CV_;                                                       \
-        static constexpr int M = M_, N = N_, K = K_, Bk = Bk_, InBits = InBits_;            \
-        static constexpr int a_lo = -3, a_hi = 3, b_lo = -2, b_hi = 2, c_lo = -4, c_hi = 4; \
-        template <Semantics S, Conversions C>                                               \
-        __device__ static Value<CVec, S, C>                                                 \
-            call(Value<AVec, S, C> a, Value<BVec, S, C> b, Value<CVec, S, C> c)             \
-        {                                                                                   \
-            return fpsan::WRAP_<0, 0, 0, S, C>(a, b, c);                                    \
-        }                                                                                   \
-    };                                                                                      \
+#define DENSE_VEC_TRAITS(Name, M_, N_, K_, Bk_, InBits_, AV_, BV_, CV_, WRAP_)                      \
+    struct Name                                                                                     \
+    {                                                                                               \
+        using AVec                               = AV_;                                             \
+        using BVec                               = BV_;                                             \
+        using CVec                               = CV_;                                             \
+        static constexpr const char* golden_name = #Name;                                           \
+        static constexpr int         M = M_, N = N_, K = K_, Bk = Bk_, InBits = InBits_;            \
+        static constexpr int         a_lo = -3, a_hi = 3, b_lo = -2, b_hi = 2, c_lo = -4, c_hi = 4; \
+        template <Semantics S, Conversions C>                                                       \
+        __device__ static Value<CVec, S, C>                                                         \
+            call(Value<AVec, S, C> a, Value<BVec, S, C> b, Value<CVec, S, C> c)                     \
+        {                                                                                           \
+            return fpsan::WRAP_<0, 0, 0, S, C>(a, b, c);                                            \
+        }                                                                                           \
+    };                                                                                              \
     DENSE_VEC_TESTS(Name)
 
 using fpsan::v16f_native;
@@ -279,201 +344,7 @@ using fpsan::v4h_native;
 using fpsan::v8amd_e4m3_native;
 using fpsan::v8amd_e5m2_native;
 
-DENSE_VEC_TRAITS(MfmaF16_16x16x16,
-                 16,
-                 16,
-                 16,
-                 1,
-                 16,
-                 v4h_native,
-                 v4h_native,
-                 v4f_native,
-                 amdgcn_mfma_f32_16x16x16f16)
-DENSE_VEC_TRAITS(MfmaF16_16x16x4,
-                 16,
-                 16,
-                 4,
-                 4,
-                 16,
-                 v4h_native,
-                 v4h_native,
-                 v16f_native,
-                 amdgcn_mfma_f32_16x16x4f16)
-DENSE_VEC_TRAITS(MfmaF16_32x32x8,
-                 32,
-                 32,
-                 8,
-                 1,
-                 16,
-                 v4h_native,
-                 v4h_native,
-                 v16f_native,
-                 amdgcn_mfma_f32_32x32x8f16)
-DENSE_VEC_TRAITS(MfmaF16_32x32x4,
-                 32,
-                 32,
-                 4,
-                 2,
-                 16,
-                 v4h_native,
-                 v4h_native,
-                 v32f_native,
-                 amdgcn_mfma_f32_32x32x4f16)
-DENSE_VEC_TRAITS(
-    MfmaF16_4x4x4, 4, 4, 4, 16, 16, v4h_native, v4h_native, v4f_native, amdgcn_mfma_f32_4x4x4f16)
-
-DENSE_VEC_TRAITS(MfmaBF16_1k_16x16x16,
-                 16,
-                 16,
-                 16,
-                 1,
-                 16,
-                 v4bf_native,
-                 v4bf_native,
-                 v4f_native,
-                 amdgcn_mfma_f32_16x16x16bf16_1k)
-DENSE_VEC_TRAITS(MfmaBF16_1k_16x16x4,
-                 16,
-                 16,
-                 4,
-                 4,
-                 16,
-                 v4bf_native,
-                 v4bf_native,
-                 v16f_native,
-                 amdgcn_mfma_f32_16x16x4bf16_1k)
-DENSE_VEC_TRAITS(MfmaBF16_1k_32x32x8,
-                 32,
-                 32,
-                 8,
-                 1,
-                 16,
-                 v4bf_native,
-                 v4bf_native,
-                 v16f_native,
-                 amdgcn_mfma_f32_32x32x8bf16_1k)
-DENSE_VEC_TRAITS(MfmaBF16_1k_32x32x4,
-                 32,
-                 32,
-                 4,
-                 2,
-                 16,
-                 v4bf_native,
-                 v4bf_native,
-                 v32f_native,
-                 amdgcn_mfma_f32_32x32x4bf16_1k)
-DENSE_VEC_TRAITS(MfmaBF16_1k_4x4x4,
-                 4,
-                 4,
-                 4,
-                 16,
-                 16,
-                 v4bf_native,
-                 v4bf_native,
-                 v4f_native,
-                 amdgcn_mfma_f32_4x4x4bf16_1k)
-
-DENSE_VEC_TRAITS(MfmaFP8_16x16x32_fp8_fp8,
-                 16,
-                 16,
-                 32,
-                 1,
-                 8,
-                 v8amd_e4m3_native,
-                 v8amd_e4m3_native,
-                 v4f_native,
-                 amdgcn_mfma_f32_16x16x32_fp8_fp8)
-DENSE_VEC_TRAITS(MfmaFP8_16x16x32_fp8_bf8,
-                 16,
-                 16,
-                 32,
-                 1,
-                 8,
-                 v8amd_e4m3_native,
-                 v8amd_e5m2_native,
-                 v4f_native,
-                 amdgcn_mfma_f32_16x16x32_fp8_bf8)
-DENSE_VEC_TRAITS(MfmaFP8_16x16x32_bf8_fp8,
-                 16,
-                 16,
-                 32,
-                 1,
-                 8,
-                 v8amd_e5m2_native,
-                 v8amd_e4m3_native,
-                 v4f_native,
-                 amdgcn_mfma_f32_16x16x32_bf8_fp8)
-DENSE_VEC_TRAITS(MfmaFP8_16x16x32_bf8_bf8,
-                 16,
-                 16,
-                 32,
-                 1,
-                 8,
-                 v8amd_e5m2_native,
-                 v8amd_e5m2_native,
-                 v4f_native,
-                 amdgcn_mfma_f32_16x16x32_bf8_bf8)
-DENSE_VEC_TRAITS(MfmaFP8_32x32x16_fp8_fp8,
-                 32,
-                 32,
-                 16,
-                 1,
-                 8,
-                 v8amd_e4m3_native,
-                 v8amd_e4m3_native,
-                 v16f_native,
-                 amdgcn_mfma_f32_32x32x16_fp8_fp8)
-DENSE_VEC_TRAITS(MfmaFP8_32x32x16_fp8_bf8,
-                 32,
-                 32,
-                 16,
-                 1,
-                 8,
-                 v8amd_e4m3_native,
-                 v8amd_e5m2_native,
-                 v16f_native,
-                 amdgcn_mfma_f32_32x32x16_fp8_bf8)
-DENSE_VEC_TRAITS(MfmaFP8_32x32x16_bf8_fp8,
-                 32,
-                 32,
-                 16,
-                 1,
-                 8,
-                 v8amd_e5m2_native,
-                 v8amd_e4m3_native,
-                 v16f_native,
-                 amdgcn_mfma_f32_32x32x16_bf8_fp8)
-DENSE_VEC_TRAITS(MfmaFP8_32x32x16_bf8_bf8,
-                 32,
-                 32,
-                 16,
-                 1,
-                 8,
-                 v8amd_e5m2_native,
-                 v8amd_e5m2_native,
-                 v16f_native,
-                 amdgcn_mfma_f32_32x32x16_bf8_bf8)
-
-DENSE_VEC_TRAITS(MfmaXF32_16x16x8,
-                 16,
-                 16,
-                 8,
-                 1,
-                 32,
-                 v2f_native,
-                 v2f_native,
-                 v4f_native,
-                 amdgcn_mfma_f32_16x16x8_xf32)
-DENSE_VEC_TRAITS(MfmaXF32_32x32x4,
-                 32,
-                 32,
-                 4,
-                 1,
-                 32,
-                 v2f_native,
-                 v2f_native,
-                 v16f_native,
-                 amdgcn_mfma_f32_32x32x4_xf32)
+FPSAN_CDNA3_DENSE_VEC_MATRIX_INTRINSICS(DENSE_VEC_TRAITS)
 
 #undef DENSE_VEC_TRAITS
 #undef DENSE_VEC_TESTS
@@ -585,6 +456,39 @@ void run_dense_f32_layout()
 }
 
 template <class Traits>
+void run_dense_f32_golden()
+{
+    if(!have_device())
+        GTEST_SKIP() << "no HIP device";
+    for(int case_id = 0; case_id < fpsan_test::golden_cdna3::kCaseCount; ++case_id)
+    {
+        const auto* gold = fpsan_test::golden_cdna3::find_case(Traits::golden_name, case_id);
+        ASSERT_NE(gold, nullptr) << Traits::golden_name << " case " << case_id;
+        ASSERT_EQ(gold->a_count, static_cast<std::size_t>(Traits::Bk * Traits::M * Traits::K));
+        ASSERT_EQ(gold->b_count, static_cast<std::size_t>(Traits::Bk * Traits::K * Traits::N));
+        ASSERT_EQ(gold->c_count, static_cast<std::size_t>(Traits::Bk * Traits::M * Traits::N));
+        ASSERT_EQ(gold->d_count, static_cast<std::size_t>(Traits::Bk * Traits::M * Traits::N));
+        DenseF32Data<Traits> d;
+        d.A       = vector_from_bits<float>(gold->a, gold->a_count);
+        d.B       = vector_from_bits<float>(gold->b, gold->b_count);
+        d.C       = vector_from_bits<float>(gold->c, gold->c_count);
+        float *dA = to_dev(d.A), *dB = to_dev(d.B), *dC = to_dev(d.C), *dD;
+        HIP_CHECK(hipMalloc(&dD, gold->d_count * sizeof(float)));
+        k_dense_f32<Traits, Semantics::Float, float><<<1, WAVE>>>(dA, dB, dC, dD);
+        HIP_CHECK(hipDeviceSynchronize());
+        std::vector<float> got(gold->d_count);
+        HIP_CHECK(hipMemcpy(got.data(), dD, got.size() * sizeof(float), hipMemcpyDeviceToHost));
+        for(std::size_t i = 0; i < got.size(); ++i)
+            EXPECT_EQ(bits_of(got[i]), gold->d[i])
+                << Traits::golden_name << " case " << case_id << " elem " << i;
+        (void)hipFree(dA);
+        (void)hipFree(dB);
+        (void)hipFree(dC);
+        (void)hipFree(dD);
+    }
+}
+
+template <class Traits>
 void run_dense_f32_fpsan()
 {
     if(!have_device())
@@ -621,8 +525,9 @@ void run_dense_f32_fpsan()
 #define DENSE_F32_TRAITS(Name, M_, N_, K_, Bk_, CVec_, WRAP_)                     \
     struct Name                                                                   \
     {                                                                             \
-        using CVec             = CVec_;                                           \
-        static constexpr int M = M_, N = N_, K = K_, Bk = Bk_;                    \
+        using CVec                               = CVec_;                         \
+        static constexpr const char* golden_name = #Name;                         \
+        static constexpr int         M = M_, N = N_, K = K_, Bk = Bk_;            \
         template <Semantics S, Conversions C>                                     \
         __device__ static Value<CVec, S, C>                                       \
             call(Value<float, S, C> a, Value<float, S, C> b, Value<CVec, S, C> c) \
@@ -634,16 +539,16 @@ void run_dense_f32_fpsan()
     {                                                                             \
         run_dense_f32_layout<Name>();                                             \
     }                                                                             \
+    TEST(Name, CompareGoldenValues)                                               \
+    {                                                                             \
+        run_dense_f32_golden<Name>();                                             \
+    }                                                                             \
     TEST(Name, FpsanMatchesScalarReference)                                       \
     {                                                                             \
         run_dense_f32_fpsan<Name>();                                              \
     }
 
-DENSE_F32_TRAITS(MfmaF32_16x16x4, 16, 16, 4, 1, v4f_native, amdgcn_mfma_f32_16x16x4f32)
-DENSE_F32_TRAITS(MfmaF32_16x16x1, 16, 16, 1, 4, v16f_native, amdgcn_mfma_f32_16x16x1f32)
-DENSE_F32_TRAITS(MfmaF32_32x32x2, 32, 32, 2, 1, v16f_native, amdgcn_mfma_f32_32x32x2f32)
-DENSE_F32_TRAITS(MfmaF32_32x32x1, 32, 32, 1, 2, v32f_native, amdgcn_mfma_f32_32x32x1f32)
-DENSE_F32_TRAITS(MfmaF32_4x4x1, 4, 4, 1, 16, v4f_native, amdgcn_mfma_f32_4x4x1f32)
+FPSAN_CDNA3_DENSE_F32_MATRIX_INTRINSICS(DENSE_F32_TRAITS)
 
 #undef DENSE_F32_TRAITS
 
@@ -747,6 +652,37 @@ TEST(MfmaF64_16x16x4, LayoutMatchesHardware)
     (void)hipFree(dD);
 }
 
+TEST(MfmaF64_16x16x4, CompareGoldenValues)
+{
+    if(!have_device())
+        GTEST_SKIP() << "no HIP device";
+    for(int case_id = 0; case_id < fpsan_test::golden_cdna3::kCaseCount; ++case_id)
+    {
+        const auto* gold = fpsan_test::golden_cdna3::find_case("MfmaF64_16x16x4", case_id);
+        ASSERT_NE(gold, nullptr) << "MfmaF64_16x16x4 case " << case_id;
+        ASSERT_EQ(gold->a_count, static_cast<std::size_t>(F64_M * F64_K));
+        ASSERT_EQ(gold->b_count, static_cast<std::size_t>(F64_K * F64_N));
+        ASSERT_EQ(gold->c_count, static_cast<std::size_t>(F64_M * F64_N));
+        ASSERT_EQ(gold->d_count, static_cast<std::size_t>(F64_M * F64_N));
+        F64Data d;
+        d.A        = vector_from_bits<double>(gold->a, gold->a_count);
+        d.B        = vector_from_bits<double>(gold->b, gold->b_count);
+        d.C        = vector_from_bits<double>(gold->c, gold->c_count);
+        double *dA = to_dev(d.A), *dB = to_dev(d.B), *dC = to_dev(d.C), *dD;
+        HIP_CHECK(hipMalloc(&dD, gold->d_count * sizeof(double)));
+        k_f64_16x16x4<Semantics::Float, double><<<1, WAVE>>>(dA, dB, dC, dD);
+        HIP_CHECK(hipDeviceSynchronize());
+        std::vector<double> got(gold->d_count);
+        HIP_CHECK(hipMemcpy(got.data(), dD, got.size() * sizeof(double), hipMemcpyDeviceToHost));
+        for(std::size_t i = 0; i < got.size(); ++i)
+            EXPECT_EQ(bits_of(got[i]), gold->d[i]) << "case " << case_id << " elem " << i;
+        (void)hipFree(dA);
+        (void)hipFree(dB);
+        (void)hipFree(dC);
+        (void)hipFree(dD);
+    }
+}
+
 TEST(MfmaF64_16x16x4, FpsanMatchesScalarReference)
 {
     if(!have_device())
@@ -842,6 +778,37 @@ TEST(MfmaF64_4x4x4, LayoutMatchesHardware)
     (void)hipFree(dB);
     (void)hipFree(dC);
     (void)hipFree(dD);
+}
+
+TEST(MfmaF64_4x4x4, CompareGoldenValues)
+{
+    if(!have_device())
+        GTEST_SKIP() << "no HIP device";
+    for(int case_id = 0; case_id < fpsan_test::golden_cdna3::kCaseCount; ++case_id)
+    {
+        const auto* gold = fpsan_test::golden_cdna3::find_case("MfmaF64_4x4x4", case_id);
+        ASSERT_NE(gold, nullptr) << "MfmaF64_4x4x4 case " << case_id;
+        ASSERT_EQ(gold->a_count, static_cast<std::size_t>(F64S_B * F64S_M * F64S_K));
+        ASSERT_EQ(gold->b_count, static_cast<std::size_t>(F64S_B * F64S_K * F64S_N));
+        ASSERT_EQ(gold->c_count, static_cast<std::size_t>(F64S_B * F64S_M * F64S_N));
+        ASSERT_EQ(gold->d_count, static_cast<std::size_t>(F64S_B * F64S_M * F64S_N));
+        F64Data d;
+        d.A        = vector_from_bits<double>(gold->a, gold->a_count);
+        d.B        = vector_from_bits<double>(gold->b, gold->b_count);
+        d.C        = vector_from_bits<double>(gold->c, gold->c_count);
+        double *dA = to_dev(d.A), *dB = to_dev(d.B), *dC = to_dev(d.C), *dD;
+        HIP_CHECK(hipMalloc(&dD, gold->d_count * sizeof(double)));
+        k_f64_4x4x4<Semantics::Float, double><<<1, WAVE>>>(dA, dB, dC, dD);
+        HIP_CHECK(hipDeviceSynchronize());
+        std::vector<double> got(gold->d_count);
+        HIP_CHECK(hipMemcpy(got.data(), dD, got.size() * sizeof(double), hipMemcpyDeviceToHost));
+        for(std::size_t i = 0; i < got.size(); ++i)
+            EXPECT_EQ(bits_of(got[i]), gold->d[i]) << "case " << case_id << " elem " << i;
+        (void)hipFree(dA);
+        (void)hipFree(dB);
+        (void)hipFree(dC);
+        (void)hipFree(dD);
+    }
 }
 
 TEST(MfmaF64_4x4x4, FpsanMatchesScalarReference)

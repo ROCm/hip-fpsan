@@ -64,6 +64,17 @@ function(fpsan_add_compile_fail_test name src)
   set_tests_properties(${name} PROPERTIES WILL_FAIL TRUE)
 endfunction()
 
+# Tool target for refreshing checked-in silicon golden fixtures. Excluded from
+# normal builds and ctest; invoke explicitly on the target architecture.
+function(fpsan_add_hip_tool name src)
+  if(FPSAN_ENABLE_HIP)
+    add_executable(${name} EXCLUDE_FROM_ALL ${src})
+    set_source_files_properties(${src} PROPERTIES LANGUAGE HIP)
+    target_link_libraries(${name} PRIVATE fpsan::fpsan)
+    set_target_properties(${name} PROPERTIES EXCLUDE_FROM_DEFAULT_BUILD TRUE)
+  endif()
+endfunction()
+
 # ---- build canary: proves the toolchain + INTERFACE target + ctest work even
 # before gtest is present.  Always built. -----------------------------------
 fpsan_add_test(fpsan_build_canary build_canary.cpp)
@@ -122,6 +133,7 @@ if(TARGET GTest::gtest_main)
     if(_fpsan_has_cdna3)
       fpsan_add_test(fpsan_mfma_cdna3_test mfma_cdna3_test.cpp)
       fpsan_add_test(fpsan_smfmac_cdna3_test smfmac_cdna3_test.cpp)
+      fpsan_add_hip_tool(fpsan_generate_goldens generate_goldens.cpp)
     endif()
     # gfx950 (CDNA4) MFMA / smfmac / scaled-cvt tests.
     set(_fpsan_has_gfx950 FALSE)

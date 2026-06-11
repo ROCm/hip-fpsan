@@ -3,12 +3,15 @@
 //
 // tests/smfmac_cdna3_test.cpp
 //
-// GPU tests for the CDNA3 / gfx94x SMFMAC wrappers. Float mode is checked
-// against the real hardware result for a host sparse-matmul reference. FPSan
-// mode is checked against an independent scalar payload-ring reference.
+// GPU tests for the CDNA3 / gfx94x SMFMAC wrappers. Matrix tests are split into
+// three phases: Float mode against a host sparse-matmul reference to validate
+// the helper layout, Float mode against persisted raw-builtin hardware goldens,
+// and FPSan mode against an independent scalar payload-ring reference.
 #include "fpsan/amdgcn_smfmac.hpp"
 #include "fpsan/fpsan.hpp"
 
+#include "golden_cdna3_matrix.hpp"
+#include "golden_cdna3_matrix_registry.hpp"
 #include "hip_test_utils.hpp"
 #include "test_random.hpp"
 
@@ -18,6 +21,7 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <cstring>
 #include <random>
 #include <type_traits>
 #include <vector>
@@ -28,6 +32,23 @@ using fpsan::Value;
 
 static constexpr Conversions kCC  = Conversions::Explicit;
 static constexpr int         WAVE = 64;
+
+template <class T>
+T value_from_bits(std::uint64_t bits)
+{
+    T v{};
+    std::memcpy(&v, &bits, sizeof v);
+    return v;
+}
+
+template <class T>
+std::vector<T> vector_from_bits(const std::uint64_t* bits, std::size_t count)
+{
+    std::vector<T> out(count);
+    for(std::size_t i = 0; i < count; ++i)
+        out[i] = value_from_bits<T>(bits[i]);
+    return out;
+}
 
 namespace
 {
@@ -278,6 +299,54 @@ static void run_smf_layout(int m, int n, int k)
 }
 
 template <class E>
+static void run_smf_golden(const char* name, int m, int n, int k)
+{
+    if(!have_device())
+        GTEST_SKIP() << "no HIP device";
+
+    const int groups = k / 4;
+    const int ccols  = 2 * groups;
+    for(int case_id = 0; case_id < fpsan_test::golden_cdna3::kCaseCount; ++case_id)
+    {
+        const auto* gold = fpsan_test::golden_cdna3::find_case(name, case_id);
+        ASSERT_NE(gold, nullptr) << name << " case " << case_id;
+        ASSERT_EQ(gold->a_count, static_cast<std::size_t>(m * ccols));
+        ASSERT_EQ(gold->b_count, static_cast<std::size_t>(k * n));
+        ASSERT_EQ(gold->c_count, static_cast<std::size_t>(m * n));
+        ASSERT_EQ(gold->idx_count, static_cast<std::size_t>(WAVE));
+        ASSERT_EQ(gold->d_count, static_cast<std::size_t>(m * n));
+        SparseData data;
+        data.A      = vector_from_bits<float>(gold->a, gold->a_count);
+        data.B      = vector_from_bits<float>(gold->b, gold->b_count);
+        data.C      = vector_from_bits<float>(gold->c, gold->c_count);
+        data.idxbuf = vector_from_bits<int>(gold->idx, gold->idx_count);
+
+        float* dA = to_dev(data.A);
+        float* dB = to_dev(data.B);
+        float* dC = to_dev(data.C);
+        int*   dI = to_dev(data.idxbuf);
+        float* dD;
+        HIP_CHECK(hipMalloc(&dD, gold->d_count * sizeof(float)));
+        if(m == 16)
+            k_smf_16x16x32<E, Semantics::Float, float><<<1, WAVE>>>(dA, dB, dC, dI, dD);
+        else
+            k_smf_32x32x16<E, Semantics::Float, float><<<1, WAVE>>>(dA, dB, dC, dI, dD);
+        HIP_CHECK(hipDeviceSynchronize());
+
+        std::vector<float> got(gold->d_count);
+        HIP_CHECK(hipMemcpy(got.data(), dD, got.size() * sizeof(float), hipMemcpyDeviceToHost));
+        for(std::size_t i = 0; i < got.size(); ++i)
+            EXPECT_EQ(bits_of(got[i]), gold->d[i]) << name << " case " << case_id << " elem " << i;
+
+        (void)hipFree(dA);
+        (void)hipFree(dB);
+        (void)hipFree(dC);
+        (void)hipFree(dI);
+        (void)hipFree(dD);
+    }
+}
+
+template <class E>
 static void run_smf_fpsan(int m, int n, int k)
 {
     if(!have_device())
@@ -453,26 +522,21 @@ __global__ void
 }
 
 template <class AE, class BE>
-static void run_smf_fp8(int m, int k)
+static void run_smf_fp8_layout(int m, int k)
 {
     if(!have_device())
         GTEST_SKIP() << "no HIP device";
 
-    const int                  n      = m;
-    const int                  groups = k / 4;
-    const int                  ccols  = 2 * groups;
-    SparseData                 data   = make_sparse_fp8_data(m, k);
-    std::vector<float>         ref(m * n);
-    std::vector<std::uint32_t> refp(m * n);
-    using VF = Value<float, Semantics::FPSan, kCC>;
-    using VA = Value<AE, Semantics::FPSan, kCC>;
-    using VB = Value<BE, Semantics::FPSan, kCC>;
+    const int          n      = m;
+    const int          groups = k / 4;
+    const int          ccols  = 2 * groups;
+    SparseData         data   = make_sparse_fp8_data(m, k);
+    std::vector<float> ref(m * n);
 
     for(int i = 0; i < m; ++i)
         for(int j = 0; j < n; ++j)
         {
             double acc = data.C[i * n + j];
-            VF     accp(data.C[i * n + j]);
             for(int q = 0; q < groups; ++q)
             {
                 const int k0 = 4 * q + data.p0[i * groups + q];
@@ -485,10 +549,111 @@ static void run_smf_fp8(int m, int k)
                        * static_cast<double>(static_cast<float>(b0));
                 acc += static_cast<double>(static_cast<float>(a1))
                        * static_cast<double>(static_cast<float>(b1));
+            }
+            ref[i * n + j] = static_cast<float>(acc);
+        }
+
+    float* dA = to_dev(data.A);
+    float* dB = to_dev(data.B);
+    float* dC = to_dev(data.C);
+    int*   dI = to_dev(data.idxbuf);
+    float* dD;
+    HIP_CHECK(hipMalloc(&dD, ref.size() * sizeof(float)));
+
+    if(m == 16)
+        k_smf_fp8_16x16x64<AE, BE, Semantics::Float, float><<<1, WAVE>>>(dA, dB, dC, dI, dD);
+    else
+        k_smf_fp8_32x32x32<AE, BE, Semantics::Float, float><<<1, WAVE>>>(dA, dB, dC, dI, dD);
+    HIP_CHECK(hipDeviceSynchronize());
+
+    std::vector<float> got(ref.size());
+    HIP_CHECK(hipMemcpy(got.data(), dD, got.size() * sizeof(float), hipMemcpyDeviceToHost));
+    for(std::size_t i = 0; i < got.size(); ++i)
+        EXPECT_EQ(bits_of(got[i]), bits_of(ref[i])) << "elem " << i;
+
+    (void)hipFree(dA);
+    (void)hipFree(dB);
+    (void)hipFree(dC);
+    (void)hipFree(dI);
+    (void)hipFree(dD);
+}
+
+template <class AE, class BE>
+static void run_smf_fp8_golden(const char* name, int m, int k)
+{
+    if(!have_device())
+        GTEST_SKIP() << "no HIP device";
+
+    const int n      = m;
+    const int groups = k / 4;
+    const int ccols  = 2 * groups;
+    for(int case_id = 0; case_id < fpsan_test::golden_cdna3::kCaseCount; ++case_id)
+    {
+        const auto* gold = fpsan_test::golden_cdna3::find_case(name, case_id);
+        ASSERT_NE(gold, nullptr) << name << " case " << case_id;
+        ASSERT_EQ(gold->a_count, static_cast<std::size_t>(m * ccols));
+        ASSERT_EQ(gold->b_count, static_cast<std::size_t>(k * n));
+        ASSERT_EQ(gold->c_count, static_cast<std::size_t>(m * n));
+        ASSERT_EQ(gold->idx_count, static_cast<std::size_t>(WAVE));
+        ASSERT_EQ(gold->d_count, static_cast<std::size_t>(m * n));
+        SparseData gdata;
+        gdata.A      = vector_from_bits<float>(gold->a, gold->a_count);
+        gdata.B      = vector_from_bits<float>(gold->b, gold->b_count);
+        gdata.C      = vector_from_bits<float>(gold->c, gold->c_count);
+        gdata.idxbuf = vector_from_bits<int>(gold->idx, gold->idx_count);
+        float* dA    = to_dev(gdata.A);
+        float* dB    = to_dev(gdata.B);
+        float* dC    = to_dev(gdata.C);
+        int*   dI    = to_dev(gdata.idxbuf);
+        float* dD;
+        HIP_CHECK(hipMalloc(&dD, gold->d_count * sizeof(float)));
+        if(m == 16)
+            k_smf_fp8_16x16x64<AE, BE, Semantics::Float, float><<<1, WAVE>>>(dA, dB, dC, dI, dD);
+        else
+            k_smf_fp8_32x32x32<AE, BE, Semantics::Float, float><<<1, WAVE>>>(dA, dB, dC, dI, dD);
+        HIP_CHECK(hipDeviceSynchronize());
+        std::vector<float> got(gold->d_count);
+        HIP_CHECK(hipMemcpy(got.data(), dD, got.size() * sizeof(float), hipMemcpyDeviceToHost));
+        for(std::size_t i = 0; i < got.size(); ++i)
+            EXPECT_EQ(bits_of(got[i]), gold->d[i]) << name << " case " << case_id << " elem " << i;
+        (void)hipFree(dA);
+        (void)hipFree(dB);
+        (void)hipFree(dC);
+        (void)hipFree(dI);
+        (void)hipFree(dD);
+    }
+}
+
+template <class AE, class BE>
+static void run_smf_fp8_fpsan(int m, int k)
+{
+    if(!have_device())
+        GTEST_SKIP() << "no HIP device";
+
+    SparseData                 data   = make_sparse_fp8_data(m, k);
+    const int                  n      = m;
+    const int                  groups = k / 4;
+    const int                  ccols  = 2 * groups;
+    std::vector<std::uint32_t> refp(m * n);
+    using VF = Value<float, Semantics::FPSan, kCC>;
+    using VA = Value<AE, Semantics::FPSan, kCC>;
+    using VB = Value<BE, Semantics::FPSan, kCC>;
+
+    for(int i = 0; i < m; ++i)
+        for(int j = 0; j < n; ++j)
+        {
+            VF accp(data.C[i * n + j]);
+            for(int q = 0; q < groups; ++q)
+            {
+                const int k0 = 4 * q + data.p0[i * groups + q];
+                const int k1 = 4 * q + data.p1[i * groups + q];
+                const AE  a0(data.A[i * ccols + 2 * q]);
+                const AE  a1(data.A[i * ccols + 2 * q + 1]);
+                const BE  b0(data.B[k0 * n + j]);
+                const BE  b1(data.B[k1 * n + j]);
                 accp = accp + fpsan::cast<float>(VA(a0)) * fpsan::cast<float>(VB(b0));
                 accp = accp + fpsan::cast<float>(VA(a1)) * fpsan::cast<float>(VB(b1));
             }
-            ref[i * n + j]  = static_cast<float>(acc);
             refp[i * n + j] = accp.fpsan_payload();
         }
 
@@ -496,122 +661,73 @@ static void run_smf_fp8(int m, int k)
     float*         dB = to_dev(data.B);
     float*         dC = to_dev(data.C);
     int*           dI = to_dev(data.idxbuf);
-    float*         dDf;
-    std::uint32_t* dDp;
-    HIP_CHECK(hipMalloc(&dDf, ref.size() * sizeof(float)));
-    HIP_CHECK(hipMalloc(&dDp, refp.size() * sizeof(std::uint32_t)));
+    std::uint32_t* dD;
+    HIP_CHECK(hipMalloc(&dD, refp.size() * sizeof(std::uint32_t)));
 
     if(m == 16)
-    {
-        k_smf_fp8_16x16x64<AE, BE, Semantics::Float, float><<<1, WAVE>>>(dA, dB, dC, dI, dDf);
-        HIP_CHECK(hipDeviceSynchronize());
         k_smf_fp8_16x16x64<AE, BE, Semantics::FPSan, std::uint32_t>
-            <<<1, WAVE>>>(dA, dB, dC, dI, dDp);
-    }
+            <<<1, WAVE>>>(dA, dB, dC, dI, dD);
     else
-    {
-        k_smf_fp8_32x32x32<AE, BE, Semantics::Float, float><<<1, WAVE>>>(dA, dB, dC, dI, dDf);
-        HIP_CHECK(hipDeviceSynchronize());
         k_smf_fp8_32x32x32<AE, BE, Semantics::FPSan, std::uint32_t>
-            <<<1, WAVE>>>(dA, dB, dC, dI, dDp);
-    }
+            <<<1, WAVE>>>(dA, dB, dC, dI, dD);
     HIP_CHECK(hipDeviceSynchronize());
 
-    std::vector<float>         got(ref.size());
     std::vector<std::uint32_t> gotp(refp.size());
-    HIP_CHECK(hipMemcpy(got.data(), dDf, got.size() * sizeof(float), hipMemcpyDeviceToHost));
     HIP_CHECK(
-        hipMemcpy(gotp.data(), dDp, gotp.size() * sizeof(std::uint32_t), hipMemcpyDeviceToHost));
-    for(std::size_t i = 0; i < got.size(); ++i)
-    {
-        EXPECT_EQ(bits_of(got[i]), bits_of(ref[i])) << "float elem " << i;
+        hipMemcpy(gotp.data(), dD, gotp.size() * sizeof(std::uint32_t), hipMemcpyDeviceToHost));
+    for(std::size_t i = 0; i < gotp.size(); ++i)
         EXPECT_EQ(gotp[i], refp[i]) << "fpsan elem " << i;
-    }
 
     (void)hipFree(dA);
     (void)hipFree(dB);
     (void)hipFree(dC);
     (void)hipFree(dI);
-    (void)hipFree(dDf);
-    (void)hipFree(dDp);
+    (void)hipFree(dD);
 }
 
-TEST(SmfmacF16_16x16x32, LayoutMatchesHardware)
-{
-    run_smf_layout<_Float16>(16, 16, 32);
-}
+#define SMF_TESTS(Name, E, M_, N_, K_)        \
+    TEST(Name, LayoutMatchesHardware)         \
+    {                                         \
+        run_smf_layout<E>(M_, N_, K_);        \
+    }                                         \
+    TEST(Name, CompareGoldenValues)           \
+    {                                         \
+        run_smf_golden<E>(#Name, M_, N_, K_); \
+    }                                         \
+    TEST(Name, FpsanMatchesScalarReference)   \
+    {                                         \
+        run_smf_fpsan<E>(M_, N_, K_);         \
+    }
 
-TEST(SmfmacF16_16x16x32, FpsanMatchesScalarReference)
-{
-    run_smf_fpsan<_Float16>(16, 16, 32);
-}
+SMF_TESTS(SmfmacF16_16x16x32, _Float16, 16, 16, 32)
+SMF_TESTS(SmfmacBf16_16x16x32, __bf16, 16, 16, 32)
+SMF_TESTS(SmfmacF16_32x32x16, _Float16, 32, 32, 16)
+SMF_TESTS(SmfmacBf16_32x32x16, __bf16, 32, 32, 16)
 
-TEST(SmfmacBf16_16x16x32, LayoutMatchesHardware)
-{
-    run_smf_layout<__bf16>(16, 16, 32);
-}
+#undef SMF_TESTS
 
-TEST(SmfmacBf16_16x16x32, FpsanMatchesScalarReference)
-{
-    run_smf_fpsan<__bf16>(16, 16, 32);
-}
+#define SMF_FP8_TESTS(Name, AE, BE, M_, K_)        \
+    TEST(Name, LayoutMatchesHardware)              \
+    {                                              \
+        run_smf_fp8_layout<AE, BE>(M_, K_);        \
+    }                                              \
+    TEST(Name, CompareGoldenValues)                \
+    {                                              \
+        run_smf_fp8_golden<AE, BE>(#Name, M_, K_); \
+    }                                              \
+    TEST(Name, FpsanMatchesScalarReference)        \
+    {                                              \
+        run_smf_fp8_fpsan<AE, BE>(M_, K_);         \
+    }
 
-TEST(SmfmacF16_32x32x16, LayoutMatchesHardware)
-{
-    run_smf_layout<_Float16>(32, 32, 16);
-}
+SMF_FP8_TESTS(SmfmacFp8_16x16x64_FP8_FP8, fpsan::amd_fp8_e4m3, fpsan::amd_fp8_e4m3, 16, 64)
+SMF_FP8_TESTS(SmfmacFp8_16x16x64_FP8_BF8, fpsan::amd_fp8_e4m3, fpsan::amd_fp8_e5m2, 16, 64)
+SMF_FP8_TESTS(SmfmacFp8_16x16x64_BF8_FP8, fpsan::amd_fp8_e5m2, fpsan::amd_fp8_e4m3, 16, 64)
+SMF_FP8_TESTS(SmfmacFp8_16x16x64_BF8_BF8, fpsan::amd_fp8_e5m2, fpsan::amd_fp8_e5m2, 16, 64)
 
-TEST(SmfmacF16_32x32x16, FpsanMatchesScalarReference)
-{
-    run_smf_fpsan<_Float16>(32, 32, 16);
-}
+SMF_FP8_TESTS(SmfmacFp8_32x32x32_FP8_FP8, fpsan::amd_fp8_e4m3, fpsan::amd_fp8_e4m3, 32, 32)
+SMF_FP8_TESTS(SmfmacFp8_32x32x32_FP8_BF8, fpsan::amd_fp8_e4m3, fpsan::amd_fp8_e5m2, 32, 32)
+SMF_FP8_TESTS(SmfmacFp8_32x32x32_BF8_FP8, fpsan::amd_fp8_e5m2, fpsan::amd_fp8_e4m3, 32, 32)
+SMF_FP8_TESTS(SmfmacFp8_32x32x32_BF8_BF8, fpsan::amd_fp8_e5m2, fpsan::amd_fp8_e5m2, 32, 32)
 
-TEST(SmfmacBf16_32x32x16, LayoutMatchesHardware)
-{
-    run_smf_layout<__bf16>(32, 32, 16);
-}
-
-TEST(SmfmacBf16_32x32x16, FpsanMatchesScalarReference)
-{
-    run_smf_fpsan<__bf16>(32, 32, 16);
-}
-
-TEST(SmfmacFp8_16x16x64, FP8_FP8)
-{
-    run_smf_fp8<fpsan::amd_fp8_e4m3, fpsan::amd_fp8_e4m3>(16, 64);
-}
-
-TEST(SmfmacFp8_16x16x64, FP8_BF8)
-{
-    run_smf_fp8<fpsan::amd_fp8_e4m3, fpsan::amd_fp8_e5m2>(16, 64);
-}
-
-TEST(SmfmacFp8_16x16x64, BF8_FP8)
-{
-    run_smf_fp8<fpsan::amd_fp8_e5m2, fpsan::amd_fp8_e4m3>(16, 64);
-}
-
-TEST(SmfmacFp8_16x16x64, BF8_BF8)
-{
-    run_smf_fp8<fpsan::amd_fp8_e5m2, fpsan::amd_fp8_e5m2>(16, 64);
-}
-
-TEST(SmfmacFp8_32x32x32, FP8_FP8)
-{
-    run_smf_fp8<fpsan::amd_fp8_e4m3, fpsan::amd_fp8_e4m3>(32, 32);
-}
-
-TEST(SmfmacFp8_32x32x32, FP8_BF8)
-{
-    run_smf_fp8<fpsan::amd_fp8_e4m3, fpsan::amd_fp8_e5m2>(32, 32);
-}
-
-TEST(SmfmacFp8_32x32x32, BF8_FP8)
-{
-    run_smf_fp8<fpsan::amd_fp8_e5m2, fpsan::amd_fp8_e4m3>(32, 32);
-}
-
-TEST(SmfmacFp8_32x32x32, BF8_BF8)
-{
-    run_smf_fp8<fpsan::amd_fp8_e5m2, fpsan::amd_fp8_e5m2>(32, 32);
-}
+#undef SMF_FP8_TESTS

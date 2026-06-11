@@ -204,6 +204,33 @@ The HIP preset auto-detects the ROCm toolchain; override with
 `-DCMAKE_HIP_COMPILER=...`, `-DCMAKE_HIP_COMPILER_ROCM_ROOT=...`,
 `-DCMAKE_HIP_ARCHITECTURES=...` if your install differs.
 
+### Generating matrix golden values
+
+CDNA3 matrix tests include a generated hardware oracle in
+`tests/golden_cdna3_matrix.hpp`. The generator is an explicit HIP tool target,
+not part of the default build or ctest run, and must be run on trusted gfx94x
+silicon to produce golden values using clang intrinsics.
+
+```bash
+cmake -S . -B build_cdna3 -DFPSAN_ENABLE_HIP=ON -DCMAKE_HIP_ARCHITECTURES=gfx942
+cmake --build build_cdna3 --target fpsan_generate_goldens
+./build_cdna3/tests/fpsan_generate_goldens > tests/golden_cdna3_matrix.hpp
+```
+
+The generated header records the input matrices, sparse index buffers, and raw
+hardware outputs as `uint64_t` bit patterns. The tests reload those fixtures and
+compare the FPSan Float-mode wrappers against the raw-builtin hardware result.
+This checks wrapper forwarding and ABI compatibility; layout-helper validation
+remains a separate scalar-reference test phase.
+
+To add golden input coverage, edit the `FPSAN_GOLDEN_INPUT_CASES(X)` table in
+`tests/generate_goldens.cpp`. Each row supplies a case name, sparse row/group
+periods, explicit `A`, `B`, and `C` value streams, and explicit sparse 2:4 pair
+choices. The streams are consumed cyclically to fill each logical matrix, so
+small patterns and full matrix-sized fixtures are both supported. Adding rows to
+that table is enough to update the generated `kCaseCount` and all intrinsic
+families covered by the generator.
+
 ### GoogleTest
 
 The unit tests use GoogleTest. CMake first tries `find_package(GTest)`; if no
