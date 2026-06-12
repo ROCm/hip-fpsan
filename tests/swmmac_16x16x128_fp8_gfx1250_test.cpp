@@ -47,9 +47,8 @@ static constexpr int         M = 16, N = 16, KD = 128, KC = 64;
 static constexpr Conversions kCC = Conversions::Explicit;
 
 // Inverse compressed-A layout (Wmma16x16x64Layout): lane + v32 slot -> compressed K.
-// Inverse of Swmmac16x16x128CompressedALayout (empirically pinned, see
-// tests/swmmac_probe.cpp): given lane and fragment slot idx (0..31), recover the
-// compressed slot cc (0..63).
+// Inverse of Swmmac16x16x128CompressedALayout (empirically pinned): given lane
+// and fragment slot idx (0..31), recover the compressed slot cc (0..63).
 //   cc bit0 = idx&1 ; cc bit1 = lane half ; cc bits2.. = idx>>1.
 __device__ inline int frag_cc_inv64(int lane, int idx)
 {
@@ -215,8 +214,8 @@ namespace
                     const int cc       = 2 * g + s;
                     const int selv     = pr[s];
                     m.sel[i * KC + cc] = static_cast<std::uint8_t>(selv);
-                    // selector location pinned empirically vs hardware
-                    // (tests/swmmac_probe.cpp): see amdgcn_swmmac_gfx1250.hpp.
+                    // selector location pinned empirically vs hardware; see
+                    // amdgcn_swmmac_gfx1250.hpp.
                     const int L   = i + 16 * (cc / 32);
                     const int dw  = (cc / 2) & 1;
                     const int bit = 4 * ((cc / 4) % 8) + 2 * (cc & 1);

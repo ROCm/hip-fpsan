@@ -1094,9 +1094,9 @@ LEGF32_TRAITS(LegacyMfmaF32_4x4x1, 4, 4, 1, 16, v4f_native, amdgcn_mfma_f32_4x4x
 // Legacy gfx9 f16 / bf16_1k MFMA shapes. A,B per-lane fragment is 4 elements
 // of f16 (or bf16). Layouts use input_loc (bits=16, element = 2*reg+sub) /
 // output_loc_32 with `B` independent MxN blocks (silicon-verified, full-block
-// random match -- see /tmp/verify_legacy_f16.hip). Both the Float builtin and
-// the FPSan dataflow are pinned here. The non-1k bf16 shapes are gfx908-only
-// (cannot select on gfx950) and are intentionally omitted.
+// random match). Both the Float builtin and the FPSan dataflow are pinned here.
+// The non-1k bf16 shapes are gfx908-only (cannot select on gfx950) and are
+// intentionally omitted.
 // ---------------------------------------------------------------------------
 template <class Traits>
 __global__ void k_legf16(const float* A, const float* B, const float* C, float* D)
@@ -1720,8 +1720,8 @@ TEST(ScaledMfma32x32x64_Mixed, FpsanMatchesScalarReference)
 // Sub-byte (fp6 / bf6 / fp4) scaled f8f6f4 MFMA. CBSZ/BLGP select the format:
 // 2=E2M3 (fp6), 3=E3M2 (bf6), 4=E2M1 (fp4). Per-lane operands are the raw
 // packed v8i32 (Width-bit field s at bits Width*s..). A and B must share a bit
-// width. Layout reverse-engineered + silicon-verified on MI350; see
-// /tmp/verify_scale_*.hip and amdgcn_mfma.hpp.
+// width. Layout reverse-engineered + silicon-verified on MI350 and pinned by
+// amdgcn_mfma.hpp.
 //
 //   * LayoutMatchesHardware (Float): pack the exact fp6/fp4 hardware codes,
 //     run the builtin via the wrapper, compare to a numeric reference. Inputs
@@ -2166,9 +2166,8 @@ TEST(ScaledMfma32x32x64_FP4, FpsanMatchesScalarReference)
 // ---------------------------------------------------------------------------
 // sub x sub DIFFERENT-width (fp6 x fp4) -- now supported (all sub formats share
 // one physical k order, so equal field indices pair the same k). Reuses the
-// sub harnesses, which already track wa/wb separately. Silicon-verified
-// (/tmp/verify_scale_mix_128.hip non-failing for sub x sub +
-// verify_scale_subdiff_3264.hip).
+// sub harnesses, which already track wa/wb separately. Silicon-verified for
+// mixed-width sub x sub cases at both 16x16x128 and 32x32x64 shapes.
 // ---------------------------------------------------------------------------
 TEST(ScaledMfma16x16x128_FP6FP4, LayoutMatchesHardware)
 {
@@ -2206,8 +2205,8 @@ TEST(ScaledMfma32x32x64_FP4FP6, FpsanMatchesScalarReference)
 // ===========================================================================
 // Per-K-block (NON-UNIFORM) scale. Each 32-element K-block carries its own
 // E8M0 scale, read from lane (stride*kb + row) of the per-lane scale operand
-// (stride = 16 at 16x16x128, 32 at 32x32x64). Silicon-RE'd + verified
-// full-block-random (/tmp/verify_scale_lane*.hip + verify_scale_full_*.hip).
+// (stride = 16 at 16x16x128, 32 at 32x32x64). Silicon-RE'd + verified with
+// full-block-random coverage.
 // These tests give DIFFERENT scales to each K-block (the uniform tests above
 // are the special case where every lane carries the same scale operand).
 // ===========================================================================
@@ -2620,8 +2619,8 @@ TEST(ScaledMfma16x16x128_PerBlockScale, FP4Sub)
 // Mixed-WIDTH 8-bit x sub-byte (fp8 x fp4 / fp6, and the mirror). The sub
 // operand follows the silicon-RE'd "mix model" that pairs it with fp8
 // (different physical k order than fp8). Uniform scale here isolates the mixed
-// LAYOUT (per-block scale is covered above). Proven full-block-random in
-// /tmp/verify_scale_mix2*.hip.
+// LAYOUT (per-block scale is covered above). Proven with full-block-random
+// coverage.
 // ===========================================================================
 namespace
 {

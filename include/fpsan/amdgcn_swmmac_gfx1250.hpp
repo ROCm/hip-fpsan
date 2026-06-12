@@ -53,9 +53,9 @@ namespace fpsan
         // The compressed A operand carries 64 K-elements per row in a v32 fp8/bf8
         // fragment (8 dwords / lane). It is NOT the dense 16x16x64 A layout. The
         // mapping below was determined empirically against the hardware builtin
-        // (tests/swmmac_probe.cpp: identity selectors + delta-B readback) and is
-        // pinned by the self-validating layout test. For compressed slot cc in 0..63
-        // of output row `row`:
+        // using identity selectors + delta-B readback and is pinned by the
+        // self-validating layout test. For compressed slot cc in 0..63 of output
+        // row `row`:
         //   lane = row + 16*((cc>>1)&1)     // bit1 of cc -> lane half
         //   idx  = 2*(cc>>2) + (cc&1)       // (0..31) fragment slot
         // i.e. each consecutive pair of cc shares a fragment idx pair, and bit1 of cc
@@ -109,7 +109,7 @@ namespace fpsan
                 {
                     // Sparse selector for compressed slot cc of output row i. The
                     // 2-bit selector location was pinned empirically against the
-                    // hardware builtin (tests/swmmac_probe.cpp):
+                    // hardware builtin:
                     //   lane = i + 16*(cc/32) ; dword = (cc/2)&1 ;
                     //   bit  = 4*((cc/4)%8) + 2*(cc&1)
                     // and the live dense K is base + selector with base = 4*(cc/2).
@@ -139,7 +139,7 @@ namespace fpsan
         // compressed slot cc in 0..31 of output row `row`:
         //   lane = row + 16*((cc>>1)&1)   // bit1 of cc -> lane half
         //   idx  = 2*(cc>>2) + (cc&1)     // (0..15) fragment slot
-        // Pinned/validated by the self-checking layout test (+ probe if needed).
+        // Pinned/validated by the self-checking layout test.
         struct Swmmac16x16x64CompressedALayout
         {
             FPSAN_DEVICE static int ab_lane(int row, int cc)
@@ -160,7 +160,7 @@ namespace fpsan
         // i32, bit = 16*((cc>>1)&1) + 4*((cc>>2)&3) + 2*(cc&1), with live dense
         // k = 4*(cc/2) + selector. The compressed-A layout, B-layout reuse, and this
         // selector location were all pinned empirically against the hardware builtin
-        // (tests/swmmac16_probe.cpp) and are arbitrated by the self-validating test.
+        // and are arbitrated by the self-validating test.
         template <class AVec, class BVec, class CVec, Semantics S, Conversions C>
         FPSAN_DEVICE Value<CVec, S, C> swmmac_software_16x16x64_16(Value<AVec, S, C> a,
                                                                    Value<BVec, S, C> b,
