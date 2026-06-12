@@ -29,6 +29,19 @@
 #error "fpsan/amdgcn_math.hpp is GPU-only; compile as HIP (or CUDA)."
 #endif
 
+#if defined(__GFX11__) || defined(__gfx1100__) || defined(__gfx1101__) || defined(__gfx1102__) \
+    || defined(__gfx1103__) || defined(__gfx1150__) || defined(__gfx1151__)
+#define FPSAN_AMDGCN_MATH_DEVICE_IS_GFX11 1
+#else
+#define FPSAN_AMDGCN_MATH_DEVICE_IS_GFX11 0
+#endif
+
+#if defined(__gfx940__) || defined(__gfx941__) || defined(__gfx942__)
+#define FPSAN_AMDGCN_MATH_DEVICE_IS_GFX94X 1
+#else
+#define FPSAN_AMDGCN_MATH_DEVICE_IS_GFX94X 0
+#endif
+
 namespace fpsan
 {
 
@@ -84,7 +97,13 @@ namespace fpsan
 
     // ---- log / log_clamp / exp2 ----
     FPSAN_DEFINE_AMDGCN_UNARY(amdgcn_logf, float, log, __builtin_amdgcn_logf)
+// `__has_builtin` reports log_clampf on gfx1100 and gfx942, but direct lowering
+// probes reject it as unsupported on those subtargets.
+#if !defined(__HIP_DEVICE_COMPILE__) \
+    || (!FPSAN_AMDGCN_MATH_DEVICE_IS_GFX11 && !FPSAN_AMDGCN_MATH_DEVICE_IS_GFX94X \
+        && __has_builtin(__builtin_amdgcn_log_clampf))
     FPSAN_DEFINE_AMDGCN_UNARY(amdgcn_log_clampf, float, log, __builtin_amdgcn_log_clampf)
+#endif
     FPSAN_DEFINE_AMDGCN_UNARY(amdgcn_exp2f, float, exp2, __builtin_amdgcn_exp2f)
 
     // ---- fract ----
@@ -93,8 +112,16 @@ namespace fpsan
     FPSAN_DEFINE_AMDGCN_UNARY(amdgcn_fracth, _Float16, fract, __builtin_amdgcn_fracth)
 
     // ---- tanh (real hyperbolic) ----
+// tanh needs the target's `tanh-insts` feature. RDNA3/gfx11 lacks that feature
+// in the audited LLVM/HIP surface, so hide the wrappers there.
+#if !defined(__HIP_DEVICE_COMPILE__) \
+    || (!FPSAN_AMDGCN_MATH_DEVICE_IS_GFX11 && __has_builtin(__builtin_amdgcn_tanhf))
     FPSAN_DEFINE_AMDGCN_UNARY(amdgcn_tanhf, float, tanh, __builtin_amdgcn_tanhf)
+#endif
+#if !defined(__HIP_DEVICE_COMPILE__) \
+    || (!FPSAN_AMDGCN_MATH_DEVICE_IS_GFX11 && __has_builtin(__builtin_amdgcn_tanhh))
     FPSAN_DEFINE_AMDGCN_UNARY(amdgcn_tanhh, _Float16, tanh, __builtin_amdgcn_tanhh)
+#endif
 
     // ---- bf16 transcendentals (gfx1250 "bf16-trans-insts") ----
     // gfx1250 adds native bf16 rcp / rsq / sqrt / sin / cos / exp2 / log / tanh
@@ -173,6 +200,33 @@ namespace fpsan
         {
             return Value<_Float16, S, C>(
                 __builtin_amdgcn_fdot2_f16_f16(a.to_float(), b.to_float(), c.to_float()));
+        }
+        else
+        {
+            auto acc = c;
+            acc      = acc + a.get(0) * b.get(0);
+            acc      = acc + a.get(1) * b.get(1);
+            return acc;
+        }
+    }
+#endif
+
+// fdot2_bf16_bf16: a, b are v2bf; acc is __bf16.  Clang exposes the
+// BF16-valued builtin through short/v2short ABI types, so Float mode bit-casts
+// at the boundary and the public wrapper stays typed as __bf16.
+#if !defined(__HIP_DEVICE_COMPILE__) || __has_builtin(__builtin_amdgcn_fdot2_bf16_bf16)
+    template <Semantics S = Semantics::Float, Conversions C = Conversions::Explicit>
+    FPSAN_DEVICE Value<__bf16, S, C> amdgcn_fdot2_bf16_bf16(Value<v2bf_native, S, C> a,
+                                                            Value<v2bf_native, S, C> b,
+                                                            Value<__bf16, S, C>      c)
+    {
+        if constexpr(S == Semantics::Float)
+        {
+            const v2i16_native ai = __builtin_bit_cast(v2i16_native, a.to_float());
+            const v2i16_native bi = __builtin_bit_cast(v2i16_native, b.to_float());
+            const short        ci = __builtin_bit_cast(short, c.to_float());
+            const short        di = __builtin_amdgcn_fdot2_bf16_bf16(ai, bi, ci);
+            return Value<__bf16, S, C>(__builtin_bit_cast(__bf16, di));
         }
         else
         {
@@ -338,5 +392,8 @@ namespace fpsan
     // or branches on exponent/class has no faithful payload-ring image.
 
 } // namespace fpsan
+
+#undef FPSAN_AMDGCN_MATH_DEVICE_IS_GFX94X
+#undef FPSAN_AMDGCN_MATH_DEVICE_IS_GFX11
 
 #endif // FPSAN_AMDGCN_MATH_HPP

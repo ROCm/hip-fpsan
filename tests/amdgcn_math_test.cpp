@@ -43,6 +43,10 @@ static constexpr int         kScalarN = 32;
 #define FPSAN_TEST_ENABLE_FDOT2 0
 #endif
 
+#ifndef FPSAN_TEST_ENABLE_FDOT2_EXTENDED
+#define FPSAN_TEST_ENABLE_FDOT2_EXTENDED 0
+#endif
+
 #ifndef FPSAN_TEST_ENABLE_GFX12_DOT_MATH
 #define FPSAN_TEST_ENABLE_GFX12_DOT_MATH 0
 #endif
@@ -99,8 +103,15 @@ namespace
     [[maybe_unused]] bool current_arch_supports_fdot2()
     {
         const auto arch = current_arch();
-        return starts_with(arch, "gfx12") || starts_with(arch, "gfx940")
-               || starts_with(arch, "gfx941") || starts_with(arch, "gfx942");
+        return starts_with(arch, "gfx11") || starts_with(arch, "gfx12")
+               || starts_with(arch, "gfx940") || starts_with(arch, "gfx941")
+               || starts_with(arch, "gfx942");
+    }
+
+    [[maybe_unused]] bool current_arch_supports_fdot2_extended()
+    {
+        const auto arch = current_arch();
+        return starts_with(arch, "gfx11") || starts_with(arch, "gfx12");
     }
 
     template <class T>
@@ -358,8 +369,11 @@ __global__ void k_fdot2_pair(const v2h*     a,
 #endif
 
 // ---- fdot2_f16_f16: v2h x v2h -> f16 ---------------------------------------
-#if FPSAN_TEST_ENABLE_GFX12_DOT_MATH \
-    && (!defined(__HIP_DEVICE_COMPILE__) || FPSAN_TEST_DEVICE_IS_GFX12)
+#if FPSAN_TEST_ENABLE_FDOT2_EXTENDED                                                \
+    && (!defined(__HIP_DEVICE_COMPILE__)                                             \
+        || (__has_builtin(__builtin_amdgcn_fdot2_f16_f16)                           \
+            && __has_builtin(__builtin_amdgcn_fdot2_bf16_bf16)                      \
+            && __has_builtin(__builtin_amdgcn_fdot2_f32_bf16)))
 __global__ void k_fdot2_f16_f16_pair(const v2h*      a,
                                      const v2h*      b,
                                      const _Float16* c,
@@ -382,6 +396,35 @@ __global__ void k_fdot2_f16_f16_pair(const v2h*      a,
     pay_direct[i]  = static_cast<std::uint16_t>(expanded.fpsan_payload());
     pay_wrapper[i] = static_cast<std::uint16_t>(
         fpsan::amdgcn_fdot2_f16_f16<Semantics::FPSan, kCC>(vap, vbp, vcp).fpsan_payload());
+}
+
+// ---- fdot2_bf16_bf16: v2bf x v2bf -> bf16 ----------------------------------
+__global__ void k_fdot2_bf16_bf16_pair(const v2bf*     a,
+                                       const v2bf*     b,
+                                       const __bf16*   c,
+                                       __bf16*         direct,
+                                       __bf16*         wrapper,
+                                       std::uint16_t*  pay_direct,
+                                       std::uint16_t*  pay_wrapper)
+{
+    int    i  = threadIdx.x;
+    v2bf   ai = a[i], bi = b[i];
+    __bf16 ci = c[i];
+    v2i16  a_i = __builtin_bit_cast(v2i16, ai);
+    v2i16  b_i = __builtin_bit_cast(v2i16, bi);
+    short  c_i = __builtin_bit_cast(short, ci);
+    short  d_i = __builtin_amdgcn_fdot2_bf16_bf16(a_i, b_i, c_i);
+    direct[i]  = __builtin_bit_cast(__bf16, d_i);
+    Value<v2bf, Semantics::Float, kCC>   va{ai}, vb{bi};
+    Value<__bf16, Semantics::Float, kCC> vc{ci};
+    wrapper[i]
+        = static_cast<__bf16>(fpsan::amdgcn_fdot2_bf16_bf16<Semantics::Float, kCC>(va, vb, vc));
+    Value<v2bf, Semantics::FPSan, kCC>   vap{ai}, vbp{bi};
+    Value<__bf16, Semantics::FPSan, kCC> vcp{ci};
+    auto expanded  = vcp + vap.get(0) * vbp.get(0) + vap.get(1) * vbp.get(1);
+    pay_direct[i]  = static_cast<std::uint16_t>(expanded.fpsan_payload());
+    pay_wrapper[i] = static_cast<std::uint16_t>(
+        fpsan::amdgcn_fdot2_bf16_bf16<Semantics::FPSan, kCC>(vap, vbp, vcp).fpsan_payload());
 }
 
 // ---- fdot2_f32_bf16: v2bf x v2bf -> f32 ------------------------------------
@@ -505,14 +548,17 @@ TEST(AmdgcnMath, fdot2_FloatAndFpsan)
 }
 #endif
 
-#if FPSAN_TEST_ENABLE_GFX12_DOT_MATH \
-    && (!defined(__HIP_DEVICE_COMPILE__) || FPSAN_TEST_DEVICE_IS_GFX12)
+#if FPSAN_TEST_ENABLE_FDOT2_EXTENDED                                                \
+    && (!defined(__HIP_DEVICE_COMPILE__)                                             \
+        || (__has_builtin(__builtin_amdgcn_fdot2_f16_f16)                           \
+            && __has_builtin(__builtin_amdgcn_fdot2_bf16_bf16)                      \
+            && __has_builtin(__builtin_amdgcn_fdot2_f32_bf16)))
 TEST(AmdgcnMath, fdot2_f16_f16_FloatAndFpsan)
 {
     if(!have_device())
         GTEST_SKIP() << "no HIP device";
-    if(!current_arch_is_gfx12())
-        GTEST_SKIP() << "current device is not gfx12";
+    if(!current_arch_supports_fdot2_extended())
+        GTEST_SKIP() << "current device does not support extended fdot2";
     auto           a = make_v2h(), b = make_v2h();
     auto           c  = make_acc_f16();
     v2h *          dA = to_dev(a), *dB = to_dev(b);
@@ -550,12 +596,58 @@ TEST(AmdgcnMath, fdot2_f16_f16_FloatAndFpsan)
     (void)hipFree(dPwrap);
 }
 
+TEST(AmdgcnMath, fdot2_bf16_bf16_FloatAndFpsan)
+{
+    if(!have_device())
+        GTEST_SKIP() << "no HIP device";
+    if(!current_arch_supports_fdot2_extended())
+        GTEST_SKIP() << "current device does not support extended fdot2";
+    auto           a = make_v2bf(), b = make_v2bf();
+    auto           cf = make_acc_f32();
+    std::vector<__bf16> c(kFDot2N);
+    for(int i = 0; i < kFDot2N; ++i)
+        c[i] = static_cast<__bf16>(cf[i]);
+    v2bf *         dA = to_dev(a), *dB = to_dev(b);
+    __bf16*        dC = to_dev(c);
+    __bf16 *       dDir, *dWrap;
+    std::uint16_t *dPdir, *dPwrap;
+    HIP_CHECK(hipMalloc(&dDir, kFDot2N * sizeof(__bf16)));
+    HIP_CHECK(hipMalloc(&dWrap, kFDot2N * sizeof(__bf16)));
+    HIP_CHECK(hipMalloc(&dPdir, kFDot2N * sizeof(std::uint16_t)));
+    HIP_CHECK(hipMalloc(&dPwrap, kFDot2N * sizeof(std::uint16_t)));
+    k_fdot2_bf16_bf16_pair<<<1, kFDot2N>>>(dA, dB, dC, dDir, dWrap, dPdir, dPwrap);
+    HIP_CHECK(hipDeviceSynchronize());
+    std::vector<__bf16>        dir(kFDot2N), wrap(kFDot2N);
+    std::vector<std::uint16_t> pdir(kFDot2N), pwrap(kFDot2N);
+    HIP_CHECK(hipMemcpy(dir.data(), dDir, kFDot2N * sizeof(__bf16), hipMemcpyDeviceToHost));
+    HIP_CHECK(hipMemcpy(wrap.data(), dWrap, kFDot2N * sizeof(__bf16), hipMemcpyDeviceToHost));
+    HIP_CHECK(
+        hipMemcpy(pdir.data(), dPdir, kFDot2N * sizeof(std::uint16_t), hipMemcpyDeviceToHost));
+    HIP_CHECK(
+        hipMemcpy(pwrap.data(), dPwrap, kFDot2N * sizeof(std::uint16_t), hipMemcpyDeviceToHost));
+    for(int i = 0; i < kFDot2N; ++i)
+    {
+        std::uint16_t bw = 0, bd = 0;
+        std::memcpy(&bw, &wrap[i], sizeof bw);
+        std::memcpy(&bd, &dir[i], sizeof bd);
+        EXPECT_EQ(bw, bd) << "Float lane " << i;
+        EXPECT_EQ(pwrap[i], pdir[i]) << "FPSan lane " << i;
+    }
+    (void)hipFree(dA);
+    (void)hipFree(dB);
+    (void)hipFree(dC);
+    (void)hipFree(dDir);
+    (void)hipFree(dWrap);
+    (void)hipFree(dPdir);
+    (void)hipFree(dPwrap);
+}
+
 TEST(AmdgcnMath, fdot2_f32_bf16_FloatAndFpsan)
 {
     if(!have_device())
         GTEST_SKIP() << "no HIP device";
-    if(!current_arch_is_gfx12())
-        GTEST_SKIP() << "current device is not gfx12";
+    if(!current_arch_supports_fdot2_extended())
+        GTEST_SKIP() << "current device does not support extended fdot2";
     auto           a = make_v2bf(), b = make_v2bf();
     auto           c  = make_acc_f32();
     v2bf *         dA = to_dev(a), *dB = to_dev(b);

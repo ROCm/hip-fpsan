@@ -23,13 +23,12 @@
 //                      results match an FPSan scalar/Triton reference.
 //
 // This header is opt-in (not pulled by <fpsan/fpsan.hpp>) and HIP/device only.
-// All RDNA4 (gfx1200/gfx1201) 16x16x16 WMMA variants share one fragment layout
-// (Wmma16x16x16Layout) and one wave dataflow (wmma_16x16x16_dataflow) -- only
-// the element types and the builtin called from Float mode differ. The layout
-// was reverse-engineered from AMD's matrix-instruction calculator and
-// re-confirmed bit-for-bit on-device by the Wmma.LayoutMatchesHardware test.
-// gfx1250 has a distinct WMMA family (K=32/64/128 shapes, different builtins and
-// fragment layout); its wrappers live further below, each __has_builtin-gated.
+// gfx11 (RDNA3), gfx12 (RDNA4), and gfx1250 expose related WMMA builtins,
+// but their A/B fragment ABI, C/D layout, and supported K-shapes differ. Keep
+// the layouts separate even where wrapper names overlap. The layouts are taken
+// from AMD's matrix-instruction calculator and re-confirmed on-device by the
+// Wmma*.LayoutMatchesHardware tests. gfx1250's distinct K=32/64/128 family
+// remains gated on its own builtins below.
 // ----------------------------------------------------------------------------
 #ifndef FPSAN_AMDGCN_MATRIX_HPP
 #define FPSAN_AMDGCN_MATRIX_HPP
@@ -53,6 +52,7 @@ namespace fpsan
     // Native vector aliases for the gfx12 16x16x16 WMMA builtin ABI. Per-lane
     // fragment widths: A,B = 8 elements of the input type, C,D = 8 elements of the
     // output type.
+    using v4f_native  = float __attribute__((ext_vector_type(4)));
     using v8h_native  = _Float16 __attribute__((ext_vector_type(8)));
     using v8f_native  = float __attribute__((ext_vector_type(8)));
     using v8bf_native = __bf16 __attribute__((ext_vector_type(8)));
@@ -72,6 +72,16 @@ namespace fpsan
     // elements per lane (B is 64x16, wave32 => 1024/32 = 32 per lane); C/D stay v8.
     using v32h_native  = _Float16 __attribute__((ext_vector_type(32)));
     using v32bf_native = __bf16 __attribute__((ext_vector_type(32)));
+
+    // Native vector aliases for the gfx11 16x16x16 WMMA builtin ABI. A/B are
+    // full 256-bit replicated operands. f32 accumulators use v8f in wave32 and
+    // v4f in wave64; f16/bf16 accumulator/output variants use 16 half-slots in
+    // wave32 and 8 half-slots in wave64, with OPSEL selecting either the low or
+    // high half of each 32-bit accumulator register.
+    using v16h_wmma_native   = _Float16 __attribute__((ext_vector_type(16)));
+    using v8i16_wmma_native  = short __attribute__((ext_vector_type(8)));
+    using v16bf_wmma_native  = __bf16 __attribute__((ext_vector_type(16)));
+    using v16i16_wmma_native = short __attribute__((ext_vector_type(16)));
 
     namespace detail
     {
@@ -251,12 +261,32 @@ namespace fpsan
             return __builtin_amdgcn_mbcnt_hi(~0u, __builtin_amdgcn_mbcnt_lo(~0u, 0u));
         }
 
+        FPSAN_DEVICE inline std::uint32_t wave_shfl_word(std::uint32_t word, int src_lane)
+        {
+            // RDNA3 wave64 DS permute lane selection is modulo 32. When a gfx11
+            // lane requests the opposite half, swap halves first, then do the
+            // same-half DS gather by the low 5 bits of the absolute source lane.
+            #if defined(__HIP_DEVICE_COMPILE__) && defined(__GFX11__) \
+                && __has_builtin(__builtin_amdgcn_permlane64)
+                if(__builtin_amdgcn_wavefrontsize() == 64)
+                {
+                    const int lane = wave_lane_full();
+                    if(((lane ^ src_lane) & 32) != 0)
+                    {
+                        word = static_cast<std::uint32_t>(
+                            __builtin_amdgcn_permlane64(static_cast<int>(word)));
+                    }
+                    src_lane &= 31;
+                }
+            #endif
+            return static_cast<std::uint32_t>(
+                __builtin_amdgcn_ds_bpermute(src_lane * 4, static_cast<int>(word)));
+        }
+
         // Move one scalar Value to this lane from `src_lane` within the wave. The
-        // stored representation (payload or float bits) is shuffled verbatim, using the
-        // raw cross-lane builtin (no HIP runtime dependency): ds_bpermute addresses the
-        // source lane by byte offset (lane*4) and moves a 32-bit word. 64-bit scalars
-        // (double) are moved as two halves via two ds_bpermute calls -- correct and
-        // portable, without leaning on the HIP-runtime overload of __shfl.
+        // stored representation (payload or float bits) is shuffled verbatim, using
+        // raw cross-lane builtins (no HIP runtime dependency). 64-bit scalars
+        // (double) are moved as two halves via two 32-bit shuffles.
         template <class FT, Semantics S, Conversions C>
         FPSAN_DEVICE Value<FT, S, C> wave_shfl(Value<FT, S, C> v, int src_lane)
         {
@@ -265,22 +295,18 @@ namespace fpsan
             const auto bits = v.to_storage_bits();
             if constexpr(sizeof(B) <= 4)
             {
-                const int w   = static_cast<int>(static_cast<std::uint32_t>(bits));
-                const int got = __builtin_amdgcn_ds_bpermute(src_lane * 4, w);
-                return Value<FT, S, C>::from_storage_bits(
-                    static_cast<B>(static_cast<std::uint32_t>(got)));
+                const auto got = wave_shfl_word(static_cast<std::uint32_t>(bits), src_lane);
+                return Value<FT, S, C>::from_storage_bits(static_cast<B>(got));
             }
             else
             {
                 static_assert(sizeof(B) == 8, "wave_shfl supports 1..8 byte scalars");
                 const std::uint64_t b64 = static_cast<std::uint64_t>(bits);
-                const int           lo  = static_cast<int>(static_cast<std::uint32_t>(b64));
-                const int           hi  = static_cast<int>(static_cast<std::uint32_t>(b64 >> 32));
-                const int           glo = __builtin_amdgcn_ds_bpermute(src_lane * 4, lo);
-                const int           ghi = __builtin_amdgcn_ds_bpermute(src_lane * 4, hi);
+                const auto          glo = wave_shfl_word(static_cast<std::uint32_t>(b64), src_lane);
+                const auto          ghi
+                    = wave_shfl_word(static_cast<std::uint32_t>(b64 >> 32), src_lane);
                 const std::uint64_t g64
-                    = (static_cast<std::uint64_t>(static_cast<std::uint32_t>(ghi)) << 32)
-                      | static_cast<std::uint64_t>(static_cast<std::uint32_t>(glo));
+                    = (static_cast<std::uint64_t>(ghi) << 32) | static_cast<std::uint64_t>(glo);
                 return Value<FT, S, C>::from_storage_bits(static_cast<B>(g64));
             }
         }
@@ -357,6 +383,118 @@ namespace fpsan
                     acc     = acc + cast<AccScalar>(av) * cast<AccScalar>(bv);
                 }
                 d.set(e, acc);
+            }
+            return d;
+        }
+
+        // ---- 16x16x16 WMMA fragment layout (gfx11: RDNA3) ----------------------
+        // Authoritative formulas from AMD's matrix-instruction calculator:
+        //   A[m][k]: lane = m + 16*q for every q in the wave, reg = floor(k/2),
+        //             half = k&1
+        //   B[k][n]: lane = n + 16*q for every q in the wave, reg = floor(k/2),
+        //             half = k&1
+        //   C/D f32[m][n]: lane = (16*m + n) % wave_size,
+        //                   reg = floor(m / (wave_size/16))
+        //   C/D f16/bf16[m][n]: same lane,
+        //                       reg = 2*floor(m / (wave_size/16))+OPSEL
+        // The v16 A/B vector index is exactly k. For f16/bf16 outputs, vector
+        // indices 2*r+OPSEL are defined; the opposite half is undefined by the
+        // non-tied hardware builtins.
+        struct WmmaGfx11_16x16x16Layout
+        {
+            FPSAN_DEVICE static int ab_lane(int row_or_col)
+            {
+                return row_or_col;
+            }
+            FPSAN_DEVICE static int ab_index(int k)
+            {
+                return k;
+            }
+            FPSAN_DEVICE static int cd_n(int lane)
+            {
+                return lane & 15;
+            }
+            FPSAN_DEVICE static int cd_m(int lane, int reg, int wave_size)
+            {
+                return (wave_size / 16) * reg + (lane >> 4);
+            }
+            FPSAN_DEVICE static int cd_half_index(int reg, bool opsel)
+            {
+                return 2 * reg + (opsel ? 1 : 0);
+            }
+        };
+
+        // gfx11 f32-output WMMA: A/B are v16 replicated operands, C/D are v8f
+        // in wave32 and v4f in wave64.
+        template <class AVec, class BVec, class CVec, Semantics S, Conversions C>
+        FPSAN_DEVICE Value<CVec, S, C>
+            wmma_gfx11_f32_16x16x16_dataflow(Value<AVec, S, C>       a,
+                                             Value<BVec, S, C>       b,
+                                             Value<CVec, S, C>       c)
+        {
+            using DFrag           = Value<CVec, S, C>;
+            using Acc             = Value<float, S, C>;
+            static constexpr int E = static_cast<int>(DFrag::lanes);
+            static_assert(E == 4 || E == 8, "gfx11 f32 WMMA C/D must be v4f or v8f");
+            const int lane      = wave_lane_full();
+            const int wave_size = __builtin_amdgcn_wavefrontsize();
+            const int n         = WmmaGfx11_16x16x16Layout::cd_n(lane);
+            DFrag     d{};
+            for(int e = 0; e < E; ++e)
+            {
+                const int m   = WmmaGfx11_16x16x16Layout::cd_m(lane, e, wave_size);
+                Acc       acc = c.get(e);
+                for(int k = 0; k < 16; ++k)
+                {
+                    const int idx = WmmaGfx11_16x16x16Layout::ab_index(k);
+                    auto      av  = wave_shfl(a.get(idx), WmmaGfx11_16x16x16Layout::ab_lane(m));
+                    auto      bv  = wave_shfl(b.get(idx), WmmaGfx11_16x16x16Layout::ab_lane(n));
+                    acc           = acc + cast<float>(av) * cast<float>(bv);
+                }
+                d.set(e, acc);
+            }
+            return d;
+        }
+
+        // gfx11 f16/bf16-output WMMA: OPSEL selects the defined half of each
+        // output register. The other half is undefined by the non-tied hardware
+        // builtins, so the FPSan path only promises the selected half.
+        template <bool Opsel,
+                  bool PreserveUnselected = false,
+                  class AVec,
+                  class BVec,
+                  class CVec,
+                  Semantics S,
+                  Conversions C>
+        FPSAN_DEVICE Value<CVec, S, C>
+            wmma_gfx11_half_16x16x16_dataflow(Value<AVec, S, C> a,
+                                              Value<BVec, S, C> b,
+                                              Value<CVec, S, C> c)
+        {
+            using DFrag           = Value<CVec, S, C>;
+            using AccScalar       = typename DFrag::element_type;
+            using Acc             = Value<AccScalar, S, C>;
+            static constexpr int E = static_cast<int>(DFrag::lanes);
+            static_assert(E == 8 || E == 16, "gfx11 f16/bf16 WMMA C/D must be v8 or v16");
+            const int lane      = wave_lane_full();
+            const int wave_size = __builtin_amdgcn_wavefrontsize();
+            const int n         = WmmaGfx11_16x16x16Layout::cd_n(lane);
+            DFrag     d{};
+            if constexpr(PreserveUnselected)
+                d = c;
+            for(int r = 0; r < E / 2; ++r)
+            {
+                const int out_idx = WmmaGfx11_16x16x16Layout::cd_half_index(r, Opsel);
+                const int m       = WmmaGfx11_16x16x16Layout::cd_m(lane, r, wave_size);
+                Acc       acc     = c.get(out_idx);
+                for(int k = 0; k < 16; ++k)
+                {
+                    const int idx = WmmaGfx11_16x16x16Layout::ab_index(k);
+                    auto      av  = wave_shfl(a.get(idx), WmmaGfx11_16x16x16Layout::ab_lane(m));
+                    auto      bv  = wave_shfl(b.get(idx), WmmaGfx11_16x16x16Layout::ab_lane(n));
+                    acc           = acc + cast<AccScalar>(av) * cast<AccScalar>(bv);
+                }
+                d.set(out_idx, acc);
             }
             return d;
         }
@@ -1181,6 +1319,293 @@ namespace fpsan
         }
 
     } // namespace detail
+
+// =============================================================================
+// RDNA3 (gfx11) wave32 WMMA wrappers. These are the base Clang builtins without
+// the gfx12 suffix. A/B operands are v16 replicated fragments; f32 accumulators
+// use v8f, while f16/bf16 accumulators use v16 with OPSEL selecting the active
+// half-register. RDNA3 does not expose the gfx12 fp8/bf8 WMMA family.
+// =============================================================================
+#if !defined(__HIP_DEVICE_COMPILE__) || defined(__GFX11__)
+
+#if !defined(__HIP_DEVICE_COMPILE__) || __has_builtin(__builtin_amdgcn_wmma_f32_16x16x16_f16_w32)
+    template <Semantics S = Semantics::Float, Conversions C = Conversions::Explicit>
+    FPSAN_DEVICE Value<v8f_native, S, C>
+                 amdgcn_wmma_f32_16x16x16_f16_w32(Value<v16h_wmma_native, S, C> a,
+                                                  Value<v16h_wmma_native, S, C> b,
+                                                  Value<v8f_native, S, C>       c)
+    {
+        if constexpr(S == Semantics::Float)
+        {
+            v8f_native d = __builtin_amdgcn_wmma_f32_16x16x16_f16_w32(
+                a.to_float(), b.to_float(), c.to_float());
+            return Value<v8f_native, S, C>(d);
+        }
+        else
+        {
+            return detail::wmma_gfx11_f32_16x16x16_dataflow(a, b, c);
+        }
+    }
+#endif
+
+#if !defined(__HIP_DEVICE_COMPILE__) || __has_builtin(__builtin_amdgcn_wmma_f32_16x16x16_bf16_w32)
+    template <Semantics S = Semantics::Float, Conversions C = Conversions::Explicit>
+    FPSAN_DEVICE Value<v8f_native, S, C>
+                 amdgcn_wmma_f32_16x16x16_bf16_w32(Value<v16bf_wmma_native, S, C> a,
+                                                   Value<v16bf_wmma_native, S, C> b,
+                                                   Value<v8f_native, S, C>        c)
+    {
+        if constexpr(S == Semantics::Float)
+        {
+            const v16i16_wmma_native ai = __builtin_bit_cast(v16i16_wmma_native, a.to_float());
+            const v16i16_wmma_native bi = __builtin_bit_cast(v16i16_wmma_native, b.to_float());
+            v8f_native               d
+                = __builtin_amdgcn_wmma_f32_16x16x16_bf16_w32(ai, bi, c.to_float());
+            return Value<v8f_native, S, C>(d);
+        }
+        else
+        {
+            return detail::wmma_gfx11_f32_16x16x16_dataflow(a, b, c);
+        }
+    }
+#endif
+
+#if !defined(__HIP_DEVICE_COMPILE__) || __has_builtin(__builtin_amdgcn_wmma_f16_16x16x16_f16_w32)
+    template <bool        Opsel = false,
+              Semantics   S     = Semantics::Float,
+              Conversions C     = Conversions::Explicit>
+    FPSAN_DEVICE Value<v16h_wmma_native, S, C>
+                 amdgcn_wmma_f16_16x16x16_f16_w32(Value<v16h_wmma_native, S, C> a,
+                                                  Value<v16h_wmma_native, S, C> b,
+                                                  Value<v16h_wmma_native, S, C> c)
+    {
+        if constexpr(S == Semantics::Float)
+        {
+            v16h_wmma_native d = __builtin_amdgcn_wmma_f16_16x16x16_f16_w32(
+                a.to_float(), b.to_float(), c.to_float(), Opsel);
+            return Value<v16h_wmma_native, S, C>(d);
+        }
+        else
+        {
+            return detail::wmma_gfx11_half_16x16x16_dataflow<Opsel>(a, b, c);
+        }
+    }
+#endif
+
+#if !defined(__HIP_DEVICE_COMPILE__) || __has_builtin(__builtin_amdgcn_wmma_f16_16x16x16_f16_tied_w32)
+    template <bool        Opsel = false,
+              Semantics   S     = Semantics::Float,
+              Conversions C     = Conversions::Explicit>
+    FPSAN_DEVICE Value<v16h_wmma_native, S, C>
+                 amdgcn_wmma_f16_16x16x16_f16_tied_w32(Value<v16h_wmma_native, S, C> a,
+                                                       Value<v16h_wmma_native, S, C> b,
+                                                       Value<v16h_wmma_native, S, C> c)
+    {
+        if constexpr(S == Semantics::Float)
+        {
+            v16h_wmma_native d = __builtin_amdgcn_wmma_f16_16x16x16_f16_tied_w32(
+                a.to_float(), b.to_float(), c.to_float(), Opsel);
+            return Value<v16h_wmma_native, S, C>(d);
+        }
+        else
+        {
+            return detail::wmma_gfx11_half_16x16x16_dataflow<Opsel, true>(a, b, c);
+        }
+    }
+#endif
+
+#if !defined(__HIP_DEVICE_COMPILE__) || __has_builtin(__builtin_amdgcn_wmma_bf16_16x16x16_bf16_w32)
+    template <bool        Opsel = false,
+              Semantics   S     = Semantics::Float,
+              Conversions C     = Conversions::Explicit>
+    FPSAN_DEVICE Value<v16bf_wmma_native, S, C>
+                 amdgcn_wmma_bf16_16x16x16_bf16_w32(Value<v16bf_wmma_native, S, C> a,
+                                                    Value<v16bf_wmma_native, S, C> b,
+                                                    Value<v16bf_wmma_native, S, C> c)
+    {
+        if constexpr(S == Semantics::Float)
+        {
+            const v16i16_wmma_native ai = __builtin_bit_cast(v16i16_wmma_native, a.to_float());
+            const v16i16_wmma_native bi = __builtin_bit_cast(v16i16_wmma_native, b.to_float());
+            const v16i16_wmma_native ci = __builtin_bit_cast(v16i16_wmma_native, c.to_float());
+            const v16i16_wmma_native di
+                = __builtin_amdgcn_wmma_bf16_16x16x16_bf16_w32(ai, bi, ci, Opsel);
+            return Value<v16bf_wmma_native, S, C>(
+                __builtin_bit_cast(v16bf_wmma_native, di));
+        }
+        else
+        {
+            return detail::wmma_gfx11_half_16x16x16_dataflow<Opsel>(a, b, c);
+        }
+    }
+#endif
+
+#if !defined(__HIP_DEVICE_COMPILE__) || __has_builtin(__builtin_amdgcn_wmma_bf16_16x16x16_bf16_tied_w32)
+    template <bool        Opsel = false,
+              Semantics   S     = Semantics::Float,
+              Conversions C     = Conversions::Explicit>
+    FPSAN_DEVICE Value<v16bf_wmma_native, S, C>
+                 amdgcn_wmma_bf16_16x16x16_bf16_tied_w32(Value<v16bf_wmma_native, S, C> a,
+                                                         Value<v16bf_wmma_native, S, C> b,
+                                                         Value<v16bf_wmma_native, S, C> c)
+    {
+        if constexpr(S == Semantics::Float)
+        {
+            const v16i16_wmma_native ai = __builtin_bit_cast(v16i16_wmma_native, a.to_float());
+            const v16i16_wmma_native bi = __builtin_bit_cast(v16i16_wmma_native, b.to_float());
+            const v16i16_wmma_native ci = __builtin_bit_cast(v16i16_wmma_native, c.to_float());
+            const v16i16_wmma_native di
+                = __builtin_amdgcn_wmma_bf16_16x16x16_bf16_tied_w32(ai, bi, ci, Opsel);
+            return Value<v16bf_wmma_native, S, C>(
+                __builtin_bit_cast(v16bf_wmma_native, di));
+        }
+        else
+        {
+            return detail::wmma_gfx11_half_16x16x16_dataflow<Opsel, true>(a, b, c);
+        }
+    }
+#endif
+
+// gfx11 wave64 variants. The builtins share A/B with wave32 but use the smaller
+// C/D ABI implied by four rows per accumulator register.
+#if !defined(__HIP_DEVICE_COMPILE__) || __has_builtin(__builtin_amdgcn_wmma_f32_16x16x16_f16_w64)
+    template <Semantics S = Semantics::Float, Conversions C = Conversions::Explicit>
+    FPSAN_DEVICE Value<v4f_native, S, C>
+                 amdgcn_wmma_f32_16x16x16_f16_w64(Value<v16h_wmma_native, S, C> a,
+                                                  Value<v16h_wmma_native, S, C> b,
+                                                  Value<v4f_native, S, C>       c)
+    {
+        if constexpr(S == Semantics::Float)
+        {
+            v4f_native d = __builtin_amdgcn_wmma_f32_16x16x16_f16_w64(
+                a.to_float(), b.to_float(), c.to_float());
+            return Value<v4f_native, S, C>(d);
+        }
+        else
+        {
+            return detail::wmma_gfx11_f32_16x16x16_dataflow(a, b, c);
+        }
+    }
+#endif
+
+#if !defined(__HIP_DEVICE_COMPILE__) || __has_builtin(__builtin_amdgcn_wmma_f32_16x16x16_bf16_w64)
+    template <Semantics S = Semantics::Float, Conversions C = Conversions::Explicit>
+    FPSAN_DEVICE Value<v4f_native, S, C>
+                 amdgcn_wmma_f32_16x16x16_bf16_w64(Value<v16bf_wmma_native, S, C> a,
+                                                   Value<v16bf_wmma_native, S, C> b,
+                                                   Value<v4f_native, S, C>        c)
+    {
+        if constexpr(S == Semantics::Float)
+        {
+            const v16i16_wmma_native ai = __builtin_bit_cast(v16i16_wmma_native, a.to_float());
+            const v16i16_wmma_native bi = __builtin_bit_cast(v16i16_wmma_native, b.to_float());
+            v4f_native               d
+                = __builtin_amdgcn_wmma_f32_16x16x16_bf16_w64(ai, bi, c.to_float());
+            return Value<v4f_native, S, C>(d);
+        }
+        else
+        {
+            return detail::wmma_gfx11_f32_16x16x16_dataflow(a, b, c);
+        }
+    }
+#endif
+
+#if !defined(__HIP_DEVICE_COMPILE__) || __has_builtin(__builtin_amdgcn_wmma_f16_16x16x16_f16_w64)
+    template <bool        Opsel = false,
+              Semantics   S     = Semantics::Float,
+              Conversions C     = Conversions::Explicit>
+    FPSAN_DEVICE Value<v8h_native, S, C>
+                 amdgcn_wmma_f16_16x16x16_f16_w64(Value<v16h_wmma_native, S, C> a,
+                                                  Value<v16h_wmma_native, S, C> b,
+                                                  Value<v8h_native, S, C>       c)
+    {
+        if constexpr(S == Semantics::Float)
+        {
+            v8h_native d = __builtin_amdgcn_wmma_f16_16x16x16_f16_w64(
+                a.to_float(), b.to_float(), c.to_float(), Opsel);
+            return Value<v8h_native, S, C>(d);
+        }
+        else
+        {
+            return detail::wmma_gfx11_half_16x16x16_dataflow<Opsel>(a, b, c);
+        }
+    }
+#endif
+
+#if !defined(__HIP_DEVICE_COMPILE__) || __has_builtin(__builtin_amdgcn_wmma_f16_16x16x16_f16_tied_w64)
+    template <bool        Opsel = false,
+              Semantics   S     = Semantics::Float,
+              Conversions C     = Conversions::Explicit>
+    FPSAN_DEVICE Value<v8h_native, S, C>
+                 amdgcn_wmma_f16_16x16x16_f16_tied_w64(Value<v16h_wmma_native, S, C> a,
+                                                       Value<v16h_wmma_native, S, C> b,
+                                                       Value<v8h_native, S, C>       c)
+    {
+        if constexpr(S == Semantics::Float)
+        {
+            v8h_native d = __builtin_amdgcn_wmma_f16_16x16x16_f16_tied_w64(
+                a.to_float(), b.to_float(), c.to_float(), Opsel);
+            return Value<v8h_native, S, C>(d);
+        }
+        else
+        {
+            return detail::wmma_gfx11_half_16x16x16_dataflow<Opsel, true>(a, b, c);
+        }
+    }
+#endif
+
+#if !defined(__HIP_DEVICE_COMPILE__) || __has_builtin(__builtin_amdgcn_wmma_bf16_16x16x16_bf16_w64)
+    template <bool        Opsel = false,
+              Semantics   S     = Semantics::Float,
+              Conversions C     = Conversions::Explicit>
+    FPSAN_DEVICE Value<v8bf_native, S, C>
+                 amdgcn_wmma_bf16_16x16x16_bf16_w64(Value<v16bf_wmma_native, S, C> a,
+                                                    Value<v16bf_wmma_native, S, C> b,
+                                                    Value<v8bf_native, S, C>       c)
+    {
+        if constexpr(S == Semantics::Float)
+        {
+            const v16i16_wmma_native ai = __builtin_bit_cast(v16i16_wmma_native, a.to_float());
+            const v16i16_wmma_native bi = __builtin_bit_cast(v16i16_wmma_native, b.to_float());
+            const v8i16_wmma_native  ci = __builtin_bit_cast(v8i16_wmma_native, c.to_float());
+            const v8i16_wmma_native  di
+                = __builtin_amdgcn_wmma_bf16_16x16x16_bf16_w64(ai, bi, ci, Opsel);
+            return Value<v8bf_native, S, C>(__builtin_bit_cast(v8bf_native, di));
+        }
+        else
+        {
+            return detail::wmma_gfx11_half_16x16x16_dataflow<Opsel>(a, b, c);
+        }
+    }
+#endif
+
+#if !defined(__HIP_DEVICE_COMPILE__) || __has_builtin(__builtin_amdgcn_wmma_bf16_16x16x16_bf16_tied_w64)
+    template <bool        Opsel = false,
+              Semantics   S     = Semantics::Float,
+              Conversions C     = Conversions::Explicit>
+    FPSAN_DEVICE Value<v8bf_native, S, C>
+                 amdgcn_wmma_bf16_16x16x16_bf16_tied_w64(Value<v16bf_wmma_native, S, C> a,
+                                                         Value<v16bf_wmma_native, S, C> b,
+                                                         Value<v8bf_native, S, C>       c)
+    {
+        if constexpr(S == Semantics::Float)
+        {
+            const v16i16_wmma_native ai = __builtin_bit_cast(v16i16_wmma_native, a.to_float());
+            const v16i16_wmma_native bi = __builtin_bit_cast(v16i16_wmma_native, b.to_float());
+            const v8i16_wmma_native  ci = __builtin_bit_cast(v8i16_wmma_native, c.to_float());
+            const v8i16_wmma_native  di
+                = __builtin_amdgcn_wmma_bf16_16x16x16_bf16_tied_w64(ai, bi, ci, Opsel);
+            return Value<v8bf_native, S, C>(__builtin_bit_cast(v8bf_native, di));
+        }
+        else
+        {
+            return detail::wmma_gfx11_half_16x16x16_dataflow<Opsel, true>(a, b, c);
+        }
+    }
+#endif
+
+#endif // defined(__GFX11__)
+
 
 // =============================================================================
 // RDNA4 (gfx1200/gfx1201) wave32 WMMA wrappers. Each wrapper is one

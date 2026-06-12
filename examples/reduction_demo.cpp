@@ -19,6 +19,7 @@
 //
 // The matrix path is SINGLE-SOURCE but uses different hardware instructions per
 // GPU architecture, selected by a device-arch `#if` (not a build flag):
+//   * RDNA3 / gfx11  -> WMMA  (amdgcn_wmma_f32_16x16x16_bf16_w32, wave32, K=16)
 //   * RDNA4 / gfx12  -> WMMA  (amdgcn_wmma_f32_16x16x16_bf16_w32, wave32, K=16)
 //   * gfx1250        -> WMMA  (amdgcn_wmma_f32_16x16x32_bf16,     wave32, K=32)
 //   * CDNA3 / gfx942 -> MFMA  (amdgcn_mfma_f32_16x16x16bf16_1k,   wave64, K=16)
@@ -41,8 +42,8 @@
 // to a small accumulator survives.  The three paths put the +1s in
 // different positions relative to the big value, so they round differently.
 //
-// Why bf16 (not f32, not f16): RDNA4 has no F32_F32 WMMA at 16x16x16; the
-// matrix path has to narrow A/B to f16/bf16/fp8.  bf16 keeps f32's 8-bit
+// Why bf16 (not f32, not f16): RDNA3/RDNA4 have no F32_F32 WMMA at 16x16x16;
+// the matrix path has to narrow A/B to f16/bf16/fp8.  bf16 keeps f32's 8-bit
 // exponent so the chosen pattern (2^24, 1) is bf16-exact and the cast is a
 // no-op for these values -- the cast machinery is exercised, but the input
 // precision isn't a moving part.
@@ -74,11 +75,12 @@
 #define DEMO_PATH_MFMA 1
 #elif defined(__gfx1250__)
 #define DEMO_PATH_WMMA_K32 1
-#elif defined(__gfx1200__) || defined(__gfx1201__) || !defined(__HIP_DEVICE_COMPILE__)
+#elif defined(__GFX11__) || defined(__gfx1200__) || defined(__gfx1201__) \
+    || !defined(__HIP_DEVICE_COMPILE__)
 #define DEMO_PATH_WMMA 1
 #else
 #error \
-    "reduction_demo: no matrix code path for this GPU architecture (have: gfx12 WMMA K=16, gfx1250 WMMA K=32, gfx94x/gfx950 MFMA)"
+    "reduction_demo: no matrix code path for this GPU architecture (have: gfx11/gfx12 WMMA K=16, gfx1250 WMMA K=32, gfx94x/gfx950 MFMA)"
 #endif
 
 using fpsan::Conversions;
@@ -151,12 +153,19 @@ __global__ void k_wfred(const float* x, Out* out)
 //     differ.
 // ---------------------------------------------------------------------------
 #if defined(DEMO_PATH_WMMA)
-// Inverse of Wmma16x16x16Layout's k(lane, idx) for the A/B fragments: given the
-// lane and fragment slot idx, which logical K-index it holds.
+// Inverse of the WMMA A/B fragment layouts: given the lane and fragment slot
+// idx, which logical K-index it holds. gfx11 uses 256-bit replicated A/B
+// operands, so the v16 element index is k directly. gfx12 uses the compact v8
+// fragment layout from Wmma16x16x16Layout.
 __device__ inline int wmma_frag_k(int lane, int idx)
 {
+#if defined(__GFX11__)
+    (void)lane;
+    return idx;
+#else
     int reg = idx >> 1, half = idx & 1;
     return half | ((reg & 1) << 1) | ((lane >> 4) << 2) | ((reg >> 1) << 3);
+#endif
 }
 #elif defined(DEMO_PATH_WMMA_K32)
 // Inverse of Wmma16x16x32Layout for the gfx1250 K=32 A/B fragments: given the
@@ -216,6 +225,22 @@ __global__ void k_matrix_column_sums(const float* x, Out* col_out)
     V8F  c{fpsan::v8f_native{}};
     auto d = fpsan::amdgcn_wmma_f32_16x16x32_bf16(a, b, c);
 #else
+#if defined(__GFX11__)
+    // RDNA3 / gfx11: WMMA 16x16x16 bf16 (wave32, 16 bf16/lane). A/B are
+    // replicated across lanes {i, i+16}, and vector element idx is K directly.
+    using V16B = Value<fpsan::v16bf_wmma_native, S, kCC>;
+    using V8F  = Value<fpsan::v8f_native, S, kCC>;
+    fpsan::v16bf_wmma_native an{}, bn{};
+    for(int idx = 0; idx < NN; ++idx)
+    {
+        int k   = wmma_frag_k(lane, idx);
+        an[idx] = static_cast<__bf16>(1.0f);
+        bn[idx] = static_cast<__bf16>(x[k * NN + (lane & 15)]);
+    }
+    V16B a{an}, b{bn};
+    V8F  c{fpsan::v8f_native{}};
+    auto d = fpsan::amdgcn_wmma_f32_16x16x16_bf16_w32(a, b, c);
+#else
     // RDNA4 / gfx12: WMMA 16x16x16 bf16 (wave32, 8 bf16/lane).
     using V8B = Value<fpsan::v8bf_native, S, kCC>;
     using V8F = Value<fpsan::v8f_native, S, kCC>;
@@ -229,6 +254,7 @@ __global__ void k_matrix_column_sums(const float* x, Out* col_out)
     V8B  a{an}, b{bn};
     V8F  c{fpsan::v8f_native{}};
     auto d = fpsan::amdgcn_wmma_f32_16x16x16_bf16_w32(a, b, c);
+#endif
 #endif
     // Lane n in 0..15 holds D[0][n] = column-n sum in accumulator register 0.
     if(lane < NN)

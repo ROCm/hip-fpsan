@@ -56,7 +56,6 @@ namespace fpsan
     // the element type.
     // =============================================================================
     using v2f_native  = float __attribute__((ext_vector_type(2)));
-    using v4f_native  = float __attribute__((ext_vector_type(4)));
     using v16f_native = float __attribute__((ext_vector_type(16)));
     using v32f_native = float __attribute__((ext_vector_type(32)));
     using v4d_native  = double __attribute__((ext_vector_type(4)));
@@ -66,7 +65,7 @@ namespace fpsan
     // The f8f6f4 scaled-MFMA builtins take their 32-byte-per-lane A/B operands as
     // an 8-element i32 vector (the LLVM ABI for the packed fp8/fp6/fp4 fragment).
     using v8i32_native = int __attribute__((ext_vector_type(8)));
-    // v8h_native / v8f_native / v8bf_native come from amdgcn_matrix.hpp.
+    // v4f_native / v8h_native / v8f_native / v8bf_native come from amdgcn_matrix.hpp.
 
     // CDNA4 fp8 MFMA: A and B are packed as a long int (8 fp8 bytes per lane).
     // LLVM's signature uses 'Wi' = i64. We expose the wrappers via Value<i64>

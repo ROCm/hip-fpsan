@@ -160,16 +160,17 @@ a **Float** path (forwards to the real `__builtin_amdgcn_*`) and an **FPSan** pa
 
 **Supported architectures:**
 
+- **RDNA3** — gfx1100 (WMMA matrix path, wave32 and wave64)
 - **RDNA4** — gfx1200 / gfx1201 (WMMA matrix path, K=16, wave32)
 - **CDNA3** — gfx942 (gfx9-family MFMA path, wave64)
 - **CDNA4** — gfx950 (MFMA + scaled / sub-byte matrix path, wave64)
 - **gfx1250** — distinct WMMA family, K=32/64/128 shapes (wave32)
 
 The CDNA / gfx9-family targets carry the MFMA/SMFMAC matrix instructions; the
-RDNA / gfx12-family targets carry WMMA/SWMMAC — each family implements the
-matrix ops native to it. Every in-scope FP-relevant intrinsic the architecture
-exposes is wrapped in both Float and FPSan modes (or deferred with an explicit
-rationale).
+RDNA targets carry WMMA/SWMMAC where native to the architecture — each family
+implements the matrix ops native to it. Every in-scope FP-relevant intrinsic the
+architecture exposes is wrapped in both Float and FPSan modes (or deferred with
+an explicit rationale).
 
 Integer MFMA/SMFMAC, graphics ops (cubemap, interp, image_bvh, fp→int format
 packs), and the IEEE bit-twiddling micro-ops (`frexp`/`div_scale`/`trig_preop`/…)
