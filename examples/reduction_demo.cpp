@@ -19,10 +19,14 @@
 //
 // The matrix path is SINGLE-SOURCE but uses different hardware instructions per
 // GPU architecture, selected by a device-arch `#if` (not a build flag):
-//   * RDNA4 / gfx12  -> WMMA  (amdgcn_wmma_f32_16x16x16_bf16_w32, wave32)
-//   * CDNA3 / gfx942 -> MFMA  (amdgcn_mfma_f32_16x16x16bf16_1k,   wave64)
-//   * CDNA4 / gfx950 -> MFMA  (amdgcn_mfma_f32_16x16x16bf16_1k,   wave64)
-// An architecture with no matrix code path here is a hard compile error. The
+//   * RDNA4 / gfx12  -> WMMA  (amdgcn_wmma_f32_16x16x16_bf16_w32, wave32, K=16)
+//   * gfx1250        -> WMMA  (amdgcn_wmma_f32_16x16x32_bf16,     wave32, K=32)
+//   * CDNA3 / gfx942 -> MFMA  (amdgcn_mfma_f32_16x16x16bf16_1k,   wave64, K=16)
+//   * CDNA4 / gfx950 -> MFMA  (amdgcn_mfma_f32_16x16x16bf16_1k,   wave64, K=16)
+// gfx1250 has a distinct WMMA family with no K=16 shape, so it uses the K=32
+// 16x16x32 WMMA with the upper 16 contraction rows of B zero-filled -- the
+// column sums of the 16x16 input are unchanged. An architecture with no matrix
+// code path here is a hard compile error. The
 // host launches every kernel at the device's runtime `warpSize`, so the same
 // binary drives wave32 and wave64 without a build-time wave size.
 //
@@ -68,11 +72,13 @@
 // ---------------------------------------------------------------------------
 #if defined(__gfx940__) || defined(__gfx941__) || defined(__gfx942__) || defined(__gfx950__)
 #define DEMO_PATH_MFMA 1
+#elif defined(__gfx1250__)
+#define DEMO_PATH_WMMA_K32 1
 #elif defined(__gfx1200__) || defined(__gfx1201__) || !defined(__HIP_DEVICE_COMPILE__)
 #define DEMO_PATH_WMMA 1
 #else
 #error \
-    "reduction_demo: no matrix code path for this GPU architecture (have: gfx12 WMMA, gfx94x/gfx950 MFMA)"
+    "reduction_demo: no matrix code path for this GPU architecture (have: gfx12 WMMA K=16, gfx1250 WMMA K=32, gfx94x/gfx950 MFMA)"
 #endif
 
 using fpsan::Conversions;
@@ -139,9 +145,10 @@ __global__ void k_wfred(const float* x, Out* out)
 // ---------------------------------------------------------------------------
 // (3) matrix: column sums of B (16x16 inputs as bf16) via D = A*B with A=ones.
 //     With A all-ones, D[m][n] = sum_k B[k][n] = column-n sum (same for all m).
-//     For both WMMA (gfx12) and MFMA (gfx94x/gfx950) the 16x16x16 output places D[0][n]
-//     on lane n, register 0 -- so the read-back is identical across archs; only
-//     the fragment layout/fill and the instruction differ.
+//     For WMMA (gfx12 K=16, gfx1250 K=32) and MFMA (gfx94x/gfx950) the 16x16
+//     output places D[0][n] on lane n, register 0 -- so the read-back is
+//     identical across archs; only the fragment layout/fill and the instruction
+//     differ.
 // ---------------------------------------------------------------------------
 #if defined(DEMO_PATH_WMMA)
 // Inverse of Wmma16x16x16Layout's k(lane, idx) for the A/B fragments: given the
@@ -150,6 +157,17 @@ __device__ inline int wmma_frag_k(int lane, int idx)
 {
     int reg = idx >> 1, half = idx & 1;
     return half | ((reg & 1) << 1) | ((lane >> 4) << 2) | ((reg >> 1) << 3);
+}
+#elif defined(DEMO_PATH_WMMA_K32)
+// Inverse of Wmma16x16x32Layout for the gfx1250 K=32 A/B fragments: given the
+// lane and v16 fragment slot idx, which logical K-index (0..31) it holds.
+// Mirrors the forward map half=k&1; reg=((k>>1)&1)+2*((k>>3)&1)+4*((k>>4)&1);
+// idx=2*reg+half; lane bit2 = (k>>2)&1.
+__device__ inline int wmma_frag_k32(int lane, int idx)
+{
+    int half = idx & 1, reg = idx >> 1;
+    return half | ((reg & 1) << 1) | (((lane >> 4) & 1) << 2) | (((reg >> 1) & 1) << 3)
+           | (((reg >> 2) & 1) << 4);
 }
 #endif
 
@@ -178,6 +196,25 @@ __global__ void k_matrix_column_sums(const float* x, Out* col_out)
     V4B  a{an}, b{bn};
     V4F  c{fpsan::v4f_native{}};
     auto d = fpsan::amdgcn_mfma_f32_16x16x16bf16_1k(a, b, c);
+#elif defined(DEMO_PATH_WMMA_K32)
+    // gfx1250: WMMA 16x16x32 bf16 (wave32, 16 bf16/lane). gfx1250 has no K=16
+    // WMMA, so we contract over K=32 with A=ones (16x32) and B holding the 16x16
+    // inputs in K-rows 0..15 and zeros in K-rows 16..31. The zero rows add
+    // nothing, so D[m][n] is still the column-n sum -- placed identically to the
+    // K=16 path (lane n, register 0).
+    using V16B = Value<fpsan::v16bf_native, S, kCC>;
+    using V8F  = Value<fpsan::v8f_native, S, kCC>;
+    fpsan::v16bf_native an{}, bn{};
+    for(int idx = 0; idx < 16; ++idx)
+    {
+        int k   = wmma_frag_k32(lane, idx);
+        an[idx] = static_cast<__bf16>(1.0f);
+        bn[idx]
+            = (k < NN) ? static_cast<__bf16>(x[k * NN + (lane & 15)]) : static_cast<__bf16>(0.0f);
+    }
+    V16B a{an}, b{bn};
+    V8F  c{fpsan::v8f_native{}};
+    auto d = fpsan::amdgcn_wmma_f32_16x16x32_bf16(a, b, c);
 #else
     // RDNA4 / gfx12: WMMA 16x16x16 bf16 (wave32, 8 bf16/lane).
     using V8B = Value<fpsan::v8bf_native, S, kCC>;
@@ -226,7 +263,7 @@ auto host_sum16(const In* cols)
         return acc.fpsan_payload();
 }
 
-static constexpr int kLabelW = 32;
+static constexpr int kLabelW = 34;
 static void          show_float(const char* label, float f)
 {
     std::uint32_t bits;
@@ -235,7 +272,9 @@ static void          show_float(const char* label, float f)
 }
 static void show_payload(const char* label, std::uint32_t p)
 {
-    std::printf("  %-*s             0x%08x\n", kLabelW, label, p);
+    // Blank value column ("%14s" of "") so the hex digits line up under the
+    // Float-mode (0x...) column above; the 3 spaces match the "  (" prefix.
+    std::printf("  %-*s %14s   0x%08x\n", kLabelW, label, "", p);
 }
 
 int main()

@@ -4,9 +4,18 @@
 // tests/amdgcn_math_test.cpp
 //
 // GPU tests for the AMD math intrinsic wrappers in fpsan/amdgcn_math.hpp. The
-// scalar math cases are shared across gfx12, gfx94x, and gfx950. Dot-product
-// cases remain gated to the architecture families where this test's operand
-// formats and builtins are known to lower.
+// scalar math cases (rcp/rsq/sqrt/sin/cos/log/exp2/fract) are shared across the
+// gfx12 family (RDNA4 and gfx1250), gfx94x, and gfx950. Two properties per
+// scalar wrapper:
+//   - Float mode forwards to the builtin (the wrapper produces the same bits
+//     as __builtin_amdgcn_{rcp,rsq,...}f directly).
+//   - FPSan mode matches fpsan::{rcp,rsqrt,...} payload-for-payload (the
+//     wrapper just routes to the tagged op).
+//
+// The dot-product cases (fdot2 / dot4 fp8) are gated by compile definitions
+// (FPSAN_TEST_ENABLE_FDOT2 / FPSAN_TEST_ENABLE_GFX12_DOT_MATH) to the families
+// whose builtins lower: the dot9-12 families exist on RDNA4 and CDNA3 but not
+// on gfx1250, so they are excluded from the gfx1250 build.
 #include "fpsan/amdgcn_math.hpp"
 #include "fpsan/fpsan.hpp"
 

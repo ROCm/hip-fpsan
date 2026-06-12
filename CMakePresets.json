@@ -4,34 +4,33 @@
   "configurePresets": [
     {
       "name": "cxx",
-      "displayName": "Pure C++ (system clang++)",
+      "displayName": "Pure C++ (no HIP)",
       "generator": "Ninja",
-      "binaryDir": "$env{HOME}/workspace/fpsan-cpp-build",
+      "binaryDir": "${sourceDir}/build/cxx",
       "cacheVariables": {
-        "CMAKE_CXX_COMPILER": "/usr/bin/clang++",
         "CMAKE_BUILD_TYPE": "RelWithDebInfo",
         "FPSAN_BUILD_TESTS": "ON",
         "FPSAN_ENABLE_HIP": "OFF"
       },
-      "description": "Pure-C++ build. FPSAN_ENABLE_HIP=OFF forces the C++ path even if a HIP toolchain happens to be discoverable on this machine."
+      "description": "Pure-C++ build. FPSAN_ENABLE_HIP=OFF forces the C++ path even if a HIP toolchain happens to be discoverable on this machine. Select the compiler via the usual CC/CXX environment variables or -DCMAKE_CXX_COMPILER=..."
     },
     {
       "name": "hip",
       "displayName": "HIP C++ (ROCm clang, gfx1201)",
       "generator": "Ninja",
-      "binaryDir": "$env{HOME}/workspace/fpsan-hip-build",
+      "binaryDir": "${sourceDir}/build/hip",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "RelWithDebInfo",
         "FPSAN_BUILD_TESTS": "ON",
         "CMAKE_HIP_ARCHITECTURES": "gfx1201"
       },
-      "description": "HIP build. The HIP path turns on automatically because a HIP toolchain is found (CMAKE_HIP_COMPILER auto-detected from ~/therock_venv by CMakeLists.txt); override with -DCMAKE_HIP_COMPILER / -DCMAKE_HIP_COMPILER_ROCM_ROOT if your install differs."
+      "description": "HIP build. The HIP path turns on automatically when a HIP toolchain is found under ROCM_PATH (default /opt/rocm); point at a different install with -DROCM_PATH=... or override -DCMAKE_HIP_COMPILER / -DCMAKE_HIP_COMPILER_ROCM_ROOT directly."
     },
     {
       "name": "hip-gfx950",
       "displayName": "HIP C++ (ROCm clang, gfx950 / CDNA4 / MI350)",
       "generator": "Ninja",
-      "binaryDir": "$env{HOME}/workspace/fpsan-hip-gfx950-build",
+      "binaryDir": "${sourceDir}/build/hip-gfx950",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "RelWithDebInfo",
         "FPSAN_BUILD_TESTS": "ON",
@@ -43,25 +42,39 @@
       "name": "hip-gfx942",
       "displayName": "HIP C++ (ROCm clang, gfx942 / CDNA3 / MI300)",
       "generator": "Ninja",
-      "binaryDir": "$env{HOME}/workspace/fpsan-hip-gfx942-build",
+      "binaryDir": "${sourceDir}/build/hip-gfx942",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "RelWithDebInfo",
         "FPSAN_BUILD_TESTS": "ON",
         "CMAKE_HIP_ARCHITECTURES": "gfx942"
       },
       "description": "Wave64 (CDNA3 / MI300). Builds and runs the gfx942-supported wrapper/test surface on MI300-class hardware."
+    },
+    {
+      "name": "hip-gfx1250",
+      "displayName": "HIP C++ (ROCm clang, gfx1250)",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build/hip-gfx1250",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "RelWithDebInfo",
+        "FPSAN_BUILD_TESTS": "ON",
+        "CMAKE_HIP_ARCHITECTURES": "gfx1250"
+      },
+      "description": "Wave32 (gfx1250). Compile-checks the gfx1250 WMMA family (K=32/64/128), bf16 transcendentals, and block-scale cvt wrappers. Runtime requires gfx1250 hardware."
     }
   ],
   "buildPresets": [
     { "name": "cxx", "configurePreset": "cxx" },
     { "name": "hip", "configurePreset": "hip" },
     { "name": "hip-gfx950", "configurePreset": "hip-gfx950" },
-    { "name": "hip-gfx942", "configurePreset": "hip-gfx942" }
+    { "name": "hip-gfx942", "configurePreset": "hip-gfx942" },
+    { "name": "hip-gfx1250", "configurePreset": "hip-gfx1250" }
   ],
   "testPresets": [
     { "name": "cxx", "configurePreset": "cxx", "output": { "outputOnFailure": true } },
     { "name": "hip", "configurePreset": "hip", "output": { "outputOnFailure": true } },
     { "name": "hip-gfx950", "configurePreset": "hip-gfx950", "output": { "outputOnFailure": true } },
-    { "name": "hip-gfx942", "configurePreset": "hip-gfx942", "output": { "outputOnFailure": true } }
+    { "name": "hip-gfx942", "configurePreset": "hip-gfx942", "output": { "outputOnFailure": true } },
+    { "name": "hip-gfx1250", "configurePreset": "hip-gfx1250", "output": { "outputOnFailure": true } }
   ]
 }

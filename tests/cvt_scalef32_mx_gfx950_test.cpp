@@ -9,8 +9,8 @@
 // Methodology mirrors the rest of the gfx950 suite: every expected value is a
 // host-side reference computed by fpsan's generic narrow<->f32 conversion
 // (detail::narrow_to_f32 / f32_to_narrow, the IREE-derived OCP math), which is
-// INDEPENDENT of the device builtin. So a result that matches on real silicon
-// but diverges under an emulator (e.g. rocjitsu) shows up as a failure here.
+// INDEPENDENT of the device builtin. So any implementation that diverges from
+// the host reference shows up as a failure here.
 //
 // We exercise the raw __builtin_amdgcn_cvt_scalef32_* directly (in fpsan's
 // Float mode these wrappers are exactly the builtin) because the FPSan

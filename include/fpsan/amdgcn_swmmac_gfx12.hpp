@@ -61,7 +61,7 @@
 #include <type_traits>
 
 #if !defined(__HIP__) && !defined(__CUDACC__)
-#    error "fpsan/amdgcn_swmmac_gfx12.hpp is GPU-only; compile as HIP (or CUDA)."
+#error "fpsan/amdgcn_swmmac_gfx12.hpp is GPU-only; compile as HIP (or CUDA)."
 #endif
 
 namespace fpsan
@@ -99,7 +99,7 @@ namespace fpsan
                 return e[i];
             }
             FPSAN_HOST_DEVICE friend auto operator<(const v16_byte_fragment& a,
-                                                   const v16_byte_fragment& b)
+                                                    const v16_byte_fragment& b)
             {
                 using mask_t = std::uint8_t __attribute__((ext_vector_type(16)));
                 mask_t m{};
@@ -271,7 +271,13 @@ namespace fpsan
         }                                                                                          \
     }
 
-#if !defined(__HIP_DEVICE_COMPILE__) || __has_builtin(__builtin_amdgcn_swmmac_f32_16x16x32_f16_w32)
+// The K=32 SWMMAC shapes are RDNA4 (gfx1200/1201) only. gfx1250 dropped them in
+// favour of K=64 (f16/bf16) / K=128 (fp8) SWMMAC (see amdgcn_swmmac_gfx1250.hpp);
+// the K=32 builtin still passes __has_builtin on gfx1250 but lowers to an
+// instruction absent from the gfx1250 ISA, so it is excluded on gfx1250 device
+// compiles.
+#if !defined(__HIP_DEVICE_COMPILE__) \
+    || (__has_builtin(__builtin_amdgcn_swmmac_f32_16x16x32_f16_w32) && !defined(__gfx1250__))
     FPSAN_DEFINE_SWMMAC_GFX12(amdgcn_swmmac_f32_16x16x32_f16_w32,
                               v8h_native,
                               v16h_swmmac_native,
@@ -314,7 +320,8 @@ namespace fpsan
         }                                                                                     \
     }
 
-#if !defined(__HIP_DEVICE_COMPILE__) || __has_builtin(__builtin_amdgcn_swmmac_f32_16x16x32_fp8_fp8_w32)
+#if !defined(__HIP_DEVICE_COMPILE__) \
+    || (__has_builtin(__builtin_amdgcn_swmmac_f32_16x16x32_fp8_fp8_w32) && !defined(__gfx1250__))
     FPSAN_DEFINE_SWMMAC_GFX12_FP8(amdgcn_swmmac_f32_16x16x32_fp8_fp8_w32,
                                   v8e4m3_native,
                                   v16e4m3_swmmac_native,

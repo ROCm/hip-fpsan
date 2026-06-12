@@ -101,7 +101,7 @@ namespace fpsan
     // __has_builtin on gfx12, gfx942, and gfx950, but the AMDGPU backend fails to
     // lower them: it expands the reduce via 32-bit DPP/swizzle and rejects the
     // 64-bit VGPR operand class ("cannot select"). Verified on gfx950 with
-    // TheRock clang. Because there is no usable f64 wave-reduce *instruction* on
+    // ROCm clang. Because there is no usable f64 wave-reduce *instruction* on
     // these targets, we deliberately do NOT ship Float-mode f64 wrappers (a wrapper that
     // silently lowered to a hand-rolled butterfly would misrepresent itself as the
     // intrinsic and corrupt the authoritative test baseline). Customers who need
@@ -316,6 +316,93 @@ namespace fpsan
     {
         return detail::bit_move(
             v, [](std::uint32_t w) -> std::uint32_t { return __builtin_amdgcn_permlane64(w); });
+    }
+#endif
+
+// ---- gfx1250 permlane data movers: bcast / down / up / xor (b32) ------------
+// v_permlane_{bcast,down,up,xor}_b32 vdst, vsrc, ssrc0, ssrc1 -- cross-lane move
+// of the data payload, governed by two wave-uniform scalar selectors. These are
+// pure bit movement (they relocate a lane's storage, never observing the value),
+// so Float and FPSan modes share one implementation. `sel0`/`sel1` MUST be
+// wave-uniform (they lower to SGPR operands); behavior is undefined otherwise.
+#if !defined(__HIP_DEVICE_COMPILE__) || __has_builtin(__builtin_amdgcn_permlane_bcast)
+    template <class FT, Semantics S, Conversions C>
+    FPSAN_DEVICE Value<FT, S, C> amdgcn_permlane_bcast(Value<FT, S, C> v, int sel0, int sel1)
+    {
+        return detail::bit_move(v, [&](std::uint32_t w) -> std::uint32_t {
+            return static_cast<std::uint32_t>(
+                __builtin_amdgcn_permlane_bcast(static_cast<int>(w), sel0, sel1));
+        });
+    }
+    template <class FT, Semantics S, Conversions C>
+    FPSAN_DEVICE Value<FT, S, C> amdgcn_permlane_down(Value<FT, S, C> v, int sel0, int sel1)
+    {
+        return detail::bit_move(v, [&](std::uint32_t w) -> std::uint32_t {
+            return static_cast<std::uint32_t>(
+                __builtin_amdgcn_permlane_down(static_cast<int>(w), sel0, sel1));
+        });
+    }
+    template <class FT, Semantics S, Conversions C>
+    FPSAN_DEVICE Value<FT, S, C> amdgcn_permlane_up(Value<FT, S, C> v, int sel0, int sel1)
+    {
+        return detail::bit_move(v, [&](std::uint32_t w) -> std::uint32_t {
+            return static_cast<std::uint32_t>(
+                __builtin_amdgcn_permlane_up(static_cast<int>(w), sel0, sel1));
+        });
+    }
+    template <class FT, Semantics S, Conversions C>
+    FPSAN_DEVICE Value<FT, S, C> amdgcn_permlane_xor(Value<FT, S, C> v, int sel0, int sel1)
+    {
+        return detail::bit_move(v, [&](std::uint32_t w) -> std::uint32_t {
+            return static_cast<std::uint32_t>(
+                __builtin_amdgcn_permlane_xor(static_cast<int>(w), sel0, sel1));
+        });
+    }
+#endif // __has_builtin(__builtin_amdgcn_permlane_bcast)
+
+// ---- permlane_idx_gen: v_permlane_idx_gen_b32 vdst, vsrc, ssrc0 -------------
+// Generates a per-lane permute INDEX (an integer to feed a subsequent permute),
+// not a moved float payload, so it is exposed as a plain integer helper. Being
+// pure integer index arithmetic, it is mode-independent (no Float/FPSan split).
+#if !defined(__HIP_DEVICE_COMPILE__) || __has_builtin(__builtin_amdgcn_permlane_idx_gen)
+    FPSAN_DEVICE inline std::uint32_t amdgcn_permlane_idx_gen(int src, int sel)
+    {
+        return static_cast<std::uint32_t>(__builtin_amdgcn_permlane_idx_gen(src, sel));
+    }
+#endif
+
+// ---- ds_bpermute_fi_b32: ds_bpermute with FI (fetch-invalid) support --------
+// Same indexed cross-lane gather as ds_bpermute (addr selects the source lane),
+// with the gfx1250 fetch-invalid behavior; pure bit movement.
+#if !defined(__HIP_DEVICE_COMPILE__) || __has_builtin(__builtin_amdgcn_ds_bpermute_fi_b32)
+    template <class FT, Semantics S, Conversions C>
+    FPSAN_DEVICE Value<FT, S, C> amdgcn_ds_bpermute_fi(int addr, Value<FT, S, C> v)
+    {
+        return detail::bit_move(v, [addr](std::uint32_t w) -> std::uint32_t {
+            return static_cast<std::uint32_t>(
+                __builtin_amdgcn_ds_bpermute_fi_b32(addr, static_cast<int>(w)));
+        });
+    }
+#endif
+
+// ---- permlane16_swap: swap two registers' payloads across lane pairs --------
+// v_permlane16_swap_b32 returns {x', y'} (a uint2); it swaps the two operands'
+// lanes within rows of 16. FetchInvalid / BoundCtrl are compile-time immediates.
+// Pure bit movement on both operands; updates x and y in place. Scalar 32-bit
+// storage only.
+#if !defined(__HIP_DEVICE_COMPILE__) || __has_builtin(__builtin_amdgcn_permlane16_swap)
+    template <bool FetchInvalid, bool BoundCtrl, class FT, Semantics S, Conversions C>
+    FPSAN_DEVICE void amdgcn_permlane16_swap(Value<FT, S, C>& x, Value<FT, S, C>& y)
+    {
+        using B = typename Value<FT, S, C>::bits_type;
+        static_assert(!Value<FT, S, C>::is_vector && sizeof(B) <= 4,
+                      "amdgcn_permlane16_swap requires a scalar 32-bit Value");
+        const std::uint32_t xw = static_cast<std::uint32_t>(x.to_storage_bits());
+        const std::uint32_t yw = static_cast<std::uint32_t>(y.to_storage_bits());
+        auto                r  = __builtin_amdgcn_permlane16_swap(
+            static_cast<int>(xw), static_cast<int>(yw), FetchInvalid, BoundCtrl);
+        x = Value<FT, S, C>::from_storage_bits(static_cast<B>(static_cast<std::uint32_t>(r[0])));
+        y = Value<FT, S, C>::from_storage_bits(static_cast<B>(static_cast<std::uint32_t>(r[1])));
     }
 #endif
 

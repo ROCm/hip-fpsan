@@ -10,8 +10,8 @@
 //   unpack: cvt_scalef32_pk_{f32,f16,bf16}_{fp8,bf8}(packed, scale)  [* scale]
 //   pack:   cvt_scalef32_pk_{fp8,bf8}_{f16,bf16}(old, v2, scale)     [/ scale]
 //
-// Two independent oracles, so a divergent (e.g. emulator) implementation fails
-// even though these pass on real gfx950:
+// Two independent oracles, so any implementation that diverges from the host
+// reference fails:
 //
 //   * UnpackAllBytes: stage fp8 byte b in word0/byte0, unpack with scale=1, and
 //     require element0 == the host OCP fp8 decode (the same decode fp8_test.cpp

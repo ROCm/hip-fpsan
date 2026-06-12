@@ -13,18 +13,34 @@ else()
   set(FPSAN_TEST_LANG CXX)
 endif()
 
+# Per-case (ON) registers every TEST() as its own ctest entry via
+# gtest_discover_tests: fine-grained ctest -j parallelism and isolated failures
+# (a crash fails only that case), at the cost of one process launch -- and full
+# HIP runtime init -- per case. Per-binary (OFF) registers each executable as a
+# single ctest entry: one process runs all its TEST()s, far lower launch/init
+# latency, but a crash/failure takes down the whole binary's entry and -j is only
+# across binaries. Default ON to keep granular CI reporting; set OFF for fast
+# local runs where everything is expected to pass.
+option(FPSAN_CTEST_PER_CASE
+       "Register each gtest TEST() as its own ctest entry (vs one entry per binary)"
+       ON)
+
 # Helper: define a test executable from one source file, link the library, set
 # its language, and register it with ctest.
 function(fpsan_add_test name src)
   add_executable(${name} ${src})
   set_source_files_properties(${src} PROPERTIES LANGUAGE ${FPSAN_TEST_LANG})
   target_link_libraries(${name} PRIVATE fpsan::fpsan)
-  if(TARGET GTest::gtest_main)
+  if(TARGET GTest::gtest_main AND FPSAN_CTEST_PER_CASE)
     target_link_libraries(${name} PRIVATE GTest::gtest_main)
     include(GoogleTest)
-    # gtest_discover_tests registers each TEST() individually, so ctest -j can
-    # parallelize across them.
+    # Each TEST() becomes its own ctest entry, so ctest -j parallelizes across
+    # them and a crash fails only that case.
     gtest_discover_tests(${name})
+  elseif(TARGET GTest::gtest_main)
+    target_link_libraries(${name} PRIVATE GTest::gtest_main)
+    # One ctest entry per binary: all of its TEST()s run in a single process.
+    add_test(NAME ${name} COMMAND ${name})
   else()
     # Canary / no-gtest fallback: register the executable as a single test.
     add_test(NAME ${name} COMMAND ${name})
@@ -94,17 +110,28 @@ if(TARGET GTest::gtest_main)
     fpsan_add_test(fpsan_hip_device_test hip_device_test.cpp)
     fpsan_add_test(fpsan_atomic_test atomic_test.cpp)
     fpsan_add_test(fpsan_classify_test classify_test.cpp)
-    # Tests whose kernels touch gfx12-specific builtins (WMMA, permlane64,
-    # mov_dpp8, ballot_w32, fdot2_f16_f16). Register them only when the
-    # arch list contains a gfx12.
+    # gfx12 family detection.  Two tiers behave differently and must not be
+    # conflated:
+    #   _fpsan_has_gfx12  -- any gfx12* (RDNA4 gfx1200/1201 OR gfx1250). Used for
+    #                        the builtins shared across the whole family
+    #                        (permlane64, mov_dpp8, ballot_w32, scalar math,
+    #                        gfx12 cvt/swmmac/global_load_tr).
+    #   _fpsan_has_rdna4  -- only gfx1200/gfx1201. These have the K=16 WMMA
+    #                        (wmma-128b-insts) and the dot9-12 fdot2/dot4 families
+    #                        that gfx1250 dropped, so the tests that exercise
+    #                        those builtins are RDNA4-only.
     set(_fpsan_has_gfx12 FALSE)
     set(_fpsan_has_cdna3 FALSE)
+    set(_fpsan_has_rdna4 FALSE)
     foreach(_arch IN LISTS CMAKE_HIP_ARCHITECTURES)
       if(_arch MATCHES "^gfx12")
         set(_fpsan_has_gfx12 TRUE)
       endif()
       if(_arch MATCHES "^gfx94[0-2]$")
         set(_fpsan_has_cdna3 TRUE)
+      endif()
+      if(_arch MATCHES "^gfx120")
+        set(_fpsan_has_rdna4 TRUE)
       endif()
     endforeach()
     if(_fpsan_has_gfx12 OR _fpsan_has_cdna3)
@@ -113,15 +140,66 @@ if(TARGET GTest::gtest_main)
       # CMake targets.
       fpsan_add_test(fpsan_cvt_test cvt_test.cpp)
     endif()
+    # Shared across the gfx12 family (build on RDNA4 and gfx1250).
     if(_fpsan_has_gfx12)
-      fpsan_add_test(fpsan_wmma_test wmma_test.cpp)
       fpsan_add_test(fpsan_xlane_test xlane_test.cpp)
       fpsan_add_test(fpsan_global_load_tr_test global_load_tr_test.cpp)
+    endif()
+    # RDNA4-only: K=16 WMMA, the fdot2/dot4 (dot9-12) families, and the K=32
+    # SWMMAC shapes (swmmac_*_16x16x32_*_w32). gfx1250 has a different WMMA family
+    # (added below) and no dot9-12, and its SWMMAC shapes are K=64 (f16/bf16) /
+    # K=128 (fp8) -- the K=32 shape is absent from the gfx1250 ISA, so the gfx12
+    # K=32 builtin emits an instruction gfx1250 cannot decode, so it is excluded
+    # on gfx1250.
+    if(_fpsan_has_rdna4)
+      fpsan_add_test(fpsan_wmma_test wmma_test.cpp)
       fpsan_add_test(fpsan_swmmac_gfx12_test swmmac_gfx12_test.cpp)
     endif()
     if(_fpsan_has_cdna3)
       fpsan_add_test(fpsan_mfma_cdna3_test mfma_cdna3_test.cpp)
       fpsan_add_test(fpsan_smfmac_cdna3_test smfmac_cdna3_test.cpp)
+    endif()
+    # gfx1250-only tests (builtins exclusive to gfx1250: bf16 transcendentals,
+    # bf16/fp8<->f16 cvt, block-scale cvt, gfx1250 WMMA/SWMMAC, ...).
+    set(_fpsan_has_gfx1250 FALSE)
+    foreach(_arch IN LISTS CMAKE_HIP_ARCHITECTURES)
+      if(_arch MATCHES "^gfx125")
+        set(_fpsan_has_gfx1250 TRUE)
+      endif()
+    endforeach()
+    if(_fpsan_has_gfx1250)
+      fpsan_add_test(fpsan_amdgcn_bf16_trans_test amdgcn_bf16_trans_test.cpp)
+      fpsan_add_test(fpsan_cvt_f16_fp8_gfx1250_test cvt_f16_fp8_gfx1250_test.cpp)
+      fpsan_add_test(fpsan_cvt_scalef32_pk_gfx1250_test
+                     cvt_scalef32_pk_gfx1250_test.cpp)
+      fpsan_add_test(fpsan_cvt_scale_unpack_gfx1250_test
+                     cvt_scale_unpack_gfx1250_test.cpp)
+      fpsan_add_test(fpsan_cvt_fp8_e5m3_gfx1250_test
+                     cvt_fp8_e5m3_gfx1250_test.cpp)
+      fpsan_add_test(fpsan_cvt_sr_pack_gfx1250_test
+                     cvt_sr_pack_gfx1250_test.cpp)
+      fpsan_add_test(fpsan_cvt_sr_pk_f16_gfx1250_test
+                     cvt_sr_pk_f16_gfx1250_test.cpp)
+      fpsan_add_test(fpsan_load_tr16_gfx1250_test
+                     load_tr16_gfx1250_test.cpp)
+      fpsan_add_test(fpsan_wmma_16x16x4_gfx1250_test
+                     wmma_16x16x4_gfx1250_test.cpp)
+      fpsan_add_test(fpsan_wmma_16x16x32_gfx1250_test
+                     wmma_16x16x32_gfx1250_test.cpp)
+      fpsan_add_test(fpsan_wmma_16x16x64_fp8_gfx1250_test
+                     wmma_16x16x64_fp8_gfx1250_test.cpp)
+      fpsan_add_test(fpsan_wmma_16x16x128_fp8_gfx1250_test
+                     wmma_16x16x128_fp8_gfx1250_test.cpp)
+      fpsan_add_test(fpsan_wmma_16x16x128_f8f6f4_gfx1250_test
+                     wmma_16x16x128_f8f6f4_gfx1250_test.cpp)
+      fpsan_add_test(fpsan_wmma_32x16x128_f4_gfx1250_test
+                     wmma_32x16x128_f4_gfx1250_test.cpp)
+      fpsan_add_test(fpsan_wmma_scale_f8f6f4_gfx1250_test
+                     wmma_scale_f8f6f4_gfx1250_test.cpp)
+      fpsan_add_test(fpsan_swmmac_16x16x128_fp8_gfx1250_test
+                     swmmac_16x16x128_fp8_gfx1250_test.cpp)
+      fpsan_add_test(fpsan_swmmac_16x16x64_16_gfx1250_test
+                     swmmac_16x16x64_16_gfx1250_test.cpp)
     endif()
     # gfx950 (CDNA4) MFMA / smfmac / scaled-cvt tests.
     set(_fpsan_has_gfx950 FALSE)
@@ -160,11 +238,14 @@ if(TARGET GTest::gtest_main)
       # source also contains dot-product tests gated by compile definitions so
       # the gfx12-only cases do not leak into CDNA builds.
       fpsan_add_test(fpsan_amdgcn_math_test amdgcn_math_test.cpp)
-      if(_fpsan_has_gfx12 OR _fpsan_has_cdna3)
+      # fdot2 / dot4 (dot9-12) exist on RDNA4 and CDNA3 but NOT gfx1250, which
+      # dropped the dot families. Gate on rdna4/cdna3 (not the whole gfx12
+      # family) so the gfx1250 build of this shared file stays scalar-only.
+      if(_fpsan_has_rdna4 OR _fpsan_has_cdna3)
         target_compile_definitions(fpsan_amdgcn_math_test
                                    PRIVATE FPSAN_TEST_ENABLE_FDOT2=1)
       endif()
-      if(_fpsan_has_gfx12)
+      if(_fpsan_has_rdna4)
         target_compile_definitions(fpsan_amdgcn_math_test
                                    PRIVATE FPSAN_TEST_ENABLE_GFX12_DOT_MATH=1)
       endif()

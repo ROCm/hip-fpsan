@@ -18,6 +18,7 @@
 #include <gtest/gtest.h>
 
 #include <cstddef>
+#include <string>
 #include <vector>
 
 // Assert a HIP call succeeded (prints the HIP error string on failure).
@@ -33,6 +34,26 @@ inline bool have_device()
 {
     int n = 0;
     return hipGetDeviceCount(&n) == hipSuccess && n > 0;
+}
+
+// True when the current HIP device is gfx1250. gfx1250 is a DISTINCT
+// architecture from the gfx12 / RDNA4 family (gfx1200/1201/1202) despite the
+// shared "gfx12" prefix: it adds the permlane_{bcast,down,up,xor},
+// permlane16_swap and permlane_idx_gen cross-lane ops that RDNA4 lacks. Those
+// builtins are device-gated by __has_builtin in the wrappers, so their kernels
+// are not emitted on RDNA4 -- a host that launches them there hits "cannot find
+// symbol" at runtime. Tests of those ops must GTEST_SKIP unless this returns
+// true. Match the full "gfx1250" token (not a "gfx12" prefix, which would
+// wrongly accept RDNA4) and ignore any trailing :feature flags in gcnArchName.
+inline bool device_is_gfx1250()
+{
+    int dev = 0;
+    if(hipGetDevice(&dev) != hipSuccess)
+        return false;
+    hipDeviceProp_t prop{};
+    if(hipGetDeviceProperties(&prop, dev) != hipSuccess)
+        return false;
+    return std::string(prop.gcnArchName).compare(0, 7, "gfx1250") == 0;
 }
 
 // Allocate device memory and copy a host vector into it. Caller hipFree()s.

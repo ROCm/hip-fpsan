@@ -17,12 +17,11 @@
 //   output_loc_32(M, N, i, j, b)              ->  (reg, lane)
 //   output_loc_64(M, N, i, j, b)              ->  (reg, lane)
 //
-// were originally seeded from AMD's rocjitsu simulator (shared/mfma_exec.h) but
-// the SOURCE OF TRUTH here is real gfx950 silicon: every shape is pinned by a
+// are pinned to real gfx950 silicon as the SOURCE OF TRUTH: every shape has a
 // LayoutMatchesHardware test that compares the software dataflow's gather to
-// the actual __builtin_amdgcn_mfma_* on-device, and where rocjitsu diverged
-// from hardware (e.g. the f64 4x4x4 shape) the silicon behaviour wins. Nothing
-// here is shaped to keep the simulator happy.
+// the actual __builtin_amdgcn_mfma_* on-device, so the silicon behaviour wins
+// for every shape (including the f64 4x4x4 shape). Nothing here is tuned to
+// match any reference other than the hardware.
 //
 // gfx9-family AccMode is "Unified" (output register == input register file),
 // matching how CDNA3 and CDNA4 schedule MFMA -- so a single dataflow template
@@ -110,9 +109,9 @@ namespace fpsan
 
         // ---- gfx9 MFMA fragment layout ---------------------------------------------
         // input_loc / output_loc_32 / output_loc_64 for the GFX9 (CDNA) MFMA register
-        // layout. Seeded from rocjitsu's mfma_exec.h, but each shape that uses these is
-        // pinned to real gfx950 silicon by a LayoutMatchesHardware test; the 4x4x4
-        // shape, where the dense formula does not apply, is handled separately.
+        // layout. Each shape that uses these is pinned to real gfx950 silicon by a
+        // LayoutMatchesHardware test; the 4x4x4 shape, where the dense formula does
+        // not apply, is handled separately.
         //
         //   dim         outer dim of the matrix (M for A, N for B)
         //   K           reduction dimension
@@ -276,17 +275,8 @@ namespace fpsan
             return d;
         }
 
-        // ---- OCP-MX E8M0 block-scale -> float -------------------------------------
-        // E8M0 stores only an exponent (bias 127): byte b -> 2^(b-127). 0xFF is NaN.
-        // Built by bit construction so it is exact (no libm) and host/device safe.
-        FPSAN_HOST_DEVICE inline float e8m0_to_float(unsigned byte)
-        {
-            if(byte == 0xFFu)
-                return __builtin_nanf("");
-            if(byte == 0u)
-                return __builtin_bit_cast(float, std::uint32_t(0x00400000u)); // 2^-127
-            return __builtin_bit_cast(float, static_cast<std::uint32_t>(byte) << 23);
-        }
+        // detail::e8m0_to_float (OCP-MX E8M0 block-scale -> float) lives in
+        // fpsan/detail/subbyte_widen.hpp, shared with the gfx1250 WMMA scale path.
 
         // ---- Per-K-block scale lane gather (silicon-verified) ---------------------
         // The scaled MFMA carries one E8M0 scale per 32-element K-block, NOT one per
@@ -295,8 +285,7 @@ namespace fpsan
         //   lane = lane_stride*kb + rc   (lane_stride = 16 for 16x16x128's 4 blocks,
         //                                 32 for 32x32x64's 2 blocks)
         // and `op` (the ScaleAOp/ScaleBOp opsel) selects which of the 4 E8M0 bytes.
-        // Reverse-engineered + verified full-block-random on MI350
-        // (/tmp/verify_scale_lane*.hip + /tmp/verify_scale_full_*.hip). The previous
+        // Reverse-engineered + verified full-block-random on MI350. The previous
         // uniform-scale model is exactly the special case where every lane carries the
         // same scale operand, so existing uniform call sites are unaffected.
         //
@@ -431,8 +420,8 @@ namespace fpsan
         // silicon-verified positions -- Width-bit field s occupies bits Width*s ..
         // Width*s+Width-1, little-endian across the 8 i32 words. This matches the cvt
         // sub-byte convention (no phi bijection on sub-byte payloads; widen == signed
-        // resize of the n-bit payload). Verified on MI350 by /tmp/verify_scale_*.hip
-        // (full-block random match of the builtin for every same-width A/B combo).
+        // resize of the n-bit payload). Verified on MI350 by a full-block-random
+        // match of the builtin for every same-width A/B combo.
         //
         // Cross-lane gather uses ds_bpermute on the individual 32-bit words (the field
         // may straddle two words for fp6). Mixed-width A/B (e.g. fp8 x fp4) is NOT
@@ -463,9 +452,8 @@ namespace fpsan
 
         // Sub-byte x sub-byte. A and B may have DIFFERENT widths (e.g. fp6 x fp4):
         // the hardware pairs A field-index s with B field-index s regardless of width
-        // (silicon-verified, /tmp/verify_scale_mix_128.hip + verify_scale_subdiff_3264
-        // -- the per-width physical->k order is identical across all sub formats, so
-        // equal field indices pair the same k). Per-K-block scale via
+        // (silicon-verified -- the per-width physical->k order is identical across all
+        // sub formats, so equal field indices pair the same k). Per-K-block scale via
         // scale_block_factor.
         template <int WA, int WB, Semantics S, Conversions C>
         FPSAN_DEVICE Value<v4f_native, S, C> mfma_scale_sub_16x16x128(const int (&aw)[8],
@@ -560,8 +548,7 @@ namespace fpsan
         // physical k orderings, so equal field indices do NOT pair the same k. The
         // 8-bit operand uses its native fp8 model; the sub-byte operand uses the
         // silicon-RE'd "mix model" that pairs it correctly with fp8 (reverse-engineered
-        // in /tmp/verify_scale_perm.hip, proven full-block-random in verify_scale_mix2*
-        // for both shapes):
+        // and proven full-block-random on MI350 for both shapes):
         //   16x16x128 sub mix slot: lane = 16*q0 + idx, field p0, with
         //     q0 = 2*((k>>6)&1) + ((k>>5)&1),  p0 = 16*((k>>4)&1) + (k&15)
         //   32x32x64  sub mix slot: lane = 16*(2*(k/32) + idx/16) + (idx%16),
@@ -666,12 +653,8 @@ namespace fpsan
             return d;
         }
 
-        // Width of the f8f6f4 format immediate's element: fp8/bf8 (0,1) -> 8,
-        // fp6/bf6 (2,3) -> 6, fp4 (4) -> 4.
-        FPSAN_HOST_DEVICE constexpr int f8f6f4_width(int code)
-        {
-            return (code <= 1) ? 8 : (code <= 3) ? 6 : 4;
-        }
+        // detail::f8f6f4_width (element bit width of the format immediate) lives in
+        // fpsan/detail/subbyte_widen.hpp, shared with the gfx1250 WMMA f8f6f4 path.
 
     } // namespace detail
 
@@ -1186,8 +1169,8 @@ namespace fpsan
             // V_MFMA_F64_4X4X4_4B_F64: 4 independent 4x4 blocks (B=4), each a K=4
             // contraction, one scalar output per lane. The per-lane layout was
             // reverse-engineered on real MI350 (the dense input_loc/output_loc
-            // formulas do NOT apply to this shape -- K=4 < 16 lanes/block -- which is
-            // where the earlier rocjitsu-derived port diverged from silicon):
+            // formulas do NOT apply to this shape -- K=4 < 16 lanes/block, so it is
+            // pinned directly to silicon):
             //   output lane L holds D[i][j] of block b with
             //       i = L / 16,  b = (L % 16) / 4,  j = L % 4
             //   A[i][k] of block b lives at lane 16*k + 4*b + i
@@ -1288,13 +1271,13 @@ namespace fpsan
 //   * Scale is E8M0 (2^(byte-127), 0xFF=NaN), one per 32-element K-block. Each
 //     K-block kb reads its scale from a SPECIFIC lane of the scale operand:
 //     lane = 16*kb + row (16x16x128) / 32*kb + row (32x32x64), byte = opsel.
-//     (Silicon-RE'd: detail::scale_block_factor; verify_scale_lane*.hip.)
+//     (Silicon-RE'd: detail::scale_block_factor.)
 //
 // FPSan model: D[i][j] = C[i][j] + sum_kb 2^scaleA(i,kb) * 2^scaleB(j,kb) *
 // (sum_{k in block kb} A[i][k]*B[k][j]) in the payload ring. This is correct
 // for arbitrary PER-K-BLOCK scales (non-uniform across the row/column); uniform
 // scale is the special case where every lane holds the same scale operand.
-// Verified full-block-random on MI350 (verify_scale_full_*.hip) for all opsels.
+// Verified full-block-random on MI350 for all opsels.
 #if !defined(__HIP_DEVICE_COMPILE__) \
     || __has_builtin(__builtin_amdgcn_mfma_scale_f32_16x16x128_f8f6f4)
     template <int         CBSZ     = 0,
@@ -1396,8 +1379,8 @@ namespace fpsan
 // A and B may have ANY sub-byte widths (fp6/bf6/fp4 in any combination,
 // including DIFFERENT widths e.g. fp6 x fp4): all sub-byte formats share one
 // physical k ordering, so the hardware pairs equal field indices to the same k
-// (silicon-verified full-block-random for every sub x sub combo at both shapes
-// -- verify_scale_mix_128.hip + verify_scale_subdiff_3264.hip). MIXING an
+// (silicon-verified full-block-random for every sub x sub combo at both
+// shapes). MIXING an
 // 8-bit (fp8/bf8) operand WITH a sub-byte one is the one case this wrapper does
 // not handle (different physical k orderings); use the *_f8f6f4_mixed wrappers
 // below for that.
@@ -1487,8 +1470,8 @@ namespace fpsan
 // is the raw packed v8i32. `_mixed_a8`: A is 8-bit, B is sub-byte; `_mixed_b8`:
 // A is sub-byte, B is 8-bit. The two formats use different physical k orderings
 // on hardware -- the sub operand follows the silicon-RE'd mix model that pairs
-// it with fp8 (detail::mfma_scale_mixed_*; proven full-block-random on MI350,
-// /tmp/verify_scale_mix2*.hip). Per-K-block E8M0 scale as elsewhere.
+// it with fp8 (detail::mfma_scale_mixed_*; proven full-block-random on
+// MI350). Per-K-block E8M0 scale as elsewhere.
 #if !defined(__HIP_DEVICE_COMPILE__) \
     || __has_builtin(__builtin_amdgcn_mfma_scale_f32_16x16x128_f8f6f4)
     template <int         CBSZ,

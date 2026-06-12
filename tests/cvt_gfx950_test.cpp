@@ -206,8 +206,8 @@ TEST(CvtPkF32, PackWritesSameWordInBothModes)
 // that host decode). The other tests here use small integer inputs that never
 // reach the E4M3 high-exponent bytes 0x79-0x7F -- exactly where the
 // NaN-detection rule matters (OCP E4M3FN: 0x79-0x7E are finite normals
-// 288..448, only 0x7F is NaN). On real silicon this passes; under an emulator
-// it catches a decode that gets the NaN boundary (or any byte) wrong.
+// 288..448, only 0x7F is NaN). It catches any implementation whose decode gets
+// the NaN boundary (or any byte) wrong.
 template <class FP8>
 __global__ void k_unpack_all_bytes(const int* packed, float* out)
 {
@@ -255,9 +255,8 @@ TEST(CvtPkF32, Bf8UnpackAllBytes)
 // ---------------------------------------------------------------------------
 // Coverage for the rest of the PR's non-scaled cvt (cvt_sr) and the fp8
 // cvt_scalef32 ops, via round-trips through the already-validated unpack ops.
-// All references are host-computed (independent of the device builtin), so a
-// rocjitsu implementation that diverges from real hardware shows up as a
-// failure even though these pass on silicon.
+// All references are host-computed (independent of the device builtin), so any
+// implementation that diverges from them shows up as a failure.
 // ---------------------------------------------------------------------------
 template <class FP8>
 struct CvtOps;

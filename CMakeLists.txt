@@ -18,9 +18,10 @@
 #   -DFPSAN_BUILD_EXAMPLES=ON|OFF   (default ON)  build the tutorial examples
 #   -DFPSAN_ENABLE_HIP=ON|OFF       (default: ON when a HIP toolchain is found,
 #                                    else OFF)    compile tests/examples as HIP.
-#       The default flows from CMAKE_HIP_COMPILER (set explicitly, auto-detected
-#       from a TheRock/therock-venv install, or found on PATH by
-#       check_language(HIP)); set -DFPSAN_ENABLE_HIP=OFF to force pure C++.
+#       The default flows from CMAKE_HIP_COMPILER, derived from ROCM_PATH
+#       (resolved as -DROCM_PATH= > $ENV{ROCM_PATH} > `rocm-sdk path --root` >
+#       /opt/rocm) or set explicitly; set -DFPSAN_ENABLE_HIP=OFF to force a
+#       pure-C++ build.
 #
 cmake_minimum_required(VERSION 3.21)
 
@@ -40,36 +41,54 @@ option(FPSAN_BUILD_TESTS "Build the FPSan test suite" ON)
 option(FPSAN_BUILD_EXAMPLES "Build the tutorial examples" ON)
 
 # ---- HIP toolchain detection -----------------------------------------------
-# Whether the tests/examples compile as HIP C++ flows from the standard
-# CMAKE_HIP_COMPILER variable, mirroring recent ROCm libraries (rocPRIM,
-# rocThrust: check_language(HIP) plus a CMAKE_HIP_COMPILER-gated option) rather
-# than a bespoke always-present toggle. If the user has not pointed
-# CMAKE_HIP_COMPILER at a toolchain, try a from-source TheRock build then the
-# therock venv SDK, and finally let check_language(HIP) search PATH. Override any
-# of this with -DCMAKE_HIP_COMPILER=... / -DCMAKE_HIP_COMPILER_ROCM_ROOT=...
-if(NOT CMAKE_HIP_COMPILER)
-  # Each candidate: "<rocm-root>|<clang++ relative path>".
-  set(_fpsan_rocm_candidates
-      "$ENV{HOME}/therock-7.13|lib/llvm/bin/clang++"
-      "$ENV{HOME}/workspace/TheRock-build/dist/rocm|lib/llvm/bin/clang++"
-      "$ENV{HOME}/therock_venv/lib/python3.13/site-packages/_rocm_sdk_devel|llvm/bin/clang++")
-  foreach(_cand ${_fpsan_rocm_candidates})
-    string(REPLACE "|" ";" _cand "${_cand}")
-    list(GET _cand 0 _rocm_root)
-    list(GET _cand 1 _rocm_clang_rel)
-    if(EXISTS "${_rocm_root}/${_rocm_clang_rel}")
-      message(STATUS "fpsan: found ROCm/HIP toolchain at ${_rocm_root}")
-      set(CMAKE_HIP_COMPILER "${_rocm_root}/${_rocm_clang_rel}" CACHE FILEPATH "HIP compiler")
-      set(CMAKE_HIP_COMPILER_ROCM_ROOT "${_rocm_root}" CACHE PATH
-          "ROCm root containing lib/cmake/hip-lang")
-      list(APPEND CMAKE_PREFIX_PATH "${_rocm_root}")
-      break()
+# Follow the ROCm-library convention (rocPRIM, rocThrust, hipBLASLt): discover
+# the toolchain under a ROCM_PATH root resolved with the same priority those
+# projects use -- an explicit -DROCM_PATH=..., then $ENV{ROCM_PATH}, then the
+# ROCm Python SDK (`rocm-sdk path --root`), then the canonical install location
+# (/opt/rocm on Linux). From that root we set the standard CMAKE_HIP_COMPILER
+# (ROCm's amdclang++ at lib/llvm/bin, matching rocm-libraries'
+# default_amdclang.cmake) and add the root to CMAKE_PREFIX_PATH, then
+# check_language(HIP) confirms it (falling back to a PATH search). Whether
+# tests/examples compile as HIP then flows from CMAKE_HIP_COMPILER rather than
+# from a bespoke always-present toggle.
+if(NOT DEFINED ROCM_PATH)
+  if(DEFINED ENV{ROCM_PATH})
+    set(ROCM_PATH "$ENV{ROCM_PATH}" CACHE PATH "Path to the ROCm installation")
+  else()
+    # Ask the ROCm Python SDK before falling back to the canonical location, the
+    # same priority the ROCm libraries use (rocm-libraries stinkytofu/hipblaslt):
+    #   ROCM_PATH env  >  `rocm-sdk path --root`  >  /opt/rocm
+    set(_fpsan_rocm_root "")
+    find_program(FPSAN_ROCM_SDK rocm-sdk)
+    if(FPSAN_ROCM_SDK)
+      execute_process(
+        COMMAND "${FPSAN_ROCM_SDK}" path --root
+        OUTPUT_VARIABLE _fpsan_rocm_root
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+        ERROR_QUIET)
     endif()
-  endforeach()
+    if(_fpsan_rocm_root AND EXISTS "${_fpsan_rocm_root}")
+      set(ROCM_PATH "${_fpsan_rocm_root}" CACHE PATH "Path to the ROCm installation")
+    else()
+      set(ROCM_PATH "/opt/rocm" CACHE PATH "Path to the ROCm installation")
+    endif()
+    unset(_fpsan_rocm_root)
+  endif()
 endif()
-
+if(NOT "${ROCM_PATH}" IN_LIST CMAKE_PREFIX_PATH)
+  list(APPEND CMAKE_PREFIX_PATH "${ROCM_PATH}")
+endif()
+# Derive the HIP compiler (ROCm's amdclang++) from ROCM_PATH when the user has
+# not set one explicitly; leave an explicit -DCMAKE_HIP_COMPILER untouched.
+if(NOT CMAKE_HIP_COMPILER AND EXISTS "${ROCM_PATH}/lib/llvm/bin/amdclang++")
+  set(CMAKE_HIP_COMPILER "${ROCM_PATH}/lib/llvm/bin/amdclang++" CACHE FILEPATH "HIP compiler")
+  if(NOT CMAKE_HIP_COMPILER_ROCM_ROOT)
+    set(CMAKE_HIP_COMPILER_ROCM_ROOT "${ROCM_PATH}" CACHE PATH
+        "ROCm root containing lib/cmake/hip-lang")
+  endif()
+endif()
 include(CheckLanguage)
-check_language(HIP) # fills CMAKE_HIP_COMPILER from PATH if still unset
+check_language(HIP) # confirms CMAKE_HIP_COMPILER, or finds it on PATH if unset
 
 # The HIP path is on by default when a HIP compiler is available and forced off
 # otherwise; pass -DFPSAN_ENABLE_HIP=OFF to force a pure-C++ build even where a
