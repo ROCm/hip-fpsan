@@ -263,7 +263,7 @@ auto host_sum16(const In* cols)
         return acc.fpsan_payload();
 }
 
-static constexpr int kLabelW = 32;
+static constexpr int kLabelW = 34;
 static void          show_float(const char* label, float f)
 {
     std::uint32_t bits;
@@ -272,7 +272,9 @@ static void          show_float(const char* label, float f)
 }
 static void show_payload(const char* label, std::uint32_t p)
 {
-    std::printf("  %-*s             0x%08x\n", kLabelW, label, p);
+    // Blank value column ("%14s" of "") so the hex digits line up under the
+    // Float-mode (0x...) column above; the 3 spaces match the "  (" prefix.
+    std::printf("  %-*s %14s   0x%08x\n", kLabelW, label, "", p);
 }
 
 int main()
