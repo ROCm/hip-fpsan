@@ -44,33 +44,33 @@ namespace fpsan
 // FPSan paths may differ in last-stage rounding -- the FPSan answer is the
 // one that matches an independent host scalar butterfly reference, which is
 // the only thing FPSan is asked to certify).
-#define FPSAN_DEFINE_WAVE_REDUCE(name, type, COMBINE_EXPR, BUILTIN)                   \
-    template <int         Strategy = 0,                                               \
-              Semantics   S        = Semantics::Float,                                \
-              Conversions C        = Conversions::Explicit>                           \
-    FPSAN_DEVICE Value<type, S, C> name(Value<type, S, C> v)                          \
-    {                                                                                 \
-        if constexpr(S == Semantics::Float)                                           \
-        {                                                                             \
-            return Value<type, S, C>(BUILTIN(v.to_float(), Strategy));                \
-        }                                                                             \
-        else                                                                          \
-        {                                                                             \
+#define FPSAN_DEFINE_WAVE_REDUCE(name, type, COMBINE_EXPR, BUILTIN)                    \
+    template <int         Strategy = 0,                                                \
+              Semantics   S        = Semantics::Float,                                 \
+              Conversions C        = Conversions::Explicit>                            \
+    FPSAN_DEVICE Value<type, S, C> name(Value<type, S, C> v)                           \
+    {                                                                                  \
+        if constexpr(S == Semantics::Float)                                            \
+        {                                                                              \
+            return Value<type, S, C>(BUILTIN(v.to_float(), Strategy));                 \
+        }                                                                              \
+        else                                                                           \
+        {                                                                              \
             /* Wave-size-correct XOR butterfly. detail::wave_shfl handles gfx11      \
        * wave64 cross-half moves with V_PERMLANE64_B32 before same-half DS    \
        * bpermute. The gfx11 wave64 Float builtin's default LLVM lowering is  \
        * tracked separately in the coverage docs because it does not match     \
-       * LLVM's documented full-wave reduction contract on tested silicon. */  \
-            const int         ws   = __builtin_amdgcn_wavefrontsize();                \
-            const int         lane = detail::wave_lane_full();                        \
-            Value<type, S, C> r    = v;                                               \
-            for(int off = 1; off < ws; off <<= 1)                                     \
-            {                                                                         \
-                auto other = detail::wave_shfl(r, lane ^ off);                        \
-                r          = (COMBINE_EXPR);                                          \
-            }                                                                         \
-            return r;                                                                 \
-        }                                                                             \
+       * LLVM's documented full-wave reduction contract on tested silicon. */ \
+            const int         ws   = __builtin_amdgcn_wavefrontsize();                 \
+            const int         lane = detail::wave_lane_full();                         \
+            Value<type, S, C> r    = v;                                                \
+            for(int off = 1; off < ws; off <<= 1)                                      \
+            {                                                                          \
+                auto other = detail::wave_shfl(r, lane ^ off);                         \
+                r          = (COMBINE_EXPR);                                           \
+            }                                                                          \
+            return r;                                                                  \
+        }                                                                              \
     }
 
 // ---- f32 ---- (gfx10+: __builtin_amdgcn_wave_reduce_f* on RDNA)
@@ -411,6 +411,23 @@ namespace fpsan
         const std::uint32_t xw = static_cast<std::uint32_t>(x.to_storage_bits());
         const std::uint32_t yw = static_cast<std::uint32_t>(y.to_storage_bits());
         auto                r  = __builtin_amdgcn_permlane16_swap(
+            static_cast<int>(xw), static_cast<int>(yw), FetchInvalid, BoundCtrl);
+        x = Value<FT, S, C>::from_storage_bits(static_cast<B>(static_cast<std::uint32_t>(r[0])));
+        y = Value<FT, S, C>::from_storage_bits(static_cast<B>(static_cast<std::uint32_t>(r[1])));
+    }
+#endif
+
+// ---- permlane32_swap: swap two registers' payloads across 32-lane halves ----
+#if !defined(__HIP_DEVICE_COMPILE__) || __has_builtin(__builtin_amdgcn_permlane32_swap)
+    template <bool FetchInvalid, bool BoundCtrl, class FT, Semantics S, Conversions C>
+    FPSAN_DEVICE void amdgcn_permlane32_swap(Value<FT, S, C>& x, Value<FT, S, C>& y)
+    {
+        using B = typename Value<FT, S, C>::bits_type;
+        static_assert(!Value<FT, S, C>::is_vector && sizeof(B) <= 4,
+                      "amdgcn_permlane32_swap requires a scalar 32-bit Value");
+        const std::uint32_t xw = static_cast<std::uint32_t>(x.to_storage_bits());
+        const std::uint32_t yw = static_cast<std::uint32_t>(y.to_storage_bits());
+        auto                r  = __builtin_amdgcn_permlane32_swap(
             static_cast<int>(xw), static_cast<int>(yw), FetchInvalid, BoundCtrl);
         x = Value<FT, S, C>::from_storage_bits(static_cast<B>(static_cast<std::uint32_t>(r[0])));
         y = Value<FT, S, C>::from_storage_bits(static_cast<B>(static_cast<std::uint32_t>(r[1])));

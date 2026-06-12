@@ -190,12 +190,17 @@ void test_ds_bpermute_xor(int off)
     std::vector<Out> got(LANES);
     HIP_CHECK(hipMemcpy(got.data(), d_out, LANES * sizeof(Out), hipMemcpyDeviceToHost));
     using V = Value<float, S, kCC>;
+#if FPSAN_TEST_FORCE_WAVE_SIZE == 64
+    const bool gfx950_fullwave = device_is_gfx950();
+#endif
     for(int i = 0; i < LANES; ++i)
     {
         int src_lane = i ^ off;
-        #if FPSAN_TEST_FORCE_WAVE_SIZE == 64
+#if FPSAN_TEST_FORCE_WAVE_SIZE == 64
+        // gfx11 wave64 DS lane selection is modulo 32; gfx950 crosses the full wave.
+        if(!gfx950_fullwave)
             src_lane = (i & ~31) | (src_lane & 31);
-        #endif
+#endif
         const float src = static_cast<float>(src_lane * 7 + 1) - 100.f;
         V           src_v{src};
         Out         expected;
@@ -278,13 +283,18 @@ void test_ds_permute_xor(int off)
     std::vector<Out> got(LANES);
     HIP_CHECK(hipMemcpy(got.data(), d_out, LANES * sizeof(Out), hipMemcpyDeviceToHost));
     using V = Value<float, S, kCC>;
+#if FPSAN_TEST_FORCE_WAVE_SIZE == 64
+    const bool gfx950_fullwave = device_is_gfx950();
+#endif
     for(int i = 0; i < LANES; ++i)
     {
         int src_lane = i ^ off;
-        #if FPSAN_TEST_FORCE_WAVE_SIZE == 64
+#if FPSAN_TEST_FORCE_WAVE_SIZE == 64
+        // gfx11 wave64 DS lane selection is modulo 32; gfx950 crosses the full wave.
+        if(!gfx950_fullwave)
             src_lane = (i & ~31) | (src_lane & 31);
-        #endif
-        // Lane i was written by the selected same-half source lane.
+#endif
+        // Lane i was written by the selected source lane.
         const float src = static_cast<float>(src_lane * 7 + 1) - 100.f;
         V           src_v{src};
         Out         expected;
@@ -476,12 +486,12 @@ TEST(Xlane, DsSwizzleHostOracle)
 {
     if(!have_device())
         GTEST_SKIP() << "no HIP device";
-    check_ds_swizzle_oracle<0x001F>("identity");    // bitmask: and=0x1F -> l'=l
-    check_ds_swizzle_oracle<0x041F>("xor1");        // bitmask: xor=1 -> swap pairs
-    check_ds_swizzle_oracle<0x081F>("xor2");        // bitmask: xor=2
-    check_ds_swizzle_oracle<0x101F>("xor4");        // bitmask: xor=4
+    check_ds_swizzle_oracle<0x001F>("identity"); // bitmask: and=0x1F -> l'=l
+    check_ds_swizzle_oracle<0x041F>("xor1"); // bitmask: xor=1 -> swap pairs
+    check_ds_swizzle_oracle<0x081F>("xor2"); // bitmask: xor=2
+    check_ds_swizzle_oracle<0x101F>("xor4"); // bitmask: xor=4
     check_ds_swizzle_oracle<0x8000>("quad_bcast0"); // quad: all pick quad-lane 0
-    check_ds_swizzle_oracle<0x80B1>("quad_swap");   // quad perm (1,0,3,2)
+    check_ds_swizzle_oracle<0x80B1>("quad_swap"); // quad perm (1,0,3,2)
 }
 
 // ---- mov_dpp (QUAD_PERM identity = 0xE4: lane k <- lane k) ------------------
@@ -539,6 +549,7 @@ TEST(Xlane, MovDppIdentityFpsan)
     test_mov_dpp_identity<Semantics::FPSan>();
 }
 
+#if !defined(__HIP_DEVICE_COMPILE__) || __has_builtin(__builtin_amdgcn_mov_dpp8)
 // ---- mov_dpp8 (identity selector 0x76543210 = lane i reads lane i) ----------
 template <Semantics S, class Out>
 __global__ void k_mov_dpp8_identity(Out* out)
@@ -584,20 +595,27 @@ void test_mov_dpp8_identity()
 
 TEST(Xlane, MovDpp8IdentityFloat)
 {
+    if(device_is_gfx950())
+        GTEST_SKIP() << "mov_dpp8 is not a gfx950 op";
     test_mov_dpp8_identity<Semantics::Float>();
 }
 TEST(Xlane, MovDpp8IdentityFpsan)
 {
+    if(device_is_gfx950())
+        GTEST_SKIP() << "mov_dpp8 is not a gfx950 op";
     test_mov_dpp8_identity<Semantics::FPSan>();
 }
 
+#endif // __has_builtin(__builtin_amdgcn_mov_dpp8)
+
+#if !defined(__HIP_DEVICE_COMPILE__) || __has_builtin(__builtin_amdgcn_permlane64)
 // ---- permlane64 (wave64 swaps low/high halves; wave32 is identity) ----------
 template <Semantics S, class Out>
 __global__ void k_permlane64(const float* in, Out* out)
 {
-    const int                           lane = threadIdx.x;
-    Value<float, S, kCC>                v{in[lane]};
-    auto                                r = fpsan::amdgcn_permlane64(v);
+    const int            lane = threadIdx.x;
+    Value<float, S, kCC> v{in[lane]};
+    auto                 r = fpsan::amdgcn_permlane64(v);
     if constexpr(S == Semantics::Float)
         out[lane] = static_cast<float>(r);
     else
@@ -610,6 +628,8 @@ void test_permlane64()
     int ndev = 0;
     if(hipGetDeviceCount(&ndev) != hipSuccess || ndev == 0)
         GTEST_SKIP() << "no HIP device";
+    if(device_is_gfx950())
+        GTEST_SKIP() << "permlane64 is not a gfx950 op";
     using Out = std::conditional_t<S == Semantics::Float, float, std::uint32_t>;
     std::vector<float> in(LANES);
     for(int i = 0; i < LANES; ++i)
@@ -657,6 +677,7 @@ TEST(Xlane, Permlane64Fpsan)
 {
     test_permlane64<Semantics::FPSan>();
 }
+#endif // __has_builtin(__builtin_amdgcn_permlane64)
 
 // ---- gfx1250 permlane bcast/down/up/xor (cross-mode bit-identity) -----------
 // Selector semantics are intricate; we certify the load-bearing invariant that
@@ -818,9 +839,8 @@ __global__ void k_permlane16(Out* out, unsigned sel0, unsigned sel1)
     const int            lane = threadIdx.x;
     Value<float, S, kCC> src{lane_input_float(lane)};
     Value<float, S, kCC> old{-999.f};
-    auto                 r = CROSS
-                                 ? fpsan::amdgcn_permlanex16<false, false>(old, src, (int)sel0, (int)sel1)
-                                 : fpsan::amdgcn_permlane16<false, false>(old, src, (int)sel0, (int)sel1);
+    auto r = CROSS ? fpsan::amdgcn_permlanex16<false, false>(old, src, (int)sel0, (int)sel1)
+                   : fpsan::amdgcn_permlane16<false, false>(old, src, (int)sel0, (int)sel1);
     if constexpr(S == Semantics::Float)
         out[lane] = static_cast<float>(r);
     else
@@ -845,9 +865,9 @@ static void check_permlane16(unsigned sel0, unsigned sel1, const char* tag)
     using VP = Value<float, Semantics::FPSan, kCC>;
     for(int i = 0; i < LANES; ++i)
     {
-        const int base = CROSS ? ((i & ~15) ^ 16) : (i & ~15);
-        const int s    = base + pl16_idx(i & 15, sel0, sel1);
-        const float src = static_cast<float>(s * 7 + 1) - 100.f;
+        const int   base = CROSS ? ((i & ~15) ^ 16) : (i & ~15);
+        const int   s    = base + pl16_idx(i & 15, sel0, sel1);
+        const float src  = static_cast<float>(s * 7 + 1) - 100.f;
         EXPECT_EQ(gf[i], static_cast<float>(VF{src})) << tag << " Float lane " << i << " src " << s;
         EXPECT_EQ(gp[i], VP{src}.fpsan_payload()) << tag << " FPSan lane " << i << " src " << s;
     }
@@ -859,12 +879,14 @@ TEST(Xlane, Permlane16HostOracle)
 {
     if(!have_device())
         GTEST_SKIP() << "no HIP device";
+    if(device_is_gfx950())
+        GTEST_SKIP() << "permlane16/permlanex16 are not gfx950 ops";
     unsigned id0 = 0, id1 = 0, sw0 = 0, sw1 = 0;
     for(int i = 0; i < 8; ++i)
     {
-        id0 |= unsigned(i) << (4 * i);             // identity: idx j -> j
+        id0 |= unsigned(i) << (4 * i); // identity: idx j -> j
         id1 |= unsigned(i + 8) << (4 * i);
-        sw0 |= unsigned(i ^ 1) << (4 * i);         // swap pairs: idx j -> j^1
+        sw0 |= unsigned(i ^ 1) << (4 * i); // swap pairs: idx j -> j^1
         sw1 |= unsigned((i + 8) ^ 1) << (4 * i);
     }
     check_permlane16<false>(id0, id1, "pl16_identity");
@@ -900,8 +922,8 @@ TEST(Xlane, Permlane16SwapCrossMode)
     int ndev = 0;
     if(hipGetDeviceCount(&ndev) != hipSuccess || ndev == 0)
         GTEST_SKIP() << "no HIP device";
-    if(!device_is_gfx1250())
-        GTEST_SKIP() << "permlane16_swap is a gfx1250-only op";
+    if(!device_is_gfx1250() && !device_is_gfx950())
+        GTEST_SKIP() << "permlane16_swap is only tested on gfx1250/gfx950";
     float *        dfx, *dfy;
     std::uint32_t *dpx, *dpy;
     HIP_CHECK(hipMalloc(&dfx, LANES * sizeof(float)));
@@ -929,6 +951,62 @@ TEST(Xlane, Permlane16SwapCrossMode)
     (void)hipFree(dpy);
 }
 #endif // __has_builtin(__builtin_amdgcn_permlane16_swap)
+
+// ---- permlane32_swap (cross-mode bit-identity on both swapped operands) -----
+#if !defined(__HIP_DEVICE_COMPILE__) || __has_builtin(__builtin_amdgcn_permlane32_swap)
+template <Semantics S, class Out>
+__global__ void k_permlane32_swap(Out* outx, Out* outy)
+{
+    const int            lane = threadIdx.x;
+    Value<float, S, kCC> x{lane_input_float(lane)};
+    Value<float, S, kCC> y{lane_input_float(lane) + 2000.f};
+    fpsan::amdgcn_permlane32_swap<false, false>(x, y);
+    if constexpr(S == Semantics::Float)
+    {
+        outx[lane] = static_cast<float>(x);
+        outy[lane] = static_cast<float>(y);
+    }
+    else
+    {
+        outx[lane] = x.fpsan_payload();
+        outy[lane] = y.fpsan_payload();
+    }
+}
+
+TEST(Xlane, Permlane32SwapCrossMode)
+{
+    int ndev = 0;
+    if(hipGetDeviceCount(&ndev) != hipSuccess || ndev == 0)
+        GTEST_SKIP() << "no HIP device";
+    if(!device_is_gfx950())
+        GTEST_SKIP() << "permlane32_swap is only tested on gfx950";
+    float *        dfx, *dfy;
+    std::uint32_t *dpx, *dpy;
+    HIP_CHECK(hipMalloc(&dfx, LANES * sizeof(float)));
+    HIP_CHECK(hipMalloc(&dfy, LANES * sizeof(float)));
+    HIP_CHECK(hipMalloc(&dpx, LANES * sizeof(std::uint32_t)));
+    HIP_CHECK(hipMalloc(&dpy, LANES * sizeof(std::uint32_t)));
+    k_permlane32_swap<Semantics::Float><<<1, LANES>>>(dfx, dfy);
+    k_permlane32_swap<Semantics::FPSan><<<1, LANES>>>(dpx, dpy);
+    HIP_CHECK(hipDeviceSynchronize());
+    std::vector<float>         fx(LANES), fy(LANES);
+    std::vector<std::uint32_t> px(LANES), py(LANES);
+    HIP_CHECK(hipMemcpy(fx.data(), dfx, LANES * sizeof(float), hipMemcpyDeviceToHost));
+    HIP_CHECK(hipMemcpy(fy.data(), dfy, LANES * sizeof(float), hipMemcpyDeviceToHost));
+    HIP_CHECK(hipMemcpy(px.data(), dpx, LANES * sizeof(std::uint32_t), hipMemcpyDeviceToHost));
+    HIP_CHECK(hipMemcpy(py.data(), dpy, LANES * sizeof(std::uint32_t), hipMemcpyDeviceToHost));
+    using VP = Value<float, Semantics::FPSan, kCC>;
+    for(int i = 0; i < LANES; ++i)
+    {
+        EXPECT_EQ(px[i], VP{fx[i]}.fpsan_payload()) << "x lane " << i;
+        EXPECT_EQ(py[i], VP{fy[i]}.fpsan_payload()) << "y lane " << i;
+    }
+    (void)hipFree(dfx);
+    (void)hipFree(dfy);
+    (void)hipFree(dpx);
+    (void)hipFree(dpy);
+}
+#endif // __has_builtin(__builtin_amdgcn_permlane32_swap)
 
 // ---- permlane_idx_gen (integer index generator; mode-independent smoke) -----
 #if !defined(__HIP_DEVICE_COMPILE__) || __has_builtin(__builtin_amdgcn_permlane_idx_gen)
