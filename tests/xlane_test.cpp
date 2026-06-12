@@ -599,6 +599,8 @@ void test_permlane_family(int sel0, int sel1)
     int ndev = 0;
     if(hipGetDeviceCount(&ndev) != hipSuccess || ndev == 0)
         GTEST_SKIP() << "no HIP device";
+    if(!device_is_gfx1250())
+        GTEST_SKIP() << "permlane_{bcast,down,up,xor} are gfx1250-only ops";
     float*         d_f;
     std::uint32_t* d_p;
     HIP_CHECK(hipMalloc(&d_f, LANES * sizeof(float)));
@@ -796,6 +798,8 @@ TEST(Xlane, Permlane16SwapCrossMode)
     int ndev = 0;
     if(hipGetDeviceCount(&ndev) != hipSuccess || ndev == 0)
         GTEST_SKIP() << "no HIP device";
+    if(!device_is_gfx1250())
+        GTEST_SKIP() << "permlane16_swap is a gfx1250-only op";
     float *        dfx, *dfy;
     std::uint32_t *dpx, *dpy;
     HIP_CHECK(hipMalloc(&dfx, LANES * sizeof(float)));
@@ -837,6 +841,8 @@ TEST(Xlane, PermlaneIdxGenDeterministic)
     int ndev = 0;
     if(hipGetDeviceCount(&ndev) != hipSuccess || ndev == 0)
         GTEST_SKIP() << "no HIP device";
+    if(!device_is_gfx1250())
+        GTEST_SKIP() << "permlane_idx_gen is a gfx1250-only op";
     std::uint32_t* d0;
     std::uint32_t* d1;
     HIP_CHECK(hipMalloc(&d0, LANES * sizeof(std::uint32_t)));
