@@ -1187,7 +1187,10 @@ namespace fpsan
                 b,                                                                        \
                 c,                                                                        \
                 [&](int reg, int /*sub*/) { return a.get(reg); },                         \
-                [&](int reg, int /*sub*/) { return b.get(reg); });                        \
+                [&](int reg, int /*sub*/) { return b.get(reg); },                         \
+                CBSZ,                                                                     \
+                ABID,                                                                     \
+                BLGP);                                                                    \
         }                                                                                 \
     }
 

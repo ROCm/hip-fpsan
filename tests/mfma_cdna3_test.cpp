@@ -28,6 +28,64 @@ using fpsan::Value;
 static constexpr Conversions kCC  = Conversions::Explicit;
 static constexpr int         WAVE = 64;
 
+template <class T, class = void>
+struct MfmaTraitCBSZ : std::integral_constant<int, 0>
+{
+};
+template <class T>
+struct MfmaTraitCBSZ<T, std::void_t<decltype(T::CBSZ)>> : std::integral_constant<int, T::CBSZ>
+{
+};
+template <class T, class = void>
+struct MfmaTraitABID : std::integral_constant<int, 0>
+{
+};
+template <class T>
+struct MfmaTraitABID<T, std::void_t<decltype(T::ABID)>> : std::integral_constant<int, T::ABID>
+{
+};
+template <class T, class = void>
+struct MfmaTraitBLGP : std::integral_constant<int, 0>
+{
+};
+template <class T>
+struct MfmaTraitBLGP<T, std::void_t<decltype(T::BLGP)>> : std::integral_constant<int, T::BLGP>
+{
+};
+
+static int host_mfma_a_src_lane(int lane, int cbsz, int abid)
+{
+    if(cbsz == 0)
+        return lane;
+    const int block = WAVE / (1 << cbsz);
+    return (lane % block) + block * abid;
+}
+
+static int host_mfma_b_src_lane(int lane, int blgp)
+{
+    switch(blgp)
+    {
+    case 0:
+        return lane;
+    case 1:
+        return lane % 32;
+    case 2:
+        return (lane % 32) + 32;
+    case 3:
+        return (lane + 16) % WAVE;
+    case 4:
+        return lane % 16;
+    case 5:
+        return (lane % 16) + 16;
+    case 6:
+        return (lane % 16) + 32;
+    case 7:
+        return (lane % 16) + 48;
+    default:
+        return lane;
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Dense vector-input MFMA shapes: f16, bf16, fp8/bf8. A/B are per-lane vector
 // fragments, C/D are f32 vector accumulators. Bk is the independent block count
@@ -46,6 +104,9 @@ struct DenseVecHarness
     static constexpr int M = Traits::M, N = Traits::N, K = Traits::K, Bk = Traits::Bk;
     static constexpr int InBits    = Traits::InBits;
     static constexpr int per_dword = 32 / InBits;
+    static constexpr int CBSZ      = MfmaTraitCBSZ<Traits>::value;
+    static constexpr int ABID      = MfmaTraitABID<Traits>::value;
+    static constexpr int BLGP      = MfmaTraitBLGP<Traits>::value;
 };
 
 template <class Traits>
@@ -118,6 +179,42 @@ __device__ void load_dense_vec(const typename DenseVecHarness<Traits>::AElem*   
 }
 
 template <class Traits>
+typename DenseVecHarness<Traits>::AElem host_dense_vec_a_value(
+    const std::vector<typename DenseVecHarness<Traits>::AElem>& A, int blk, int i, int k)
+{
+    using H            = DenseVecHarness<Traits>;
+    auto      want     = fpsan::detail::input_loc(H::M, H::K, H::Bk, i, k, blk, H::InBits);
+    const int src_lane = host_mfma_a_src_lane(want.lane, H::CBSZ, H::ABID);
+    for(int bb = 0; bb < H::Bk; ++bb)
+        for(int ii = 0; ii < H::M; ++ii)
+            for(int kk = 0; kk < H::K; ++kk)
+            {
+                auto loc = fpsan::detail::input_loc(H::M, H::K, H::Bk, ii, kk, bb, H::InBits);
+                if(loc.lane == src_lane && loc.reg == want.reg && loc.sub == want.sub)
+                    return A[(bb * H::M + ii) * H::K + kk];
+            }
+    return typename H::AElem{};
+}
+
+template <class Traits>
+typename DenseVecHarness<Traits>::BElem host_dense_vec_b_value(
+    const std::vector<typename DenseVecHarness<Traits>::BElem>& B, int blk, int k, int j)
+{
+    using H            = DenseVecHarness<Traits>;
+    auto      want     = fpsan::detail::input_loc(H::N, H::K, H::Bk, j, k, blk, H::InBits);
+    const int src_lane = host_mfma_b_src_lane(want.lane, H::BLGP);
+    for(int bb = 0; bb < H::Bk; ++bb)
+        for(int jj = 0; jj < H::N; ++jj)
+            for(int kk = 0; kk < H::K; ++kk)
+            {
+                auto loc = fpsan::detail::input_loc(H::N, H::K, H::Bk, jj, kk, bb, H::InBits);
+                if(loc.lane == src_lane && loc.reg == want.reg && loc.sub == want.sub)
+                    return B[(bb * H::K + kk) * H::N + jj];
+            }
+    return typename H::BElem{};
+}
+
+template <class Traits>
 __global__ void k_dense_vec_float(const typename DenseVecHarness<Traits>::AElem* A,
                                   const typename DenseVecHarness<Traits>::BElem* B,
                                   const typename DenseVecHarness<Traits>::CElem* C,
@@ -178,9 +275,10 @@ void run_dense_vec_layout()
                 double acc
                     = static_cast<double>(static_cast<float>(d.C[(blk * H::M + i) * H::N + j]));
                 for(int k = 0; k < H::K; ++k)
-                    acc += static_cast<double>(static_cast<float>(d.A[(blk * H::M + i) * H::K + k]))
+                    acc += static_cast<double>(
+                               static_cast<float>(host_dense_vec_a_value<Traits>(d.A, blk, i, k)))
                            * static_cast<double>(
-                               static_cast<float>(d.B[(blk * H::K + k) * H::N + j]));
+                               static_cast<float>(host_dense_vec_b_value<Traits>(d.B, blk, k, j)));
                 ref[(blk * H::M + i) * H::N + j]
                     = static_cast<typename H::CElem>(static_cast<float>(acc));
             }
@@ -220,9 +318,10 @@ void run_dense_vec_fpsan()
                 VC acc(d.C[(blk * H::M + i) * H::N + j]);
                 for(int k = 0; k < H::K; ++k)
                     acc = acc
-                          + fpsan::cast<typename H::CElem>(VA(d.A[(blk * H::M + i) * H::K + k]))
+                          + fpsan::cast<typename H::CElem>(
+                                VA(host_dense_vec_a_value<Traits>(d.A, blk, i, k)))
                                 * fpsan::cast<typename H::CElem>(
-                                    VB(d.B[(blk * H::K + k) * H::N + j]));
+                                    VB(host_dense_vec_b_value<Traits>(d.B, blk, k, j)));
                 ref[(blk * H::M + i) * H::N + j] = acc.fpsan_payload();
             }
     auto*              dA = to_dev(d.A);
@@ -475,6 +574,40 @@ DENSE_VEC_TRAITS(MfmaXF32_32x32x4,
                  v16f_native,
                  amdgcn_mfma_f32_32x32x4_xf32)
 
+struct MfmaXF32_16x16x8_CBSZ1_ABID1_BLGP3
+{
+    using AVec             = v2f_native;
+    using BVec             = v2f_native;
+    using CVec             = v4f_native;
+    static constexpr int M = 16, N = 16, K = 8, Bk = 1, InBits = 32;
+    static constexpr int CBSZ = 1, ABID = 1, BLGP = 3;
+    static constexpr int a_lo = -3, a_hi = 3, b_lo = -2, b_hi = 2, c_lo = -4, c_hi = 4;
+    template <Semantics S, Conversions C>
+    __device__ static Value<CVec, S, C>
+        call(Value<AVec, S, C> a, Value<BVec, S, C> b, Value<CVec, S, C> c)
+    {
+        return fpsan::amdgcn_mfma_f32_16x16x8_xf32<CBSZ, ABID, BLGP, S, C>(a, b, c);
+    }
+};
+DENSE_VEC_TESTS(MfmaXF32_16x16x8_CBSZ1_ABID1_BLGP3)
+
+struct MfmaXF32_32x32x4_CBSZ1_ABID1_BLGP1
+{
+    using AVec             = v2f_native;
+    using BVec             = v2f_native;
+    using CVec             = v16f_native;
+    static constexpr int M = 32, N = 32, K = 4, Bk = 1, InBits = 32;
+    static constexpr int CBSZ = 1, ABID = 1, BLGP = 1;
+    static constexpr int a_lo = -3, a_hi = 3, b_lo = -2, b_hi = 2, c_lo = -4, c_hi = 4;
+    template <Semantics S, Conversions C>
+    __device__ static Value<CVec, S, C>
+        call(Value<AVec, S, C> a, Value<BVec, S, C> b, Value<CVec, S, C> c)
+    {
+        return fpsan::amdgcn_mfma_f32_32x32x4_xf32<CBSZ, ABID, BLGP, S, C>(a, b, c);
+    }
+};
+DENSE_VEC_TESTS(MfmaXF32_32x32x4_CBSZ1_ABID1_BLGP1)
+
 #undef DENSE_VEC_TRAITS
 #undef DENSE_VEC_TESTS
 
@@ -675,7 +808,13 @@ static F64Data make_f64_16_inputs()
     return d;
 }
 
-template <Semantics S, class Out>
+template <class T>
+T host_neg_if(T v, bool neg)
+{
+    return neg ? -v : v;
+}
+
+template <Semantics S, class Out, int NEG = 0>
 __global__ void k_f64_16x16x4(const double* A, const double* B, const double* C, Out* D)
 {
     int    lane = threadIdx.x;
@@ -704,7 +843,7 @@ __global__ void k_f64_16x16x4(const double* A, const double* B, const double* C,
         }
     Value<double, S, kCC>     a{an}, b{bn};
     Value<v4d_native, S, kCC> c{cn};
-    auto                      d = fpsan::amdgcn_mfma_f64_16x16x4f64<0, 0, 0, S, kCC>(a, b, c);
+    auto                      d = fpsan::amdgcn_mfma_f64_16x16x4f64<0, 0, NEG, S, kCC>(a, b, c);
     for(int i = 0; i < F64_M; ++i)
         for(int j = 0; j < F64_N; ++j)
         {
@@ -777,6 +916,69 @@ TEST(MfmaF64_16x16x4, FpsanMatchesScalarReference)
     (void)hipFree(dD);
 }
 
+TEST(MfmaF64_16x16x4_NEG5, LayoutMatchesHardware)
+{
+    if(!have_device())
+        GTEST_SKIP() << "no HIP device";
+    constexpr int       NEG = 5;
+    auto                d   = make_f64_16_inputs();
+    std::vector<double> ref(F64_M * F64_N);
+    for(int i = 0; i < F64_M; ++i)
+        for(int j = 0; j < F64_N; ++j)
+        {
+            double acc = host_neg_if(d.C[i * F64_N + j], (NEG & 4) != 0);
+            for(int k = 0; k < F64_K; ++k)
+                acc += host_neg_if(d.A[i * F64_K + k], (NEG & 1) != 0)
+                       * host_neg_if(d.B[k * F64_N + j], (NEG & 2) != 0);
+            ref[i * F64_N + j] = acc;
+        }
+    double *dA = to_dev(d.A), *dB = to_dev(d.B), *dC = to_dev(d.C), *dD;
+    HIP_CHECK(hipMalloc(&dD, ref.size() * sizeof(double)));
+    k_f64_16x16x4<Semantics::Float, double, NEG><<<1, WAVE>>>(dA, dB, dC, dD);
+    HIP_CHECK(hipDeviceSynchronize());
+    std::vector<double> got(ref.size());
+    HIP_CHECK(hipMemcpy(got.data(), dD, got.size() * sizeof(double), hipMemcpyDeviceToHost));
+    for(std::size_t i = 0; i < got.size(); ++i)
+        EXPECT_EQ(bits_of(got[i]), bits_of(ref[i])) << "elem " << i;
+    (void)hipFree(dA);
+    (void)hipFree(dB);
+    (void)hipFree(dC);
+    (void)hipFree(dD);
+}
+
+TEST(MfmaF64_16x16x4_NEG5, FpsanMatchesScalarReference)
+{
+    if(!have_device())
+        GTEST_SKIP() << "no HIP device";
+    constexpr int NEG = 5;
+    auto          d   = make_f64_16_inputs();
+    using VD          = Value<double, Semantics::FPSan, kCC>;
+    std::vector<std::uint64_t> ref(F64_M * F64_N);
+    for(int i = 0; i < F64_M; ++i)
+        for(int j = 0; j < F64_N; ++j)
+        {
+            VD acc = host_neg_if(VD(d.C[i * F64_N + j]), (NEG & 4) != 0);
+            for(int k = 0; k < F64_K; ++k)
+                acc = acc
+                      + host_neg_if(VD(d.A[i * F64_K + k]), (NEG & 1) != 0)
+                            * host_neg_if(VD(d.B[k * F64_N + j]), (NEG & 2) != 0);
+            ref[i * F64_N + j] = acc.fpsan_payload();
+        }
+    double *       dA = to_dev(d.A), *dB = to_dev(d.B), *dC = to_dev(d.C);
+    std::uint64_t* dD;
+    HIP_CHECK(hipMalloc(&dD, ref.size() * sizeof(std::uint64_t)));
+    k_f64_16x16x4<Semantics::FPSan, std::uint64_t, NEG><<<1, WAVE>>>(dA, dB, dC, dD);
+    HIP_CHECK(hipDeviceSynchronize());
+    std::vector<std::uint64_t> got(ref.size());
+    HIP_CHECK(hipMemcpy(got.data(), dD, got.size() * sizeof(std::uint64_t), hipMemcpyDeviceToHost));
+    for(std::size_t i = 0; i < got.size(); ++i)
+        EXPECT_EQ(got[i], ref[i]) << "elem " << i;
+    (void)hipFree(dA);
+    (void)hipFree(dB);
+    (void)hipFree(dC);
+    (void)hipFree(dD);
+}
+
 static constexpr int F64S_M = 4, F64S_N = 4, F64S_K = 4, F64S_B = 4;
 
 static F64Data make_f64_4_inputs()
@@ -795,7 +997,7 @@ static F64Data make_f64_4_inputs()
     return d;
 }
 
-template <Semantics S, class Out>
+template <Semantics S, class Out, int NEG = 0>
 __global__ void k_f64_4x4x4(const double* A, const double* B, const double* C, Out* D)
 {
     const int             lane  = threadIdx.x;
@@ -807,7 +1009,7 @@ __global__ void k_f64_4x4x4(const double* A, const double* B, const double* C, O
     const int             out_i = lane / 16;
     const int             out_j = lane % 4;
     Value<double, S, kCC> a{an}, b{bn}, c{C[(blk * F64S_M + out_i) * F64S_N + out_j]};
-    auto                  d = fpsan::amdgcn_mfma_f64_4x4x4f64<0, 0, 0, S, kCC>(a, b, c);
+    auto                  d = fpsan::amdgcn_mfma_f64_4x4x4f64<0, 0, NEG, S, kCC>(a, b, c);
     if constexpr(S == Semantics::Float)
         D[(blk * F64S_M + out_i) * F64S_N + out_j] = d.to_float();
     else
@@ -866,6 +1068,72 @@ TEST(MfmaF64_4x4x4, FpsanMatchesScalarReference)
     std::uint64_t* dD;
     HIP_CHECK(hipMalloc(&dD, ref.size() * sizeof(std::uint64_t)));
     k_f64_4x4x4<Semantics::FPSan, std::uint64_t><<<1, WAVE>>>(dA, dB, dC, dD);
+    HIP_CHECK(hipDeviceSynchronize());
+    std::vector<std::uint64_t> got(ref.size());
+    HIP_CHECK(hipMemcpy(got.data(), dD, got.size() * sizeof(std::uint64_t), hipMemcpyDeviceToHost));
+    for(std::size_t i = 0; i < got.size(); ++i)
+        EXPECT_EQ(got[i], ref[i]) << "elem " << i;
+    (void)hipFree(dA);
+    (void)hipFree(dB);
+    (void)hipFree(dC);
+    (void)hipFree(dD);
+}
+
+TEST(MfmaF64_4x4x4_NEG5, LayoutMatchesHardware)
+{
+    if(!have_device())
+        GTEST_SKIP() << "no HIP device";
+    constexpr int       NEG = 5;
+    auto                d   = make_f64_4_inputs();
+    std::vector<double> ref(F64S_B * F64S_M * F64S_N);
+    for(int blk = 0; blk < F64S_B; ++blk)
+        for(int i = 0; i < F64S_M; ++i)
+            for(int j = 0; j < F64S_N; ++j)
+            {
+                double acc = host_neg_if(d.C[(blk * F64S_M + i) * F64S_N + j], (NEG & 4) != 0);
+                for(int k = 0; k < F64S_K; ++k)
+                    acc += host_neg_if(d.A[(blk * F64S_M + i) * F64S_K + k], (NEG & 1) != 0)
+                           * host_neg_if(d.B[(blk * F64S_K + k) * F64S_N + j], (NEG & 2) != 0);
+                ref[(blk * F64S_M + i) * F64S_N + j] = acc;
+            }
+    double *dA = to_dev(d.A), *dB = to_dev(d.B), *dC = to_dev(d.C), *dD;
+    HIP_CHECK(hipMalloc(&dD, ref.size() * sizeof(double)));
+    k_f64_4x4x4<Semantics::Float, double, NEG><<<1, WAVE>>>(dA, dB, dC, dD);
+    HIP_CHECK(hipDeviceSynchronize());
+    std::vector<double> got(ref.size());
+    HIP_CHECK(hipMemcpy(got.data(), dD, got.size() * sizeof(double), hipMemcpyDeviceToHost));
+    for(std::size_t i = 0; i < got.size(); ++i)
+        EXPECT_EQ(bits_of(got[i]), bits_of(ref[i])) << "elem " << i;
+    (void)hipFree(dA);
+    (void)hipFree(dB);
+    (void)hipFree(dC);
+    (void)hipFree(dD);
+}
+
+TEST(MfmaF64_4x4x4_NEG5, FpsanMatchesScalarReference)
+{
+    if(!have_device())
+        GTEST_SKIP() << "no HIP device";
+    constexpr int NEG = 5;
+    auto          d   = make_f64_4_inputs();
+    using VD          = Value<double, Semantics::FPSan, kCC>;
+    std::vector<std::uint64_t> ref(F64S_B * F64S_M * F64S_N);
+    for(int blk = 0; blk < F64S_B; ++blk)
+        for(int i = 0; i < F64S_M; ++i)
+            for(int j = 0; j < F64S_N; ++j)
+            {
+                VD acc = host_neg_if(VD(d.C[(blk * F64S_M + i) * F64S_N + j]), (NEG & 4) != 0);
+                for(int k = 0; k < F64S_K; ++k)
+                    acc = acc
+                          + host_neg_if(VD(d.A[(blk * F64S_M + i) * F64S_K + k]), (NEG & 1) != 0)
+                                * host_neg_if(VD(d.B[(blk * F64S_K + k) * F64S_N + j]),
+                                              (NEG & 2) != 0);
+                ref[(blk * F64S_M + i) * F64S_N + j] = acc.fpsan_payload();
+            }
+    double *       dA = to_dev(d.A), *dB = to_dev(d.B), *dC = to_dev(d.C);
+    std::uint64_t* dD;
+    HIP_CHECK(hipMalloc(&dD, ref.size() * sizeof(std::uint64_t)));
+    k_f64_4x4x4<Semantics::FPSan, std::uint64_t, NEG><<<1, WAVE>>>(dA, dB, dC, dD);
     HIP_CHECK(hipDeviceSynchronize());
     std::vector<std::uint64_t> got(ref.size());
     HIP_CHECK(hipMemcpy(got.data(), dD, got.size() * sizeof(std::uint64_t), hipMemcpyDeviceToHost));
