@@ -1217,6 +1217,9 @@ namespace fpsan
                                                                      Value<double, S, Cv>     b,
                                                                      Value<v4d_native, S, Cv> c)
     {
+        static_assert(CBSZ == 0 && ABID == 0,
+                      "f64 MFMA does not support CBSZ/ABID broadcast controls; use the third "
+                      "immediate for NEG");
         if constexpr(S == Semantics::Float)
         {
             auto d = __builtin_amdgcn_mfma_f64_16x16x4f64(
@@ -1228,10 +1231,21 @@ namespace fpsan
             // Scalar-A/B variant: each lane carries one f64 element of A and B.
             // The dataflow gathers across lanes per (i, k) / (j, k); the
             // "register-0" path of the extractor is the lane's scalar Value.
-            auto ea = [&](int /*reg*/, int /*sub*/) { return a; };
-            auto eb = [&](int /*reg*/, int /*sub*/) { return b; };
+            // F64 MFMA uses the third immediate as NEG[2:0], not BLGP: bit 0
+            // negates A, bit 1 negates B, and bit 2 negates C.
+            auto an = a;
+            auto bn = b;
+            auto cn = c;
+            if constexpr((BLGP & 1) != 0)
+                an = -an;
+            if constexpr((BLGP & 2) != 0)
+                bn = -bn;
+            if constexpr((BLGP & 4) != 0)
+                cn = -cn;
+            auto ea = [&](int /*reg*/, int /*sub*/) { return an; };
+            auto eb = [&](int /*reg*/, int /*sub*/) { return bn; };
             return detail::mfma_software<16, 16, 4, 1, /*InBits=*/64, double, S, Cv>(
-                a, b, c, ea, eb);
+                an, bn, cn, ea, eb, 0, 0, 0);
         }
     }
 #endif
@@ -1246,6 +1260,9 @@ namespace fpsan
                                                                Value<double, S, Cv> b,
                                                                Value<double, S, Cv> c)
     {
+        static_assert(CBSZ == 0 && ABID == 0,
+                      "f64 MFMA does not support CBSZ/ABID broadcast controls; use the third "
+                      "immediate for NEG");
         if constexpr(S == Semantics::Float)
         {
             auto d = __builtin_amdgcn_mfma_f64_4x4x4f64(
@@ -1267,11 +1284,19 @@ namespace fpsan
             // Pinned by MfmaF64_4x4x4.LayoutMatchesHardware.
             const int            lane = detail::wave_lane_full();
             const int            i = lane / 16, blk = (lane % 16) / 4, j = lane % 4;
+            auto                 an  = a;
+            auto                 bn  = b;
             Value<double, S, Cv> acc = c;
+            if constexpr((BLGP & 1) != 0)
+                an = -an;
+            if constexpr((BLGP & 2) != 0)
+                bn = -bn;
+            if constexpr((BLGP & 4) != 0)
+                acc = -acc;
             for(int k = 0; k < 4; ++k)
             {
-                auto av = detail::wave_shfl(a, 16 * k + 4 * blk + i);
-                auto bv = detail::wave_shfl(b, 16 * k + 4 * blk + j);
+                auto av = detail::wave_shfl(an, 16 * k + 4 * blk + i);
+                auto bv = detail::wave_shfl(bn, 16 * k + 4 * blk + j);
                 acc     = acc + av * bv;
             }
             return acc;

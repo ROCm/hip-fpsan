@@ -549,6 +549,9 @@ MFMA_FP8_TRAITS(MfmaF32_32x32x16_BF8_BF8,
 // Broadcast/permutation modifiers are covered on the legal multi-block legacy
 // MFMA shapes below. The dense gfx950 16x16x32/32x32x16 shapes have B=1, so
 // non-zero CBSZ would exceed log2(blocks) and is not a useful conformance case.
+// xF32 is intentionally absent here: LLVM's gfx950 source-of-truth marks
+// v_mfma_f32_*_xf32 unsupported on gfx950. Those wrappers are covered by the
+// CDNA3 MFMA tests where the xf32-insts feature exists.
 
 // ---------------------------------------------------------------------------
 // F64 16x16x4 MFMA. A and B are *scalar* doubles per lane (not vector
@@ -601,14 +604,14 @@ __device__ void load_f64_frags(const double*              A,
     c = Value<v4d_native, S, kCC>(cn);
 }
 
-template <Semantics S, class Out>
+template <Semantics S, class Out, int CBSZ = 0, int ABID = 0, int NEG = 0>
 __global__ void k_mfma_f64_16x16x4(const double* A, const double* B, const double* C, Out* D)
 {
     int                       lane = threadIdx.x;
     Value<double, S, kCC>     a, b;
     Value<v4d_native, S, kCC> c;
     load_f64_frags<S>(A, B, C, lane, a, b, c);
-    auto d = fpsan::amdgcn_mfma_f64_16x16x4f64<0, 0, 0, S, kCC>(a, b, c);
+    auto d = fpsan::amdgcn_mfma_f64_16x16x4f64<CBSZ, ABID, NEG, S, kCC>(a, b, c);
     for(int i = 0; i < F64_M; ++i)
         for(int j = 0; j < F64_N; ++j)
         {
@@ -643,6 +646,12 @@ namespace
         for(auto& x : m.C)
             x = fpsan_test::pick_int_valued<double>(rng, -4, 4);
         return m;
+    }
+
+    template <class T>
+    T host_neg_if(T v, bool neg)
+    {
+        return neg ? -v : v;
     }
 } // namespace
 
@@ -696,6 +705,73 @@ TEST(MfmaF64_16x16x4, FpsanMatchesScalarReference)
     std::uint64_t* dD;
     HIP_CHECK(hipMalloc(&dD, F64_M * F64_N * sizeof(std::uint64_t)));
     k_mfma_f64_16x16x4<Semantics::FPSan, std::uint64_t><<<1, WAVE>>>(dA, dB, dC, dD);
+    HIP_CHECK(hipDeviceSynchronize());
+    std::vector<std::uint64_t> got(F64_M * F64_N);
+    HIP_CHECK(
+        hipMemcpy(got.data(), dD, F64_M * F64_N * sizeof(std::uint64_t), hipMemcpyDeviceToHost));
+    for(int i = 0; i < F64_M * F64_N; ++i)
+        EXPECT_EQ(got[i], ref[i]) << "payload mismatch at " << (i / F64_N) << "," << (i % F64_N);
+    (void)hipFree(dA);
+    (void)hipFree(dB);
+    (void)hipFree(dC);
+    (void)hipFree(dD);
+}
+
+TEST(MfmaF64_16x16x4_NEG5, LayoutMatchesHardware)
+{
+    int ndev = 0;
+    if(hipGetDeviceCount(&ndev) != hipSuccess || ndev == 0)
+        GTEST_SKIP() << "no HIP device";
+    constexpr int       NEG = 5; // f64 MFMA third immediate is NEG: negate A and C.
+    F64Mats             m   = make_f64_inputs();
+    std::vector<double> ref(F64_M * F64_N);
+    for(int i = 0; i < F64_M; ++i)
+        for(int j = 0; j < F64_N; ++j)
+        {
+            double acc = host_neg_if(m.C[i * F64_N + j], (NEG & 4) != 0);
+            for(int k = 0; k < F64_K; ++k)
+                acc += host_neg_if(m.A[i * F64_K + k], (NEG & 1) != 0)
+                       * host_neg_if(m.B[k * F64_N + j], (NEG & 2) != 0);
+            ref[i * F64_N + j] = acc;
+        }
+    double *dA = to_dev(m.A), *dB = to_dev(m.B), *dC = to_dev(m.C), *dD;
+    HIP_CHECK(hipMalloc(&dD, F64_M * F64_N * sizeof(double)));
+    k_mfma_f64_16x16x4<Semantics::Float, double, 0, 0, NEG><<<1, WAVE>>>(dA, dB, dC, dD);
+    HIP_CHECK(hipDeviceSynchronize());
+    std::vector<double> got(F64_M * F64_N);
+    HIP_CHECK(hipMemcpy(got.data(), dD, F64_M * F64_N * sizeof(double), hipMemcpyDeviceToHost));
+    for(int i = 0; i < F64_M * F64_N; ++i)
+        EXPECT_EQ(bits_of(got[i]), bits_of(ref[i]))
+            << "NEG mismatch at " << (i / F64_N) << "," << (i % F64_N);
+    (void)hipFree(dA);
+    (void)hipFree(dB);
+    (void)hipFree(dC);
+    (void)hipFree(dD);
+}
+
+TEST(MfmaF64_16x16x4_NEG5, FpsanMatchesScalarReference)
+{
+    int ndev = 0;
+    if(hipGetDeviceCount(&ndev) != hipSuccess || ndev == 0)
+        GTEST_SKIP() << "no HIP device";
+    constexpr int NEG = 5;
+    F64Mats       m   = make_f64_inputs();
+    using VD          = Value<double, Semantics::FPSan, kCC>;
+    std::vector<std::uint64_t> ref(F64_M * F64_N);
+    for(int i = 0; i < F64_M; ++i)
+        for(int j = 0; j < F64_N; ++j)
+        {
+            VD acc = host_neg_if(VD(m.C[i * F64_N + j]), (NEG & 4) != 0);
+            for(int k = 0; k < F64_K; ++k)
+                acc = acc
+                      + host_neg_if(VD(m.A[i * F64_K + k]), (NEG & 1) != 0)
+                            * host_neg_if(VD(m.B[k * F64_N + j]), (NEG & 2) != 0);
+            ref[i * F64_N + j] = acc.fpsan_payload();
+        }
+    double *       dA = to_dev(m.A), *dB = to_dev(m.B), *dC = to_dev(m.C);
+    std::uint64_t* dD;
+    HIP_CHECK(hipMalloc(&dD, F64_M * F64_N * sizeof(std::uint64_t)));
+    k_mfma_f64_16x16x4<Semantics::FPSan, std::uint64_t, 0, 0, NEG><<<1, WAVE>>>(dA, dB, dC, dD);
     HIP_CHECK(hipDeviceSynchronize());
     std::vector<std::uint64_t> got(F64_M * F64_N);
     HIP_CHECK(
@@ -891,12 +967,12 @@ TEST(Smfmac, F32_32x32x32_F16_ZeroAGivesC)
 //   A[i][k] of block b at lane 16k+4b+i; B[k][j] of block b at lane 16k+4b+j
 //   D[L] = C[L] + sum_{k=0..3} A[16k+4b+i] * B[16k+4b+j]
 // ---------------------------------------------------------------------------
-template <Semantics S, class Out>
+template <Semantics S, class Out, int CBSZ = 0, int ABID = 0, int NEG = 0>
 __global__ void k_mfma_f64_4x4x4(const double* A, const double* B, const double* C, Out* D)
 {
     int                   lane = threadIdx.x;
     Value<double, S, kCC> a{A[lane]}, b{B[lane]}, c{C[lane]};
-    auto                  d = fpsan::amdgcn_mfma_f64_4x4x4f64<0, 0, 0, S, kCC>(a, b, c);
+    auto                  d = fpsan::amdgcn_mfma_f64_4x4x4f64<CBSZ, ABID, NEG, S, kCC>(a, b, c);
     if constexpr(S == Semantics::Float)
         D[lane] = d.to_float();
     else
@@ -966,6 +1042,75 @@ TEST(MfmaF64_4x4x4, FpsanMatchesScalarReference)
     std::uint64_t* dD;
     HIP_CHECK(hipMalloc(&dD, WAVE * sizeof(std::uint64_t)));
     k_mfma_f64_4x4x4<Semantics::FPSan, std::uint64_t><<<1, WAVE>>>(dA, dB, dC, dD);
+    HIP_CHECK(hipDeviceSynchronize());
+    std::vector<std::uint64_t> got(WAVE);
+    HIP_CHECK(hipMemcpy(got.data(), dD, WAVE * sizeof(std::uint64_t), hipMemcpyDeviceToHost));
+    for(int L = 0; L < WAVE; ++L)
+        EXPECT_EQ(got[L], ref[L]) << "lane " << L;
+    (void)hipFree(dA);
+    (void)hipFree(dB);
+    (void)hipFree(dC);
+    (void)hipFree(dD);
+}
+
+TEST(MfmaF64_4x4x4_NEG5, LayoutMatchesHardware)
+{
+    int ndev = 0;
+    if(hipGetDeviceCount(&ndev) != hipSuccess || ndev == 0)
+        GTEST_SKIP() << "no HIP device";
+    constexpr int NEG = 5; // f64 MFMA third immediate is NEG: negate A and C.
+    auto          A = make_f64_4x4x4_vec(0), B = make_f64_4x4x4_vec(1), C = make_f64_4x4x4_vec(2);
+    std::vector<double> ref(WAVE);
+    for(int L = 0; L < WAVE; ++L)
+    {
+        int    i = L / 16, b = (L % 16) / 4, j = L % 4;
+        double acc = host_neg_if(C[L], (NEG & 4) != 0);
+        for(int k = 0; k < 4; ++k)
+        {
+            acc += host_neg_if(A[16 * k + 4 * b + i], (NEG & 1) != 0)
+                   * host_neg_if(B[16 * k + 4 * b + j], (NEG & 2) != 0);
+        }
+        ref[L] = acc;
+    }
+    double *dA = to_dev(A), *dB = to_dev(B), *dC = to_dev(C), *dD;
+    HIP_CHECK(hipMalloc(&dD, WAVE * sizeof(double)));
+    k_mfma_f64_4x4x4<Semantics::Float, double, 0, 0, NEG><<<1, WAVE>>>(dA, dB, dC, dD);
+    HIP_CHECK(hipDeviceSynchronize());
+    std::vector<double> got(WAVE);
+    HIP_CHECK(hipMemcpy(got.data(), dD, WAVE * sizeof(double), hipMemcpyDeviceToHost));
+    for(int L = 0; L < WAVE; ++L)
+        EXPECT_EQ(bits_of(got[L]), bits_of(ref[L])) << "lane " << L;
+    (void)hipFree(dA);
+    (void)hipFree(dB);
+    (void)hipFree(dC);
+    (void)hipFree(dD);
+}
+
+TEST(MfmaF64_4x4x4_NEG5, FpsanMatchesScalarReference)
+{
+    int ndev = 0;
+    if(hipGetDeviceCount(&ndev) != hipSuccess || ndev == 0)
+        GTEST_SKIP() << "no HIP device";
+    constexpr int NEG = 5;
+    auto          A = make_f64_4x4x4_vec(0), B = make_f64_4x4x4_vec(1), C = make_f64_4x4x4_vec(2);
+    using VD = Value<double, Semantics::FPSan, kCC>;
+    std::vector<std::uint64_t> ref(WAVE);
+    for(int L = 0; L < WAVE; ++L)
+    {
+        int i = L / 16, b = (L % 16) / 4, j = L % 4;
+        VD  acc = host_neg_if(VD(C[L]), (NEG & 4) != 0);
+        for(int k = 0; k < 4; ++k)
+        {
+            acc = acc
+                  + host_neg_if(VD(A[16 * k + 4 * b + i]), (NEG & 1) != 0)
+                        * host_neg_if(VD(B[16 * k + 4 * b + j]), (NEG & 2) != 0);
+        }
+        ref[L] = acc.fpsan_payload();
+    }
+    double *       dA = to_dev(A), *dB = to_dev(B), *dC = to_dev(C);
+    std::uint64_t* dD;
+    HIP_CHECK(hipMalloc(&dD, WAVE * sizeof(std::uint64_t)));
+    k_mfma_f64_4x4x4<Semantics::FPSan, std::uint64_t, 0, 0, NEG><<<1, WAVE>>>(dA, dB, dC, dD);
     HIP_CHECK(hipDeviceSynchronize());
     std::vector<std::uint64_t> got(WAVE);
     HIP_CHECK(hipMemcpy(got.data(), dD, WAVE * sizeof(std::uint64_t), hipMemcpyDeviceToHost));
