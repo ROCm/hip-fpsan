@@ -193,8 +193,10 @@ cmake --preset hip-gfx950   && cmake --build --preset hip-gfx950
 cmake --preset hip-gfx1250  && cmake --build --preset hip-gfx1250
 ```
 
-The HIP presets find the ROCm toolchain under `ROCM_PATH` (default `/opt/rocm`);
-point them at a different install with `-DROCM_PATH=...` (or `$ENV{ROCM_PATH}`),
+The HIP presets find the ROCm toolchain under `ROCM_PATH`, resolved as
+`-DROCM_PATH=...` > `$ENV{ROCM_PATH}` > `rocm-sdk path --root` > `/opt/rocm`
+(the same priority the ROCm libraries use). Point them at a different install
+with `-DROCM_PATH=...` (or `$ENV{ROCM_PATH}`),
 or override the pieces directly with `-DCMAKE_HIP_COMPILER=...`,
 `-DCMAKE_HIP_COMPILER_ROCM_ROOT=...`, `-DCMAKE_HIP_ARCHITECTURES=...`.
 
@@ -209,8 +211,8 @@ at a local checkout with
 CMake options: `FPSAN_BUILD_TESTS` (ON), `FPSAN_BUILD_EXAMPLES` (ON),
 `FPSAN_ENABLE_HIP`. The latter defaults to ON when a HIP toolchain is available
 and OFF otherwise: it follows the standard `CMAKE_HIP_COMPILER` variable, which
-is derived from `ROCM_PATH` (default `/opt/rocm`, overridable with
-`-DROCM_PATH=...` or `$ENV{ROCM_PATH}`), set explicitly, or found on `PATH` by
+is derived from `ROCM_PATH` (resolved as `-DROCM_PATH=...` > `$ENV{ROCM_PATH}` >
+`rocm-sdk path --root` > `/opt/rocm`), set explicitly, or found on `PATH` by
 `check_language(HIP)`. Set `-DFPSAN_ENABLE_HIP=OFF` to force a pure-C++ build
 even where a HIP toolchain exists.
 

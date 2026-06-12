@@ -19,8 +19,9 @@
 #   -DFPSAN_ENABLE_HIP=ON|OFF       (default: ON when a HIP toolchain is found,
 #                                    else OFF)    compile tests/examples as HIP.
 #       The default flows from CMAKE_HIP_COMPILER, derived from ROCM_PATH
-#       (default /opt/rocm, override with -DROCM_PATH= or $ENV{ROCM_PATH}) or set
-#       explicitly; set -DFPSAN_ENABLE_HIP=OFF to force a pure-C++ build.
+#       (resolved as -DROCM_PATH= > $ENV{ROCM_PATH} > `rocm-sdk path --root` >
+#       /opt/rocm) or set explicitly; set -DFPSAN_ENABLE_HIP=OFF to force a
+#       pure-C++ build.
 #
 cmake_minimum_required(VERSION 3.21)
 
@@ -40,18 +41,38 @@ option(FPSAN_BUILD_TESTS "Build the FPSan test suite" ON)
 option(FPSAN_BUILD_EXAMPLES "Build the tutorial examples" ON)
 
 # ---- HIP toolchain detection -----------------------------------------------
-# Follow the ROCm-library convention (rocPRIM, rocThrust): discover the toolchain
-# under a ROCM_PATH root that defaults to the canonical install location
-# (/opt/rocm on Linux), honouring $ENV{ROCM_PATH} and overridable with
-# -DROCM_PATH=... From that root we set the standard CMAKE_HIP_COMPILER and add
-# the root to CMAKE_PREFIX_PATH, then check_language(HIP) confirms it (falling
-# back to a PATH search). Whether tests/examples compile as HIP then flows from
-# CMAKE_HIP_COMPILER rather than from a bespoke always-present toggle.
+# Follow the ROCm-library convention (rocPRIM, rocThrust, hipBLASLt): discover
+# the toolchain under a ROCM_PATH root resolved with the same priority those
+# projects use -- an explicit -DROCM_PATH=..., then $ENV{ROCM_PATH}, then the
+# ROCm Python SDK (`rocm-sdk path --root`), then the canonical install location
+# (/opt/rocm on Linux). From that root we set the standard CMAKE_HIP_COMPILER
+# (ROCm's amdclang++ at lib/llvm/bin, matching rocm-libraries'
+# default_amdclang.cmake) and add the root to CMAKE_PREFIX_PATH, then
+# check_language(HIP) confirms it (falling back to a PATH search). Whether
+# tests/examples compile as HIP then flows from CMAKE_HIP_COMPILER rather than
+# from a bespoke always-present toggle.
 if(NOT DEFINED ROCM_PATH)
   if(DEFINED ENV{ROCM_PATH})
     set(ROCM_PATH "$ENV{ROCM_PATH}" CACHE PATH "Path to the ROCm installation")
   else()
-    set(ROCM_PATH "/opt/rocm" CACHE PATH "Path to the ROCm installation")
+    # Ask the ROCm Python SDK before falling back to the canonical location, the
+    # same priority the ROCm libraries use (rocm-libraries stinkytofu/hipblaslt):
+    #   ROCM_PATH env  >  `rocm-sdk path --root`  >  /opt/rocm
+    set(_fpsan_rocm_root "")
+    find_program(FPSAN_ROCM_SDK rocm-sdk)
+    if(FPSAN_ROCM_SDK)
+      execute_process(
+        COMMAND "${FPSAN_ROCM_SDK}" path --root
+        OUTPUT_VARIABLE _fpsan_rocm_root
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+        ERROR_QUIET)
+    endif()
+    if(_fpsan_rocm_root AND EXISTS "${_fpsan_rocm_root}")
+      set(ROCM_PATH "${_fpsan_rocm_root}" CACHE PATH "Path to the ROCm installation")
+    else()
+      set(ROCM_PATH "/opt/rocm" CACHE PATH "Path to the ROCm installation")
+    endif()
+    unset(_fpsan_rocm_root)
   endif()
 endif()
 if(NOT "${ROCM_PATH}" IN_LIST CMAKE_PREFIX_PATH)

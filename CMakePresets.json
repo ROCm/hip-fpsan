@@ -42,7 +42,7 @@
       "name": "hip-gfx942",
       "displayName": "HIP C++ (ROCm clang, gfx942 / CDNA3 / MI300)",
       "generator": "Ninja",
-      "binaryDir": "$env{HOME}/workspace/fpsan-hip-gfx942-build",
+      "binaryDir": "${sourceDir}/build/hip-gfx942",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "RelWithDebInfo",
         "FPSAN_BUILD_TESTS": "ON",
