@@ -21,14 +21,20 @@
 
 #include <cstdint>
 #include <cstring>
+#include <type_traits>
 #include <vector>
 
 using fpsan::Conversions;
 using fpsan::Semantics;
 using fpsan::Value;
 
-static constexpr Conversions kCC   = Conversions::Explicit;
-static constexpr int         LANES = 32;
+static constexpr Conversions kCC = Conversions::Explicit;
+#ifndef FPSAN_TEST_FORCE_WAVE_SIZE
+#define FPSAN_TEST_FORCE_WAVE_SIZE 32
+#endif
+static_assert(FPSAN_TEST_FORCE_WAVE_SIZE == 32 || FPSAN_TEST_FORCE_WAVE_SIZE == 64,
+              "xlane tests support one wave32 or wave64 wave");
+static constexpr int LANES = FPSAN_TEST_FORCE_WAVE_SIZE;
 
 // Distinct per-lane f32 input: integer lane*7 + 1, signed -- exact in f32, but
 // large enough that the bit pattern at each lane is unique.
@@ -94,6 +100,16 @@ TEST(Xlane, ReadlaneFpsan17)
 {
     test_readlane<Semantics::FPSan>(17);
 }
+#if FPSAN_TEST_FORCE_WAVE_SIZE == 64
+TEST(Xlane, ReadlaneFloat48)
+{
+    test_readlane<Semantics::Float>(48);
+}
+TEST(Xlane, ReadlaneFpsan48)
+{
+    test_readlane<Semantics::FPSan>(48);
+}
+#endif
 
 // ---- readfirstlane (= readlane(0) when lane 0 is active) --------------------
 template <Semantics S, class Out>
@@ -176,7 +192,11 @@ void test_ds_bpermute_xor(int off)
     using V = Value<float, S, kCC>;
     for(int i = 0; i < LANES; ++i)
     {
-        const float src = static_cast<float>((i ^ off) * 7 + 1) - 100.f;
+        int src_lane = i ^ off;
+        #if FPSAN_TEST_FORCE_WAVE_SIZE == 64
+            src_lane = (i & ~31) | (src_lane & 31);
+        #endif
+        const float src = static_cast<float>(src_lane * 7 + 1) - 100.f;
         V           src_v{src};
         Out         expected;
         if constexpr(S == Semantics::Float)
@@ -204,6 +224,28 @@ TEST(Xlane, DsBpermuteXorFpsan16)
 {
     test_ds_bpermute_xor<Semantics::FPSan>(16);
 }
+#if FPSAN_TEST_FORCE_WAVE_SIZE == 64
+// RDNA3 DS permute lane selection is modulo 32 even in wave64, so cover the
+// largest same-half XOR here. Cross-half exchange is covered by permlane64.
+TEST(Xlane, DsBpermuteXorFloat31)
+{
+    test_ds_bpermute_xor<Semantics::Float>(31);
+}
+TEST(Xlane, DsBpermuteXorFpsan31)
+{
+    test_ds_bpermute_xor<Semantics::FPSan>(31);
+}
+// off=32 is the important negative boundary: DS applies the low 5 address
+// bits, so this is an identity within each 32-lane half, not a cross-half move.
+TEST(Xlane, DsBpermuteXorFloat32Modulo)
+{
+    test_ds_bpermute_xor<Semantics::Float>(32);
+}
+TEST(Xlane, DsBpermuteXorFpsan32Modulo)
+{
+    test_ds_bpermute_xor<Semantics::FPSan>(32);
+}
+#endif
 
 // ---- ds_permute (scatter: result[addr[lane]/4] = src[lane]) -----------------
 // Inverse semantics from bpermute: each lane WRITES to the lane indicated by
@@ -238,8 +280,12 @@ void test_ds_permute_xor(int off)
     using V = Value<float, S, kCC>;
     for(int i = 0; i < LANES; ++i)
     {
-        // Lane i was written by lane (i ^ off).
-        const float src = static_cast<float>((i ^ off) * 7 + 1) - 100.f;
+        int src_lane = i ^ off;
+        #if FPSAN_TEST_FORCE_WAVE_SIZE == 64
+            src_lane = (i & ~31) | (src_lane & 31);
+        #endif
+        // Lane i was written by the selected same-half source lane.
+        const float src = static_cast<float>(src_lane * 7 + 1) - 100.f;
         V           src_v{src};
         Out         expected;
         if constexpr(S == Semantics::Float)
@@ -267,6 +313,28 @@ TEST(Xlane, DsPermuteXorFpsan16)
 {
     test_ds_permute_xor<Semantics::FPSan>(16);
 }
+#if FPSAN_TEST_FORCE_WAVE_SIZE == 64
+// RDNA3 DS permute lane selection is modulo 32 even in wave64, so cover the
+// largest same-half XOR here. Cross-half exchange is covered by permlane64.
+TEST(Xlane, DsPermuteXorFloat31)
+{
+    test_ds_permute_xor<Semantics::Float>(31);
+}
+TEST(Xlane, DsPermuteXorFpsan31)
+{
+    test_ds_permute_xor<Semantics::FPSan>(31);
+}
+// off=32 is the important negative boundary: DS applies the low 5 address
+// bits, so this is an identity within each 32-lane half, not a cross-half move.
+TEST(Xlane, DsPermuteXorFloat32Modulo)
+{
+    test_ds_permute_xor<Semantics::Float>(32);
+}
+TEST(Xlane, DsPermuteXorFpsan32Modulo)
+{
+    test_ds_permute_xor<Semantics::FPSan>(32);
+}
+#endif
 
 // ---- ds_swizzle (cross-mode consistency) ------------------------------------
 // ds_swizzle encodings are intricate and hardware-revision-specific; rather
@@ -523,39 +591,71 @@ TEST(Xlane, MovDpp8IdentityFpsan)
     test_mov_dpp8_identity<Semantics::FPSan>();
 }
 
-// ---- permlane64 (wave32: half-swap is unobservable; check no-crash) --------
-__global__ void k_permlane64_smoke(const float* in, float* out)
+// ---- permlane64 (wave64 swaps low/high halves; wave32 is identity) ----------
+template <Semantics S, class Out>
+__global__ void k_permlane64(const float* in, Out* out)
 {
     const int                           lane = threadIdx.x;
-    Value<float, Semantics::Float, kCC> v{in[lane]};
-    out[lane] = static_cast<float>(fpsan::amdgcn_permlane64(v));
+    Value<float, S, kCC>                v{in[lane]};
+    auto                                r = fpsan::amdgcn_permlane64(v);
+    if constexpr(S == Semantics::Float)
+        out[lane] = static_cast<float>(r);
+    else
+        out[lane] = r.fpsan_payload();
 }
 
-// permlane64 swaps lane i with lane i^32 (the two halves of a wave64). It is a
-// gfx11 wave64 instruction and is NOT a gfx1250 instruction; on wave32 the
-// upper-half partner (lane i+32) does not exist, so each lane fetches an invalid
-// lane and reads back 0 -- the result is not meaningful at the wave32 level.
-// Therefore this is a no-crash smoke only: run the wrapper and require the kernel
-// to complete, without asserting a specific (undefined-on-wave32) lane mapping.
-TEST(Xlane, Permlane64Smoke)
+template <Semantics S>
+void test_permlane64()
 {
     int ndev = 0;
     if(hipGetDeviceCount(&ndev) != hipSuccess || ndev == 0)
         GTEST_SKIP() << "no HIP device";
+    using Out = std::conditional_t<S == Semantics::Float, float, std::uint32_t>;
     std::vector<float> in(LANES);
     for(int i = 0; i < LANES; ++i)
         in[i] = static_cast<float>(i);
-    float *dIn, *dOut;
+    float* dIn;
+    Out*   dOut;
     HIP_CHECK(hipMalloc(&dIn, LANES * sizeof(float)));
-    HIP_CHECK(hipMalloc(&dOut, LANES * sizeof(float)));
+    HIP_CHECK(hipMalloc(&dOut, LANES * sizeof(Out)));
     HIP_CHECK(hipMemcpy(dIn, in.data(), LANES * sizeof(float), hipMemcpyHostToDevice));
-    k_permlane64_smoke<<<1, LANES>>>(dIn, dOut);
+    k_permlane64<S><<<1, LANES>>>(dIn, dOut);
     HIP_CHECK(hipDeviceSynchronize());
-    std::vector<float> got(LANES);
-    HIP_CHECK(hipMemcpy(got.data(), dOut, LANES * sizeof(float), hipMemcpyDeviceToHost));
-    SUCCEED() << "permlane64 wrapper executed without crashing on wave32";
+    std::vector<Out> got(LANES);
+    HIP_CHECK(hipMemcpy(got.data(), dOut, LANES * sizeof(Out), hipMemcpyDeviceToHost));
+    if constexpr(LANES == 32)
+    {
+        if(device_is_gfx1250())
+        {
+            SUCCEED() << "permlane64 wrapper executed without crashing on gfx1250 wave32";
+            (void)hipFree(dIn);
+            (void)hipFree(dOut);
+            return;
+        }
+    }
+    using V = Value<float, S, kCC>;
+    for(int i = 0; i < LANES; ++i)
+    {
+        const int src = (LANES == 64) ? (i ^ 32) : i;
+        V         src_v{in[src]};
+        Out       expected;
+        if constexpr(S == Semantics::Float)
+            expected = static_cast<float>(src_v);
+        else
+            expected = src_v.fpsan_payload();
+        EXPECT_EQ(got[i], expected) << "lane " << i;
+    }
     (void)hipFree(dIn);
     (void)hipFree(dOut);
+}
+
+TEST(Xlane, Permlane64Float)
+{
+    test_permlane64<Semantics::Float>();
+}
+TEST(Xlane, Permlane64Fpsan)
+{
+    test_permlane64<Semantics::FPSan>();
 }
 
 // ---- gfx1250 permlane bcast/down/up/xor (cross-mode bit-identity) -----------
@@ -863,6 +963,37 @@ TEST(Xlane, PermlaneIdxGenDeterministic)
 #endif // __has_builtin(__builtin_amdgcn_permlane_idx_gen)
 
 // ---- ballot (wave32: bit i of result set iff lane i passed true) -----------
+#if FPSAN_TEST_FORCE_WAVE_SIZE == 64
+__global__ void k_ballot(const int* pred, std::uint64_t* mask)
+{
+    const int     lane = threadIdx.x;
+    std::uint64_t m    = fpsan::amdgcn_ballot_w64(pred[lane] != 0);
+    if(lane == 0)
+        *mask = m;
+}
+
+TEST(Xlane, BallotW64)
+{
+    int ndev = 0;
+    if(hipGetDeviceCount(&ndev) != hipSuccess || ndev == 0)
+        GTEST_SKIP() << "no HIP device";
+    std::vector<int> pred(LANES);
+    for(int i = 0; i < LANES; ++i)
+        pred[i] = (i % 2 == 0) ? 1 : 0;
+    int*           dPred;
+    std::uint64_t* dMask;
+    HIP_CHECK(hipMalloc(&dPred, LANES * sizeof(int)));
+    HIP_CHECK(hipMalloc(&dMask, sizeof(std::uint64_t)));
+    HIP_CHECK(hipMemcpy(dPred, pred.data(), LANES * sizeof(int), hipMemcpyHostToDevice));
+    k_ballot<<<1, LANES>>>(dPred, dMask);
+    HIP_CHECK(hipDeviceSynchronize());
+    std::uint64_t mask = 0;
+    HIP_CHECK(hipMemcpy(&mask, dMask, sizeof mask, hipMemcpyDeviceToHost));
+    EXPECT_EQ(mask, 0x5555555555555555ull);
+    (void)hipFree(dPred);
+    (void)hipFree(dMask);
+}
+#else
 __global__ void k_ballot(const int* pred, std::uint32_t* mask)
 {
     const int     lane = threadIdx.x;
@@ -893,3 +1024,4 @@ TEST(Xlane, BallotW32)
     (void)hipFree(dPred);
     (void)hipFree(dMask);
 }
+#endif

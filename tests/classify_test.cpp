@@ -23,6 +23,12 @@ using fpsan::Semantics;
 using fpsan::Value;
 
 static constexpr Conversions kCC = Conversions::Explicit;
+#ifndef FPSAN_TEST_FORCE_WAVE_SIZE
+#define FPSAN_TEST_FORCE_WAVE_SIZE 32
+#endif
+static_assert(FPSAN_TEST_FORCE_WAVE_SIZE == 32 || FPSAN_TEST_FORCE_WAVE_SIZE == 64,
+              "classify tests support one wave32 or wave64 wave");
+static constexpr int LANES = FPSAN_TEST_FORCE_WAVE_SIZE;
 
 // Mask 0x3FF = all categories ON; classf returns true for any normal value.
 __global__ void k_classf_pair(const float* in, char* bf, char* bp)
@@ -39,22 +45,22 @@ TEST(Classify, ClassfFloatAndFpsanAgree)
     int ndev = 0;
     if(hipGetDeviceCount(&ndev) != hipSuccess || ndev == 0)
         GTEST_SKIP() << "no HIP device";
-    std::vector<float> in(32);
+    std::vector<float> in(LANES);
     std::mt19937       rng = fpsan_test::make_rng();
     for(auto& x : in)
         x = fpsan_test::pick_quarter<float>(rng, -20, 20); // -5 .. 5
     float* dIn;
-    HIP_CHECK(hipMalloc(&dIn, 32 * sizeof(float)));
-    HIP_CHECK(hipMemcpy(dIn, in.data(), 32 * sizeof(float), hipMemcpyHostToDevice));
+    HIP_CHECK(hipMalloc(&dIn, LANES * sizeof(float)));
+    HIP_CHECK(hipMemcpy(dIn, in.data(), LANES * sizeof(float), hipMemcpyHostToDevice));
     char *dBf, *dBp;
-    HIP_CHECK(hipMalloc(&dBf, 32));
-    HIP_CHECK(hipMalloc(&dBp, 32));
-    k_classf_pair<<<1, 32>>>(dIn, dBf, dBp);
+    HIP_CHECK(hipMalloc(&dBf, LANES));
+    HIP_CHECK(hipMalloc(&dBp, LANES));
+    k_classf_pair<<<1, LANES>>>(dIn, dBf, dBp);
     HIP_CHECK(hipDeviceSynchronize());
-    char bf[32], bp[32];
-    HIP_CHECK(hipMemcpy(bf, dBf, 32, hipMemcpyDeviceToHost));
-    HIP_CHECK(hipMemcpy(bp, dBp, 32, hipMemcpyDeviceToHost));
-    for(int i = 0; i < 32; ++i)
+    std::vector<char> bf(LANES), bp(LANES);
+    HIP_CHECK(hipMemcpy(bf.data(), dBf, LANES, hipMemcpyDeviceToHost));
+    HIP_CHECK(hipMemcpy(bp.data(), dBp, LANES, hipMemcpyDeviceToHost));
+    for(int i = 0; i < LANES; ++i)
     {
         // Float and FPSan must agree with each other AND with an independent host
         // reference: classf(v, 0x3FF) returns true for any value matching any of
@@ -74,10 +80,12 @@ __global__ void k_fcmpf_pair(const float* a, const float* b, std::uint64_t* mf, 
     Value<float, Semantics::Float, kCC> af{a[i]}, bf{b[i]};
     Value<float, Semantics::FPSan, kCC> ap{a[i]}, bp{b[i]};
     // Predicate 1 = OEQ (ordered equal); see LLVM fcmp predicates.
+    std::uint64_t f = fpsan::amdgcn_fcmpf<1, Semantics::Float, kCC>(af, bf);
+    std::uint64_t p = fpsan::amdgcn_fcmpf<1, Semantics::FPSan, kCC>(ap, bp);
     if(i == 0)
     {
-        *mf = fpsan::amdgcn_fcmpf<1, Semantics::Float, kCC>(af, bf);
-        *mp = fpsan::amdgcn_fcmpf<1, Semantics::FPSan, kCC>(ap, bp);
+        *mf = f;
+        *mp = p;
     }
 }
 
@@ -86,27 +94,31 @@ TEST(Classify, FcmpfFloatAndFpsanAgree)
     int ndev = 0;
     if(hipGetDeviceCount(&ndev) != hipSuccess || ndev == 0)
         GTEST_SKIP() << "no HIP device";
-    std::vector<float> a(32), b(32);
+    std::vector<float> a(LANES), b(LANES);
     // Half identical, half different so the mask is nontrivial.
-    for(int i = 0; i < 32; ++i)
+    std::uint64_t expected = 0;
+    for(int i = 0; i < LANES; ++i)
     {
         a[i] = static_cast<float>(i % 4);
         b[i] = static_cast<float>(i % 5);
+        if(a[i] == b[i])
+            expected |= (1ull << i);
     }
     float *dA, *dB;
-    HIP_CHECK(hipMalloc(&dA, 32 * sizeof(float)));
-    HIP_CHECK(hipMalloc(&dB, 32 * sizeof(float)));
-    HIP_CHECK(hipMemcpy(dA, a.data(), 32 * sizeof(float), hipMemcpyHostToDevice));
-    HIP_CHECK(hipMemcpy(dB, b.data(), 32 * sizeof(float), hipMemcpyHostToDevice));
+    HIP_CHECK(hipMalloc(&dA, LANES * sizeof(float)));
+    HIP_CHECK(hipMalloc(&dB, LANES * sizeof(float)));
+    HIP_CHECK(hipMemcpy(dA, a.data(), LANES * sizeof(float), hipMemcpyHostToDevice));
+    HIP_CHECK(hipMemcpy(dB, b.data(), LANES * sizeof(float), hipMemcpyHostToDevice));
     std::uint64_t *dMf, *dMp;
     HIP_CHECK(hipMalloc(&dMf, sizeof(std::uint64_t)));
     HIP_CHECK(hipMalloc(&dMp, sizeof(std::uint64_t)));
-    k_fcmpf_pair<<<1, 32>>>(dA, dB, dMf, dMp);
+    k_fcmpf_pair<<<1, LANES>>>(dA, dB, dMf, dMp);
     HIP_CHECK(hipDeviceSynchronize());
     std::uint64_t mf = 0, mp = 0;
     HIP_CHECK(hipMemcpy(&mf, dMf, sizeof mf, hipMemcpyDeviceToHost));
     HIP_CHECK(hipMemcpy(&mp, dMp, sizeof mp, hipMemcpyDeviceToHost));
     EXPECT_EQ(mf, mp);
+    EXPECT_EQ(mf, expected);
     (void)hipFree(dA);
     (void)hipFree(dB);
     (void)hipFree(dMf);

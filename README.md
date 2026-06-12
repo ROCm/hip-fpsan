@@ -160,44 +160,18 @@ a **Float** path (forwards to the real `__builtin_amdgcn_*`) and an **FPSan** pa
 
 **Supported architectures:**
 
-- **RDNA3** — gfx11 (WMMA matrix path, wave32 and wave64)
+- **RDNA3** — gfx1100 (WMMA matrix path, wave32 and wave64)
 - **RDNA4** — gfx1200 / gfx1201 (WMMA matrix path, K=16, wave32)
+- **CDNA3** — gfx942 (gfx9-family MFMA path, wave64)
+- **CDNA4** — gfx950 (MFMA + scaled / sub-byte matrix path, wave64)
 - **gfx1250** — distinct WMMA family, K=32/64/128 shapes (wave32)
-- **CDNA3** — gfx94x / MI300 (gfx9-family MFMA path, wave64)
-- **CDNA4** — gfx950 / MI350 (MFMA + scaled / sub-byte matrix path, wave64)
 
-Every in-scope FP-relevant intrinsic LLVM tags for the arch is implemented in
-both Float and FPSan modes and silicon-verified, or deferred with explicit
-rationale (see [`docs/gfx12-coverage-audit.md`](docs/gfx12-coverage-audit.md)
-for the gfx12 inventory). Of-course-MFMA-doesn't-exist-on-RDNA-and-WMMA-
-doesn't-exist-on-CDNA aside, the CDNA / gfx9-family targets carry the
-MFMA/SMFMAC matrix instructions and the RDNA / gfx12-family targets carry
-WMMA/SWMMAC. CDNA3 covers the gfx94x FP feature set: shared
-scalar/math/wave/classify/atomics, AMD-FNUZ FP8/BF8 conversions, dense MFMA,
-and SMFMAC f16/bf16/fp8. Backend-visible non-1K BF16 MFMA forms and
-`log_clampf` are deferred on gfx94x because direct gfx942 probes do not lower.
-RDNA3 covers the gfx11 FP feature set: wave/xlane, scalar math, fdot2,
-atomics/classify, and f16/bf16 WMMA in wave32 and wave64. The RDNA3 scalar
-surface excludes backend-visible forms that direct gfx1100 probes do not lower,
-currently `log_clampf` and `tanh{f,h}`; those wrappers are gated out of gfx11
-device builds.
+The CDNA / gfx9-family targets carry the MFMA/SMFMAC matrix instructions; the
+RDNA targets carry WMMA/SWMMAC where native to the architecture — each family
+implements the matrix ops native to it. Every in-scope FP-relevant intrinsic the
+architecture exposes is wrapped in both Float and FPSan modes (or deferred with
+an explicit rationale).
 
-| Intrinsic family (header) | RDNA3 / gfx11 | RDNA4 / gfx12 | gfx1250 | CDNA3 / gfx94x | CDNA4 / gfx950 |
-|---|:---:|:---:|:---:|:---:|:---:|
-| Wave reduce / cross-lane (`amdgcn_wave.hpp`) | ✅ wave32 f32/f64 | ✅ wave32 f32 | ✅ wave32 f32 | ✅ wave64 f32 | ✅ wave64 f32 |
-| Scalar math + `ldexp` (`amdgcn_math.hpp`) | ✅ | ✅ | ✅ + bf16 trans | ✅ | ✅ |
-| `dot4_f32_{fp8,bf8}` (`amdgcn_math.hpp`) | — *(dot11 not gfx11)* | ✅ | — *(dot families dropped)* | — *(dot11-insts is RDNA)* | — *(dot11-insts is RDNA)* |
-| FP atomics fadd/fmin/fmax (`amdgcn_atomic.hpp`) | ✅ | ✅ | ✅ | ✅ | ✅ |
-| Classify / compare (`amdgcn_classify.hpp`) | ✅ | ✅ | ✅ | ✅ | ✅ |
-| FP8/BF8 convert + stochastic-round (`amdgcn_cvt.hpp`) | — | ✅ | ✅ | ✅ AMD FNUZ | ✅ |
-| MX scaled convert `cvt_scalef32` (fp8/fp6/fp4) | — | — | ✅ gfx1250 scale/pack/unpack | — | ✅ (100%) |
-| Dense matrix MMA (`amdgcn_matrix.hpp` / `amdgcn_mfma.hpp`) | ✅ WMMA 16x16x16 f16/bf16 wave32+wave64 | ✅ WMMA 16x16x16 | ✅ WMMA K=4/32/64/128 | ✅ MFMA dense + legacy gfx9 | ✅ MFMA dense + legacy gfx9 |
-| Sparse 2:4 matrix MMA (`amdgcn_swmmac_gfx12.hpp` / `amdgcn_smfmac.hpp`) | — | ✅ SWMMAC all 7 shapes | ✅ SWMMAC K=64/K=128 | ✅ SMFMAC f16/bf16/fp8 | ✅ SMFMAC f16/bf16/fp8 |
-| Scaled f8f6f4 matrix MMA — sub-byte, per-K-block scale | — | — | ✅ WMMA scaled f8f6f4 | — | ✅ MFMA scaled f8f6f4 |
-| Global transpose load (`amdgcn_global_load.hpp`) | — | ✅ wave32 | ✅ load_tr16 | — | — |
-| LDS transpose `ds_read_tr*` (`amdgcn_ds.hpp`) | — | — | — | — | ✅ |
-
-✅ = both modes implemented & tested · — = not applicable to that target.
 Integer MFMA/SMFMAC, graphics ops (cubemap, interp, image_bvh, fp→int format
 packs), and the IEEE bit-twiddling micro-ops (`frexp`/`div_scale`/`trig_preop`/…)
 are intentionally out of scope: a symbolic FPSan payload has no faithful image

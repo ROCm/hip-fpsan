@@ -10,8 +10,9 @@
 // The wave-reduce family relies on two identities (see also [[mix.hpp]],
 // [[value.hpp]]):
 //   - FPSan addition is integer add mod 2^w on the payload, so a butterfly
-//     reduce produces the same payload as a sequential reduce. Strategy and
-//     tree shape are irrelevant in FPSan mode.
+//     reduce produces the same payload as a sequential reduce once the lane
+//     exchange covers the full wave. Strategy and tree shape are irrelevant in
+//     FPSan mode.
 //   - FPSan order is signed-int order on the payload, so fpsan::min /
 //   fpsan::max
 //     reduce to signed-int min / max on storage. Same butterfly works.
@@ -35,9 +36,8 @@ namespace fpsan
 
 // Define one fpsan::<name> wave-reduce wrapper. Float mode forwards to BUILTIN
 // (passes Strategy as the _Constant int32_t arg). FPSan mode runs a wave-size
-// correct XOR butterfly (wave32 on RDNA, wave64 on CDNA/gfx950) with
-// COMBINE_EXPR, where the names `r` and `other` are in
-// scope and resolve to per-stage Values. Strategy is ignored in FPSan mode
+// correct XOR butterfly with COMBINE_EXPR, where the names `r` and `other` are
+// in scope and resolve to per-stage Values. Strategy is ignored in FPSan mode
 // (for fadd/fmin/fmax: the combine op is associative + commutative on
 // payloads, so the tree shape doesn't matter; for fsub: we pick the same
 // butterfly shape as the rest of the family and document that the Float and
@@ -56,13 +56,11 @@ namespace fpsan
         }                                                                             \
         else                                                                          \
         {                                                                             \
-            /* Wave-size-correct XOR butterfly: on CDNA (wave64) we must fold all   \
-       * 64 lanes, on RDNA wave32 only 32. wave_lane_full() gives the true    \
-       * 0..ws-1 lane id on both, and ds_bpermute (inside wave_shfl) is       \
-       * already 64-lane capable, so the only knobs are the lane id and the   \
-       * loop bound. The hardware wave_reduce folds the entire active wave and \
-       * broadcasts the result to every lane; this butterfly reproduces that  \
-       * exactly when the whole wave is active. */ \
+            /* Wave-size-correct XOR butterfly. detail::wave_shfl handles gfx11      \
+       * wave64 cross-half moves with V_PERMLANE64_B32 before same-half DS    \
+       * bpermute. The gfx11 wave64 Float builtin's default LLVM lowering is  \
+       * tracked separately in the coverage docs because it does not match     \
+       * LLVM's documented full-wave reduction contract on tested silicon. */  \
             const int         ws   = __builtin_amdgcn_wavefrontsize();                \
             const int         lane = detail::wave_lane_full();                        \
             Value<type, S, C> r    = v;                                               \

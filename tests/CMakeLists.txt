@@ -28,6 +28,7 @@ option(FPSAN_CTEST_PER_CASE
 # Helper: define a test executable from one source file, link the library, set
 # its language, and register it with ctest.
 function(fpsan_add_test name src)
+  cmake_parse_arguments(FPSAN_TEST "" "TEST_PREFIX" "" ${ARGN})
   add_executable(${name} ${src})
   set_source_files_properties(${src} PROPERTIES LANGUAGE ${FPSAN_TEST_LANG})
   target_link_libraries(${name} PRIVATE fpsan::fpsan)
@@ -36,7 +37,7 @@ function(fpsan_add_test name src)
     include(GoogleTest)
     # Each TEST() becomes its own ctest entry, so ctest -j parallelizes across
     # them and a crash fails only that case.
-    gtest_discover_tests(${name})
+    gtest_discover_tests(${name} TEST_PREFIX "${FPSAN_TEST_TEST_PREFIX}")
   elseif(TARGET GTest::gtest_main)
     target_link_libraries(${name} PRIVATE GTest::gtest_main)
     # One ctest entry per binary: all of its TEST()s run in a single process.
@@ -78,6 +79,12 @@ function(fpsan_add_compile_fail_test name src)
            COMMAND ${CMAKE_COMMAND} --build ${CMAKE_BINARY_DIR}
                    --target ${name} --config $<CONFIG>)
   set_tests_properties(${name} PROPERTIES WILL_FAIL TRUE)
+endfunction()
+
+function(fpsan_enable_gfx11_wave64 name)
+  target_compile_definitions(${name} PRIVATE FPSAN_TEST_FORCE_WAVE_SIZE=64)
+  target_compile_options(${name}
+                         PRIVATE $<$<COMPILE_LANGUAGE:HIP>:-mwavefrontsize64>)
 endfunction()
 
 # ---- build canary: proves the toolchain + INTERFACE target + ctest work even
@@ -191,8 +198,26 @@ if(TARGET GTest::gtest_main)
                             PROPERTIES HIP_ARCHITECTURES "${_fpsan_gfx11_arches}")
       target_compile_definitions(fpsan_wmma_gfx11_w64_test
                                  PRIVATE FPSAN_TEST_GFX11_WAVE64=1)
-      target_compile_options(fpsan_wmma_gfx11_w64_test
-                             PRIVATE $<$<COMPILE_LANGUAGE:HIP>:-mwavefrontsize64>)
+      fpsan_enable_gfx11_wave64(fpsan_wmma_gfx11_w64_test)
+    endif()
+    if(_fpsan_has_gfx11)
+      fpsan_add_test(fpsan_xlane_w64_test xlane_test.cpp TEST_PREFIX W64.)
+      set_target_properties(fpsan_xlane_w64_test
+                            PROPERTIES HIP_ARCHITECTURES "${_fpsan_gfx11_arches}")
+      fpsan_enable_gfx11_wave64(fpsan_xlane_w64_test)
+
+      fpsan_add_test(fpsan_classify_w64_test classify_test.cpp TEST_PREFIX W64.)
+      set_target_properties(fpsan_classify_w64_test
+                            PROPERTIES HIP_ARCHITECTURES "${_fpsan_gfx11_arches}")
+      fpsan_enable_gfx11_wave64(fpsan_classify_w64_test)
+
+      fpsan_add_test(fpsan_wave_gfx11_w64_test wave_test.cpp TEST_PREFIX W64.)
+      set_target_properties(fpsan_wave_gfx11_w64_test
+                            PROPERTIES HIP_ARCHITECTURES "${_fpsan_gfx11_arches}")
+      target_compile_definitions(fpsan_wave_gfx11_w64_test
+                                 PRIVATE FPSAN_TEST_ENABLE_WAVE_F64=1
+                                         FPSAN_TEST_SKIP_FLOAT_WAVE_REDUCE=1)
+      fpsan_enable_gfx11_wave64(fpsan_wave_gfx11_w64_test)
     endif()
     if(_fpsan_has_cdna3)
       fpsan_add_test(fpsan_mfma_cdna3_test mfma_cdna3_test.cpp)

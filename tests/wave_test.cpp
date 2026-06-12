@@ -5,10 +5,11 @@
 //
 // GPU tests for the wave-cooperative reduce wrappers in fpsan/amdgcn_wave.hpp.
 // The harness is wave-size agnostic: it queries the device warp size at run
-// time (32 on RDNA wave32, 64 on CDNA/gfx950 wave64), launches exactly one
-// full wave, and reduces the host references over that same lane count. This
-// is what makes the suite authoritative on gfx950 -- a wave32-only reference
-// would silently pass while the wrapper folded only half the wave.
+// time unless FPSAN_TEST_FORCE_WAVE_SIZE selects a compile-time wave size,
+// launches exactly one full wave, and reduces the host references over that
+// same lane count. This is what makes the suite authoritative on gfx950 and on
+// explicit gfx11 wave64 FPSan targets -- a wave32-only reference would silently
+// pass while the wrapper folded only half the wave.
 //
 // Per (op, type) we certify:
 //   - FpsanMatchesHostButterfly: FPSan-mode payload equals a host scalar
@@ -45,6 +46,15 @@ static constexpr Conversions kCC = Conversions::Explicit;
 #ifndef FPSAN_TEST_ENABLE_WAVE_F64
 #define FPSAN_TEST_ENABLE_WAVE_F64 0
 #endif
+#ifndef FPSAN_TEST_FORCE_WAVE_SIZE
+#define FPSAN_TEST_FORCE_WAVE_SIZE 0
+#endif
+#ifndef FPSAN_TEST_SKIP_FLOAT_WAVE_REDUCE
+#define FPSAN_TEST_SKIP_FLOAT_WAVE_REDUCE 0
+#endif
+static_assert(FPSAN_TEST_FORCE_WAVE_SIZE == 0 || FPSAN_TEST_FORCE_WAVE_SIZE == 32
+                  || FPSAN_TEST_FORCE_WAVE_SIZE == 64,
+              "wave tests support default device wave size, wave32, or wave64");
 // Upper bound on lanes in one wave (wave64). Host reference scratch is sized
 // to this; the active count is the runtime warp size.
 static constexpr int kMaxLanes = 64;
@@ -142,6 +152,9 @@ namespace
     // Runtime warp size of device 0 (32 or 64), or 0 if no device.
     int device_wave_size()
     {
+        #if FPSAN_TEST_FORCE_WAVE_SIZE != 0
+            return FPSAN_TEST_FORCE_WAVE_SIZE;
+        #else
         int ndev = 0;
         if(hipGetDeviceCount(&ndev) != hipSuccess || ndev == 0)
             return 0;
@@ -149,6 +162,7 @@ namespace
         if(hipGetDeviceProperties(&p, 0) != hipSuccess)
             return 0;
         return p.warpSize;
+        #endif
     }
 
     template <class FT>
@@ -171,7 +185,11 @@ namespace
 template <class T>
 void run_float_matches_host_butterfly()
 {
-    if constexpr(!T::sequential_is_safe)
+    if constexpr(FPSAN_TEST_SKIP_FLOAT_WAVE_REDUCE)
+    {
+        GTEST_SKIP() << "Float wave_reduce is skipped for this target";
+    }
+    else if constexpr(!T::sequential_is_safe)
     {
         GTEST_SKIP() << "non-associative op; float result depends on hw tree shape";
     }
