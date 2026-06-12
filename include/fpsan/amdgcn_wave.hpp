@@ -417,6 +417,23 @@ namespace fpsan
     }
 #endif
 
+// ---- permlane32_swap: swap two registers' payloads across 32-lane halves ----
+#if !defined(__HIP_DEVICE_COMPILE__) || __has_builtin(__builtin_amdgcn_permlane32_swap)
+    template <bool FetchInvalid, bool BoundCtrl, class FT, Semantics S, Conversions C>
+    FPSAN_DEVICE void amdgcn_permlane32_swap(Value<FT, S, C>& x, Value<FT, S, C>& y)
+    {
+        using B = typename Value<FT, S, C>::bits_type;
+        static_assert(!Value<FT, S, C>::is_vector && sizeof(B) <= 4,
+                      "amdgcn_permlane32_swap requires a scalar 32-bit Value");
+        const std::uint32_t xw = static_cast<std::uint32_t>(x.to_storage_bits());
+        const std::uint32_t yw = static_cast<std::uint32_t>(y.to_storage_bits());
+        auto                r  = __builtin_amdgcn_permlane32_swap(
+            static_cast<int>(xw), static_cast<int>(yw), FetchInvalid, BoundCtrl);
+        x = Value<FT, S, C>::from_storage_bits(static_cast<B>(static_cast<std::uint32_t>(r[0])));
+        y = Value<FT, S, C>::from_storage_bits(static_cast<B>(static_cast<std::uint32_t>(r[1])));
+    }
+#endif
+
 // ---- mov_dpp8: DPP variant with a per-lane selector encoded as a 32-bit
 // immediate (8 nibbles, one per lane within an 8-lane row). gfx10+ only.
 #if !defined(__HIP_DEVICE_COMPILE__) || __has_builtin(__builtin_amdgcn_mov_dpp8)

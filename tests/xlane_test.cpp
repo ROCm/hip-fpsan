@@ -539,6 +539,7 @@ TEST(Xlane, MovDppIdentityFpsan)
     test_mov_dpp_identity<Semantics::FPSan>();
 }
 
+#if !defined(__HIP_DEVICE_COMPILE__) || __has_builtin(__builtin_amdgcn_mov_dpp8)
 // ---- mov_dpp8 (identity selector 0x76543210 = lane i reads lane i) ----------
 template <Semantics S, class Out>
 __global__ void k_mov_dpp8_identity(Out* out)
@@ -584,13 +585,20 @@ void test_mov_dpp8_identity()
 
 TEST(Xlane, MovDpp8IdentityFloat)
 {
+    if(device_is_gfx950())
+        GTEST_SKIP() << "mov_dpp8 is not a gfx950 op";
     test_mov_dpp8_identity<Semantics::Float>();
 }
 TEST(Xlane, MovDpp8IdentityFpsan)
 {
+    if(device_is_gfx950())
+        GTEST_SKIP() << "mov_dpp8 is not a gfx950 op";
     test_mov_dpp8_identity<Semantics::FPSan>();
 }
 
+#endif // __has_builtin(__builtin_amdgcn_mov_dpp8)
+
+#if !defined(__HIP_DEVICE_COMPILE__) || __has_builtin(__builtin_amdgcn_permlane64)
 // ---- permlane64 (wave64 swaps low/high halves; wave32 is identity) ----------
 template <Semantics S, class Out>
 __global__ void k_permlane64(const float* in, Out* out)
@@ -610,6 +618,8 @@ void test_permlane64()
     int ndev = 0;
     if(hipGetDeviceCount(&ndev) != hipSuccess || ndev == 0)
         GTEST_SKIP() << "no HIP device";
+    if(device_is_gfx950())
+        GTEST_SKIP() << "permlane64 is not a gfx950 op";
     using Out = std::conditional_t<S == Semantics::Float, float, std::uint32_t>;
     std::vector<float> in(LANES);
     for(int i = 0; i < LANES; ++i)
@@ -657,6 +667,7 @@ TEST(Xlane, Permlane64Fpsan)
 {
     test_permlane64<Semantics::FPSan>();
 }
+#endif // __has_builtin(__builtin_amdgcn_permlane64)
 
 // ---- gfx1250 permlane bcast/down/up/xor (cross-mode bit-identity) -----------
 // Selector semantics are intricate; we certify the load-bearing invariant that
@@ -859,6 +870,8 @@ TEST(Xlane, Permlane16HostOracle)
 {
     if(!have_device())
         GTEST_SKIP() << "no HIP device";
+    if(device_is_gfx950())
+        GTEST_SKIP() << "permlane16/permlanex16 are not gfx950 ops";
     unsigned id0 = 0, id1 = 0, sw0 = 0, sw1 = 0;
     for(int i = 0; i < 8; ++i)
     {
@@ -900,8 +913,8 @@ TEST(Xlane, Permlane16SwapCrossMode)
     int ndev = 0;
     if(hipGetDeviceCount(&ndev) != hipSuccess || ndev == 0)
         GTEST_SKIP() << "no HIP device";
-    if(!device_is_gfx1250())
-        GTEST_SKIP() << "permlane16_swap is a gfx1250-only op";
+    if(!device_is_gfx1250() && !device_is_gfx950())
+        GTEST_SKIP() << "permlane16_swap is only tested on gfx1250/gfx950";
     float *        dfx, *dfy;
     std::uint32_t *dpx, *dpy;
     HIP_CHECK(hipMalloc(&dfx, LANES * sizeof(float)));
@@ -929,6 +942,62 @@ TEST(Xlane, Permlane16SwapCrossMode)
     (void)hipFree(dpy);
 }
 #endif // __has_builtin(__builtin_amdgcn_permlane16_swap)
+
+// ---- permlane32_swap (cross-mode bit-identity on both swapped operands) -----
+#if !defined(__HIP_DEVICE_COMPILE__) || __has_builtin(__builtin_amdgcn_permlane32_swap)
+template <Semantics S, class Out>
+__global__ void k_permlane32_swap(Out* outx, Out* outy)
+{
+    const int            lane = threadIdx.x;
+    Value<float, S, kCC> x{lane_input_float(lane)};
+    Value<float, S, kCC> y{lane_input_float(lane) + 2000.f};
+    fpsan::amdgcn_permlane32_swap<false, false>(x, y);
+    if constexpr(S == Semantics::Float)
+    {
+        outx[lane] = static_cast<float>(x);
+        outy[lane] = static_cast<float>(y);
+    }
+    else
+    {
+        outx[lane] = x.fpsan_payload();
+        outy[lane] = y.fpsan_payload();
+    }
+}
+
+TEST(Xlane, Permlane32SwapCrossMode)
+{
+    int ndev = 0;
+    if(hipGetDeviceCount(&ndev) != hipSuccess || ndev == 0)
+        GTEST_SKIP() << "no HIP device";
+    if(!device_is_gfx950())
+        GTEST_SKIP() << "permlane32_swap is only tested on gfx950";
+    float *        dfx, *dfy;
+    std::uint32_t *dpx, *dpy;
+    HIP_CHECK(hipMalloc(&dfx, LANES * sizeof(float)));
+    HIP_CHECK(hipMalloc(&dfy, LANES * sizeof(float)));
+    HIP_CHECK(hipMalloc(&dpx, LANES * sizeof(std::uint32_t)));
+    HIP_CHECK(hipMalloc(&dpy, LANES * sizeof(std::uint32_t)));
+    k_permlane32_swap<Semantics::Float><<<1, LANES>>>(dfx, dfy);
+    k_permlane32_swap<Semantics::FPSan><<<1, LANES>>>(dpx, dpy);
+    HIP_CHECK(hipDeviceSynchronize());
+    std::vector<float>         fx(LANES), fy(LANES);
+    std::vector<std::uint32_t> px(LANES), py(LANES);
+    HIP_CHECK(hipMemcpy(fx.data(), dfx, LANES * sizeof(float), hipMemcpyDeviceToHost));
+    HIP_CHECK(hipMemcpy(fy.data(), dfy, LANES * sizeof(float), hipMemcpyDeviceToHost));
+    HIP_CHECK(hipMemcpy(px.data(), dpx, LANES * sizeof(std::uint32_t), hipMemcpyDeviceToHost));
+    HIP_CHECK(hipMemcpy(py.data(), dpy, LANES * sizeof(std::uint32_t), hipMemcpyDeviceToHost));
+    using VP = Value<float, Semantics::FPSan, kCC>;
+    for(int i = 0; i < LANES; ++i)
+    {
+        EXPECT_EQ(px[i], VP{fx[i]}.fpsan_payload()) << "x lane " << i;
+        EXPECT_EQ(py[i], VP{fy[i]}.fpsan_payload()) << "y lane " << i;
+    }
+    (void)hipFree(dfx);
+    (void)hipFree(dfy);
+    (void)hipFree(dpx);
+    (void)hipFree(dpy);
+}
+#endif // __has_builtin(__builtin_amdgcn_permlane32_swap)
 
 // ---- permlane_idx_gen (integer index generator; mode-independent smoke) -----
 #if !defined(__HIP_DEVICE_COMPILE__) || __has_builtin(__builtin_amdgcn_permlane_idx_gen)

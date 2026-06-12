@@ -88,10 +88,10 @@ namespace fpsan
         template <class Elem>
         using v16_fragment = vec_fragment<Elem, 16>;
     } // namespace detail
-    using v32e4m3_native = detail::v32_fragment<fp8_e4m3>;
-    using v32e5m2_native = detail::v32_fragment<fp8_e5m2>; // bf8 scaled-MFMA operand
-    using v16e4m3_native = detail::v16_fragment<fp8_e4m3>;
-    using v16e5m2_native = detail::v16_fragment<fp8_e5m2>;
+    using v32e4m3_native     = detail::v32_fragment<fp8_e4m3>;
+    using v32e5m2_native     = detail::v32_fragment<fp8_e5m2>; // bf8 scaled-MFMA operand
+    using v16e4m3_native     = detail::v16_fragment<fp8_e4m3>;
+    using v16e5m2_native     = detail::v16_fragment<fp8_e5m2>;
     using v8amd_e4m3_native  = detail::v8_fragment<amd_fp8_e4m3>;
     using v8amd_e5m2_native  = detail::v8_fragment<amd_fp8_e5m2>;
     using v16amd_e4m3_native = detail::v16_fragment<amd_fp8_e4m3>;
@@ -129,7 +129,7 @@ namespace fpsan
             int lane;
             int sub; // sub-element within the dword (0 for 32/64-bit elements)
         };
-        FPSAN_DEVICE inline InputLoc
+        FPSAN_HOST_DEVICE inline InputLoc
             input_loc(int dim, int K, int B, int i, int k, int b, int data_bits)
         {
             const int lanes_per_block = 64 / (dim * B);
@@ -153,7 +153,7 @@ namespace fpsan
             int reg;
             int lane;
         };
-        FPSAN_DEVICE inline OutputLoc output_loc_32(int M, int N, int i, int j, int b)
+        FPSAN_HOST_DEVICE inline OutputLoc output_loc_32(int M, int N, int i, int j, int b)
         {
             const int multirows      = 64 / N;
             const int mn_div_4       = (M * N) / 4;
@@ -164,7 +164,7 @@ namespace fpsan
             return {reg, lane};
         }
 
-        FPSAN_DEVICE inline OutputLoc output_loc_64(int M, int N, int i, int j, int b)
+        FPSAN_HOST_DEVICE inline OutputLoc output_loc_64(int M, int N, int i, int j, int b)
         {
             const int multirows      = 64 / N;
             const int mn             = M * N;
@@ -172,6 +172,39 @@ namespace fpsan
             const int local          = b * (mn / 64) + (i / multirows);
             const int lane = (b % blocks_per_reg) * N + (i % multirows) * blocks_per_reg * N + j;
             return {local * 2, lane};
+        }
+
+        FPSAN_DEVICE inline int mfma_a_src_lane(int lane, int cbsz, int abid)
+        {
+            if(cbsz == 0)
+                return lane;
+            const int block = 64 / (1 << cbsz);
+            return (lane % block) + block * abid;
+        }
+
+        FPSAN_DEVICE inline int mfma_b_src_lane(int lane, int blgp)
+        {
+            switch(blgp)
+            {
+            case 0:
+                return lane;
+            case 1:
+                return lane % 32;
+            case 2:
+                return (lane % 32) + 32;
+            case 3:
+                return (lane + 16) % 64;
+            case 4:
+                return lane % 16;
+            case 5:
+                return (lane % 16) + 16;
+            case 6:
+                return (lane % 16) + 32;
+            case 7:
+                return (lane % 16) + 48;
+            default:
+                return lane;
+            }
         }
 
         // ---- Wave-cooperative software MFMA ----------------------------------------
@@ -208,7 +241,42 @@ namespace fpsan
                   class CFrag,
                   class ExtractA,
                   class ExtractB>
+        FPSAN_DEVICE CFrag mfma_software(
+            AFrag a, BFrag b, CFrag c, ExtractA ea, ExtractB eb, int cbsz, int abid, int blgp);
+
+        template <int M,
+                  int N,
+                  int K,
+                  int B,
+                  int InBits,
+                  class CElem,
+                  Semantics   S,
+                  Conversions C,
+                  class AFrag,
+                  class BFrag,
+                  class CFrag,
+                  class ExtractA,
+                  class ExtractB>
         FPSAN_DEVICE CFrag mfma_software(AFrag a, BFrag b, CFrag c, ExtractA ea, ExtractB eb)
+        {
+            return mfma_software<M, N, K, B, InBits, CElem, S, C>(a, b, c, ea, eb, 0, 0, 0);
+        }
+
+        template <int M,
+                  int N,
+                  int K,
+                  int B,
+                  int InBits,
+                  class CElem,
+                  Semantics   S,
+                  Conversions C,
+                  class AFrag,
+                  class BFrag,
+                  class CFrag,
+                  class ExtractA,
+                  class ExtractB>
+        FPSAN_DEVICE CFrag mfma_software(
+            AFrag a, BFrag b, CFrag c, ExtractA ea, ExtractB eb, int cbsz, int abid, int blgp)
         {
             (void)a;
             (void)b;
@@ -265,9 +333,9 @@ namespace fpsan
                     // Pull this lane's worth of the source fragments, then shuffle across.
                     auto av_local = ea(al.reg, al.sub); // scalar AElem from this lane
                     auto bv_local = eb(bl.reg, bl.sub);
-                    auto av       = detail::wave_shfl(av_local, al.lane);
-                    auto bv       = detail::wave_shfl(bv_local, bl.lane);
-                    acc           = acc + cast<CElem>(av) * cast<CElem>(bv);
+                    auto av = detail::wave_shfl(av_local, mfma_a_src_lane(al.lane, cbsz, abid));
+                    auto bv = detail::wave_shfl(bv_local, mfma_b_src_lane(bl.lane, blgp));
+                    acc     = acc + cast<CElem>(av) * cast<CElem>(bv);
                 }
                 d.set(reg, acc);
             }
@@ -720,7 +788,14 @@ namespace fpsan
         else                                                                              \
         {                                                                                 \
             return detail::mfma_software<M_, N_, K_, 1, /*InBits=*/16, float, S, Cv>(     \
-                a, b, c, FPSAN_MFMA_EXTRACT_VEC8(a), FPSAN_MFMA_EXTRACT_VEC8(b));         \
+                a,                                                                        \
+                b,                                                                        \
+                c,                                                                        \
+                FPSAN_MFMA_EXTRACT_VEC8(a),                                               \
+                FPSAN_MFMA_EXTRACT_VEC8(b),                                               \
+                CBSZ,                                                                     \
+                ABID,                                                                     \
+                BLGP);                                                                    \
         }                                                                                 \
     }
 
@@ -741,7 +816,14 @@ namespace fpsan
         else                                                                              \
         {                                                                                 \
             return detail::mfma_software<M_, N_, K_, 1, /*InBits=*/16, float, S, Cv>(     \
-                a, b, c, FPSAN_MFMA_EXTRACT_VEC8(a), FPSAN_MFMA_EXTRACT_VEC8(b));         \
+                a,                                                                        \
+                b,                                                                        \
+                c,                                                                        \
+                FPSAN_MFMA_EXTRACT_VEC8(a),                                               \
+                FPSAN_MFMA_EXTRACT_VEC8(b),                                               \
+                CBSZ,                                                                     \
+                ABID,                                                                     \
+                BLGP);                                                                    \
         }                                                                                 \
     }
 
@@ -807,7 +889,14 @@ namespace fpsan
         else                                                                              \
         {                                                                                 \
             return detail::mfma_software<M_, N_, K_, B_, /*InBits=*/16, float, S, Cv>(    \
-                a, b, c, FPSAN_MFMA_EXTRACT_VEC8(a), FPSAN_MFMA_EXTRACT_VEC8(b));         \
+                a,                                                                        \
+                b,                                                                        \
+                c,                                                                        \
+                FPSAN_MFMA_EXTRACT_VEC8(a),                                               \
+                FPSAN_MFMA_EXTRACT_VEC8(b),                                               \
+                CBSZ,                                                                     \
+                ABID,                                                                     \
+                BLGP);                                                                    \
         }                                                                                 \
     }
 
@@ -928,7 +1017,7 @@ namespace fpsan
             auto ea = [&](int reg, int sub) { return a.get(4 * reg + sub); };         \
             auto eb = [&](int reg, int sub) { return b.get(4 * reg + sub); };         \
             return detail::mfma_software<M_, N_, K_, 1, /*InBits=*/8, float, S, Cv>(  \
-                a, b, c, ea, eb);                                                     \
+                a, b, c, ea, eb, CBSZ, ABID, BLGP);                                   \
         }                                                                             \
     }
 
@@ -1220,7 +1309,7 @@ namespace fpsan
             auto ea = [&](int, int) { return a; };                                        \
             auto eb = [&](int, int) { return b; };                                        \
             return detail::mfma_software<M_, N_, K_, B_, /*InBits=*/32, float, S, Cv>(    \
-                a, b, c, ea, eb);                                                         \
+                a, b, c, ea, eb, CBSZ, ABID, BLGP);                                       \
         }                                                                                 \
     }
 

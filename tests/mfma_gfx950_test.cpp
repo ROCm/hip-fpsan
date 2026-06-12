@@ -40,6 +40,7 @@
 
 #include <cstdint>
 #include <cstring>
+#include <type_traits>
 #include <vector>
 
 using fpsan::Conversions;
@@ -48,6 +49,64 @@ using fpsan::Value;
 
 static constexpr Conversions kCC  = Conversions::Explicit;
 static constexpr int         WAVE = 64;
+
+template <class T, class = void>
+struct MfmaTraitCBSZ : std::integral_constant<int, 0>
+{
+};
+template <class T>
+struct MfmaTraitCBSZ<T, std::void_t<decltype(T::CBSZ)>> : std::integral_constant<int, T::CBSZ>
+{
+};
+template <class T, class = void>
+struct MfmaTraitABID : std::integral_constant<int, 0>
+{
+};
+template <class T>
+struct MfmaTraitABID<T, std::void_t<decltype(T::ABID)>> : std::integral_constant<int, T::ABID>
+{
+};
+template <class T, class = void>
+struct MfmaTraitBLGP : std::integral_constant<int, 0>
+{
+};
+template <class T>
+struct MfmaTraitBLGP<T, std::void_t<decltype(T::BLGP)>> : std::integral_constant<int, T::BLGP>
+{
+};
+
+static int host_mfma_a_src_lane(int lane, int cbsz, int abid)
+{
+    if(cbsz == 0)
+        return lane;
+    const int block = WAVE / (1 << cbsz);
+    return (lane % block) + block * abid;
+}
+
+static int host_mfma_b_src_lane(int lane, int blgp)
+{
+    switch(blgp)
+    {
+    case 0:
+        return lane;
+    case 1:
+        return lane % 32;
+    case 2:
+        return (lane % 32) + 32;
+    case 3:
+        return (lane + 16) % WAVE;
+    case 4:
+        return lane % 16;
+    case 5:
+        return (lane % 16) + 16;
+    case 6:
+        return (lane % 16) + 32;
+    case 7:
+        return (lane % 16) + 48;
+    default:
+        return lane;
+    }
+}
 
 // ---------------------------------------------------------------------------
 // Harness shared by every dense MFMA shape whose A/B operands are packed
@@ -68,6 +127,9 @@ struct Harness
     static constexpr int M = Traits::M, N = Traits::N, K = Traits::K;
     static constexpr int InBits    = Traits::InBits;
     static constexpr int per_dword = 32 / InBits;
+    static constexpr int CBSZ      = MfmaTraitCBSZ<Traits>::value;
+    static constexpr int ABID      = MfmaTraitABID<Traits>::value;
+    static constexpr int BLGP      = MfmaTraitBLGP<Traits>::value;
 };
 
 // Pack this lane's A/B/C fragments from row-major logical matrices, using the
@@ -113,6 +175,40 @@ __device__ void load_frags(const typename Harness<Traits>::AElem*         A,
     a = Value<typename H::AVec, S, kCC>(an);
     b = Value<typename H::BVec, S, kCC>(bn);
     c = Value<typename H::CVec, S, kCC>(cn);
+}
+
+template <class Traits>
+typename Harness<Traits>::AElem
+    host_mfma_a_value(const std::vector<typename Harness<Traits>::AElem>& A, int i, int k)
+{
+    using H            = Harness<Traits>;
+    auto      want     = fpsan::detail::input_loc(H::M, H::K, 1, i, k, 0, H::InBits);
+    const int src_lane = host_mfma_a_src_lane(want.lane, H::CBSZ, H::ABID);
+    for(int ii = 0; ii < H::M; ++ii)
+        for(int kk = 0; kk < H::K; ++kk)
+        {
+            auto loc = fpsan::detail::input_loc(H::M, H::K, 1, ii, kk, 0, H::InBits);
+            if(loc.lane == src_lane && loc.reg == want.reg && loc.sub == want.sub)
+                return A[ii * H::K + kk];
+        }
+    return typename H::AElem{};
+}
+
+template <class Traits>
+typename Harness<Traits>::BElem
+    host_mfma_b_value(const std::vector<typename Harness<Traits>::BElem>& B, int k, int j)
+{
+    using H            = Harness<Traits>;
+    auto      want     = fpsan::detail::input_loc(H::N, H::K, 1, j, k, 0, H::InBits);
+    const int src_lane = host_mfma_b_src_lane(want.lane, H::BLGP);
+    for(int jj = 0; jj < H::N; ++jj)
+        for(int kk = 0; kk < H::K; ++kk)
+        {
+            auto loc = fpsan::detail::input_loc(H::N, H::K, 1, jj, kk, 0, H::InBits);
+            if(loc.lane == src_lane && loc.reg == want.reg && loc.sub == want.sub)
+                return B[kk * H::N + jj];
+        }
+    return typename H::BElem{};
 }
 
 // Float-mode kernel: calls the real builtin (Float mode) and writes D as
@@ -211,8 +307,9 @@ void run_layout_matches_hardware()
         {
             double acc = static_cast<double>(static_cast<float>(m.C[i * H::N + j]));
             for(int k = 0; k < H::K; ++k)
-                acc += static_cast<double>(static_cast<float>(m.A[i * H::K + k]))
-                       * static_cast<double>(static_cast<float>(m.B[k * H::N + j]));
+                acc += static_cast<double>(static_cast<float>(host_mfma_a_value<Traits>(m.A, i, k)))
+                       * static_cast<double>(
+                           static_cast<float>(host_mfma_b_value<Traits>(m.B, k, j)));
             ref[i * H::N + j] = static_cast<CE>(static_cast<float>(acc));
         }
 
@@ -258,8 +355,8 @@ void run_fpsan_matches_scalar_reference()
             VC acc(m.C[i * H::N + j]);
             for(int k = 0; k < H::K; ++k)
                 acc = acc
-                      + fpsan::cast<CE>(VA(m.A[i * H::K + k]))
-                            * fpsan::cast<CE>(VB(m.B[k * H::N + j]));
+                      + fpsan::cast<CE>(VA(host_mfma_a_value<Traits>(m.A, i, k)))
+                            * fpsan::cast<CE>(VB(host_mfma_b_value<Traits>(m.B, k, j)));
             ref[i * H::N + j] = acc.fpsan_payload();
         }
 
@@ -448,6 +545,10 @@ MFMA_FP8_TRAITS(MfmaF32_32x32x16_BF8_BF8,
                 32,
                 16,
                 amdgcn_mfma_f32_32x32x16_bf8_bf8)
+
+// Broadcast/permutation modifiers are covered on the legal multi-block legacy
+// MFMA shapes below. The dense gfx950 16x16x32/32x32x16 shapes have B=1, so
+// non-zero CBSZ would exceed log2(blocks) and is not a useful conformance case.
 
 // ---------------------------------------------------------------------------
 // F64 16x16x4 MFMA. A and B are *scalar* doubles per lane (not vector
@@ -996,6 +1097,39 @@ namespace
 } // namespace
 
 template <class T>
+float host_legf32_a_value(const std::vector<float>& A, int b, int i, int k)
+{
+    auto      want = fpsan::detail::input_loc(T::M, T::K, T::Bk, i, k, b, 32);
+    const int src_lane
+        = host_mfma_a_src_lane(want.lane, MfmaTraitCBSZ<T>::value, MfmaTraitABID<T>::value);
+    for(int bb = 0; bb < T::Bk; ++bb)
+        for(int ii = 0; ii < T::M; ++ii)
+            for(int kk = 0; kk < T::K; ++kk)
+            {
+                auto loc = fpsan::detail::input_loc(T::M, T::K, T::Bk, ii, kk, bb, 32);
+                if(loc.lane == src_lane && loc.reg == want.reg && loc.sub == want.sub)
+                    return A[(bb * T::M + ii) * T::K + kk];
+            }
+    return 0.0f;
+}
+
+template <class T>
+float host_legf32_b_value(const std::vector<float>& B, int b, int k, int j)
+{
+    auto      want     = fpsan::detail::input_loc(T::N, T::K, T::Bk, j, k, b, 32);
+    const int src_lane = host_mfma_b_src_lane(want.lane, MfmaTraitBLGP<T>::value);
+    for(int bb = 0; bb < T::Bk; ++bb)
+        for(int jj = 0; jj < T::N; ++jj)
+            for(int kk = 0; kk < T::K; ++kk)
+            {
+                auto loc = fpsan::detail::input_loc(T::N, T::K, T::Bk, jj, kk, bb, 32);
+                if(loc.lane == src_lane && loc.reg == want.reg && loc.sub == want.sub)
+                    return B[(bb * T::K + kk) * T::N + jj];
+            }
+    return 0.0f;
+}
+
+template <class T>
 void run_legf32_layout()
 {
     int ndev = 0;
@@ -1009,8 +1143,8 @@ void run_legf32_layout()
             {
                 double acc = m.C[(b * T::M + i) * T::N + j];
                 for(int k = 0; k < T::K; ++k)
-                    acc += (double)m.A[(b * T::M + i) * T::K + k]
-                           * (double)m.B[(b * T::K + k) * T::N + j];
+                    acc += (double)host_legf32_a_value<T>(m.A, b, i, k)
+                           * (double)host_legf32_b_value<T>(m.B, b, k, j);
                 ref[(b * T::M + i) * T::N + j] = (float)acc;
             }
     float *   dA = to_dev(m.A), *dB = to_dev(m.B), *dC = to_dev(m.C), *dD;
@@ -1044,7 +1178,8 @@ void run_legf32_fpsan()
                 VF acc(m.C[(b * T::M + i) * T::N + j]);
                 for(int k = 0; k < T::K; ++k)
                     acc = acc
-                          + VF(m.A[(b * T::M + i) * T::K + k]) * VF(m.B[(b * T::K + k) * T::N + j]);
+                          + VF(host_legf32_a_value<T>(m.A, b, i, k))
+                                * VF(host_legf32_b_value<T>(m.B, b, k, j));
                 ref[(b * T::M + i) * T::N + j] = acc.fpsan_payload();
             }
     float *        dA = to_dev(m.A), *dB = to_dev(m.B), *dC = to_dev(m.C);
@@ -1068,11 +1203,12 @@ void run_legf32_fpsan()
     {                                                                             \
         using CVec             = CV;                                              \
         static constexpr int M = M_, N = N_, K = K_, Bk = B_;                     \
+        static constexpr int CBSZ = 0, ABID = 0, BLGP = 0;                        \
         template <Semantics S, Conversions C>                                     \
         __device__ static Value<CVec, S, C>                                       \
             call(Value<float, S, C> a, Value<float, S, C> b, Value<CVec, S, C> c) \
         {                                                                         \
-            return fpsan::WRAP<0, 0, 0, S, C>(a, b, c);                           \
+            return fpsan::WRAP<CBSZ, ABID, BLGP, S, C>(a, b, c);                  \
         }                                                                         \
     };                                                                            \
     TEST(Name, LayoutMatchesHardware)                                             \
@@ -1089,6 +1225,48 @@ LEGF32_TRAITS(LegacyMfmaF32_16x16x1, 16, 16, 1, 4, v16f_native, amdgcn_mfma_f32_
 LEGF32_TRAITS(LegacyMfmaF32_32x32x2, 32, 32, 2, 1, v16f_native, amdgcn_mfma_f32_32x32x2f32)
 LEGF32_TRAITS(LegacyMfmaF32_32x32x1, 32, 32, 1, 2, fpsan::v32f_native, amdgcn_mfma_f32_32x32x1f32)
 LEGF32_TRAITS(LegacyMfmaF32_4x4x1, 4, 4, 1, 16, v4f_native, amdgcn_mfma_f32_4x4x1f32)
+
+struct LegacyMfmaF32_16x16x1_CBSZ2_ABID3_BLGP5
+{
+    using CVec             = v16f_native;
+    static constexpr int M = 16, N = 16, K = 1, Bk = 4;
+    static constexpr int CBSZ = 2, ABID = 3, BLGP = 5;
+    template <Semantics S, Conversions C>
+    __device__ static Value<CVec, S, C>
+        call(Value<float, S, C> a, Value<float, S, C> b, Value<CVec, S, C> c)
+    {
+        return fpsan::amdgcn_mfma_f32_16x16x1f32<CBSZ, ABID, BLGP, S, C>(a, b, c);
+    }
+};
+TEST(LegacyMfmaF32_16x16x1_CBSZ2_ABID3_BLGP5, LayoutMatchesHardware)
+{
+    run_legf32_layout<LegacyMfmaF32_16x16x1_CBSZ2_ABID3_BLGP5>();
+}
+TEST(LegacyMfmaF32_16x16x1_CBSZ2_ABID3_BLGP5, FpsanMatchesScalarReference)
+{
+    run_legf32_fpsan<LegacyMfmaF32_16x16x1_CBSZ2_ABID3_BLGP5>();
+}
+
+struct LegacyMfmaF32_32x32x1_CBSZ1_ABID1_BLGP1
+{
+    using CVec             = fpsan::v32f_native;
+    static constexpr int M = 32, N = 32, K = 1, Bk = 2;
+    static constexpr int CBSZ = 1, ABID = 1, BLGP = 1;
+    template <Semantics S, Conversions C>
+    __device__ static Value<CVec, S, C>
+        call(Value<float, S, C> a, Value<float, S, C> b, Value<CVec, S, C> c)
+    {
+        return fpsan::amdgcn_mfma_f32_32x32x1f32<CBSZ, ABID, BLGP, S, C>(a, b, c);
+    }
+};
+TEST(LegacyMfmaF32_32x32x1_CBSZ1_ABID1_BLGP1, LayoutMatchesHardware)
+{
+    run_legf32_layout<LegacyMfmaF32_32x32x1_CBSZ1_ABID1_BLGP1>();
+}
+TEST(LegacyMfmaF32_32x32x1_CBSZ1_ABID1_BLGP1, FpsanMatchesScalarReference)
+{
+    run_legf32_fpsan<LegacyMfmaF32_32x32x1_CBSZ1_ABID1_BLGP1>();
+}
 
 // ---------------------------------------------------------------------------
 // Legacy gfx9 f16 / bf16_1k MFMA shapes. A,B per-lane fragment is 4 elements
@@ -1189,6 +1367,39 @@ __global__ void k_legf16_p(const float* A, const float* B, const float* C, std::
 }
 
 template <class T>
+float host_legf16_a_value(const std::vector<float>& A, int b, int i, int k)
+{
+    auto      want = fpsan::detail::input_loc(T::M, T::K, T::Bk, i, k, b, 16);
+    const int src_lane
+        = host_mfma_a_src_lane(want.lane, MfmaTraitCBSZ<T>::value, MfmaTraitABID<T>::value);
+    for(int bb = 0; bb < T::Bk; ++bb)
+        for(int ii = 0; ii < T::M; ++ii)
+            for(int kk = 0; kk < T::K; ++kk)
+            {
+                auto loc = fpsan::detail::input_loc(T::M, T::K, T::Bk, ii, kk, bb, 16);
+                if(loc.lane == src_lane && loc.reg == want.reg && loc.sub == want.sub)
+                    return A[(bb * T::M + ii) * T::K + kk];
+            }
+    return 0.0f;
+}
+
+template <class T>
+float host_legf16_b_value(const std::vector<float>& B, int b, int k, int j)
+{
+    auto      want     = fpsan::detail::input_loc(T::N, T::K, T::Bk, j, k, b, 16);
+    const int src_lane = host_mfma_b_src_lane(want.lane, MfmaTraitBLGP<T>::value);
+    for(int bb = 0; bb < T::Bk; ++bb)
+        for(int jj = 0; jj < T::N; ++jj)
+            for(int kk = 0; kk < T::K; ++kk)
+            {
+                auto loc = fpsan::detail::input_loc(T::N, T::K, T::Bk, jj, kk, bb, 16);
+                if(loc.lane == src_lane && loc.reg == want.reg && loc.sub == want.sub)
+                    return B[(bb * T::K + kk) * T::N + jj];
+            }
+    return 0.0f;
+}
+
+template <class T>
 void run_legf16_layout()
 {
     int ndev = 0;
@@ -1202,8 +1413,8 @@ void run_legf16_layout()
             {
                 double acc = m.C[(b * T::M + i) * T::N + j];
                 for(int k = 0; k < T::K; ++k)
-                    acc += (double)m.A[(b * T::M + i) * T::K + k]
-                           * (double)m.B[(b * T::K + k) * T::N + j];
+                    acc += (double)host_legf16_a_value<T>(m.A, b, i, k)
+                           * (double)host_legf16_b_value<T>(m.B, b, k, j);
                 ref[(b * T::M + i) * T::N + j] = (float)acc;
             }
     float *   dA = to_dev(m.A), *dB = to_dev(m.B), *dC = to_dev(m.C), *dD;
@@ -1239,9 +1450,9 @@ void run_legf16_fpsan()
                 for(int k = 0; k < T::K; ++k)
                     acc = acc
                           + fpsan::cast<float>(Value<AE, Semantics::FPSan, kCC>(
-                                AE(m.A[(b * T::M + i) * T::K + k])))
+                                AE(host_legf16_a_value<T>(m.A, b, i, k))))
                                 * fpsan::cast<float>(Value<AE, Semantics::FPSan, kCC>(
-                                    AE(m.B[(b * T::K + k) * T::N + j])));
+                                    AE(host_legf16_b_value<T>(m.B, b, k, j))));
                 ref[(b * T::M + i) * T::N + j] = acc.fpsan_payload();
             }
     float *        dA = to_dev(m.A), *dB = to_dev(m.B), *dC = to_dev(m.C);
@@ -1267,11 +1478,12 @@ void run_legf16_fpsan()
         using AElem            = AE;                                            \
         using CVec             = CV;                                            \
         static constexpr int M = M_, N = N_, K = K_, Bk = B_;                   \
+        static constexpr int CBSZ = 0, ABID = 0, BLGP = 0;                      \
         template <Semantics S, Conversions C>                                   \
         __device__ static Value<CVec, S, C>                                     \
             call(Value<AVec, S, C> a, Value<AVec, S, C> b, Value<CVec, S, C> c) \
         {                                                                       \
-            return fpsan::WRAP<0, 0, 0, S, C>(a, b, c);                         \
+            return fpsan::WRAP<CBSZ, ABID, BLGP, S, C>(a, b, c);                \
         }                                                                       \
     };                                                                          \
     TEST(Name, LayoutMatchesHardware)                                           \
@@ -1373,6 +1585,52 @@ LEGF16_TRAITS(LegacyMfmaBF16_4x4x4_1k,
               __bf16,
               v4f_native,
               amdgcn_mfma_f32_4x4x4bf16_1k)
+
+struct LegacyMfmaF16_16x16x4_CBSZ2_ABID3_BLGP5
+{
+    using AVec             = fpsan::v4h_native;
+    using AElem            = _Float16;
+    using CVec             = v16f_native;
+    static constexpr int M = 16, N = 16, K = 4, Bk = 4;
+    static constexpr int CBSZ = 2, ABID = 3, BLGP = 5;
+    template <Semantics S, Conversions C>
+    __device__ static Value<CVec, S, C>
+        call(Value<AVec, S, C> a, Value<AVec, S, C> b, Value<CVec, S, C> c)
+    {
+        return fpsan::amdgcn_mfma_f32_16x16x4f16<CBSZ, ABID, BLGP, S, C>(a, b, c);
+    }
+};
+TEST(LegacyMfmaF16_16x16x4_CBSZ2_ABID3_BLGP5, LayoutMatchesHardware)
+{
+    run_legf16_layout<LegacyMfmaF16_16x16x4_CBSZ2_ABID3_BLGP5>();
+}
+TEST(LegacyMfmaF16_16x16x4_CBSZ2_ABID3_BLGP5, FpsanMatchesScalarReference)
+{
+    run_legf16_fpsan<LegacyMfmaF16_16x16x4_CBSZ2_ABID3_BLGP5>();
+}
+
+struct LegacyMfmaBF16_32x32x4_1k_CBSZ1_ABID1_BLGP1
+{
+    using AVec             = fpsan::v4bf_native;
+    using AElem            = __bf16;
+    using CVec             = fpsan::v32f_native;
+    static constexpr int M = 32, N = 32, K = 4, Bk = 2;
+    static constexpr int CBSZ = 1, ABID = 1, BLGP = 1;
+    template <Semantics S, Conversions C>
+    __device__ static Value<CVec, S, C>
+        call(Value<AVec, S, C> a, Value<AVec, S, C> b, Value<CVec, S, C> c)
+    {
+        return fpsan::amdgcn_mfma_f32_32x32x4bf16_1k<CBSZ, ABID, BLGP, S, C>(a, b, c);
+    }
+};
+TEST(LegacyMfmaBF16_32x32x4_1k_CBSZ1_ABID1_BLGP1, LayoutMatchesHardware)
+{
+    run_legf16_layout<LegacyMfmaBF16_32x32x4_1k_CBSZ1_ABID1_BLGP1>();
+}
+TEST(LegacyMfmaBF16_32x32x4_1k_CBSZ1_ABID1_BLGP1, FpsanMatchesScalarReference)
+{
+    run_legf16_fpsan<LegacyMfmaBF16_32x32x4_1k_CBSZ1_ABID1_BLGP1>();
+}
 
 // ---------------------------------------------------------------------------
 // Scaled f8f6f4 MFMA 16x16x128 (E4M3), FPSan dataflow. Layout + scale are the
@@ -2185,6 +2443,10 @@ TEST(ScaledMfma16x16x128_FP4FP6, FpsanMatchesScalarReference)
 {
     run_scale_sub16_fpsan<4, 2>();
 }
+TEST(ScaledMfma16x16x128_BF6FP4, LayoutMatchesHardware)
+{
+    run_scale_sub16_layout<3, 4>();
+}
 TEST(ScaledMfma16x16x128_BF6FP4, FpsanMatchesScalarReference)
 {
     run_scale_sub16_fpsan<3, 4>();
@@ -2196,6 +2458,10 @@ TEST(ScaledMfma32x32x64_FP6FP4, LayoutMatchesHardware)
 TEST(ScaledMfma32x32x64_FP6FP4, FpsanMatchesScalarReference)
 {
     run_scale_sub32_fpsan<2, 4>();
+}
+TEST(ScaledMfma32x32x64_FP4FP6, LayoutMatchesHardware)
+{
+    run_scale_sub32_layout<4, 2>();
 }
 TEST(ScaledMfma32x32x64_FP4FP6, FpsanMatchesScalarReference)
 {
@@ -2918,6 +3184,10 @@ TEST(ScaledMfma16x16x128_Mixed8xSub, FP8xFP6_Fpsan)
 {
     run_scale16_mixed_fpsan<false, fp8_e4m3, 0, 2>();
 }
+TEST(ScaledMfma16x16x128_Mixed8xSub, BF8xFP4_Fpsan)
+{
+    run_scale16_mixed_fpsan<false, fp8_e5m2, 1, 4>();
+}
 
 // ---- 32x32x64 mixed 8 x sub (Float layout) --------------------------------
 template <Semantics S, class Out, class AElem, int CBSZ, int BLGP>
@@ -3075,6 +3345,88 @@ void run_scale32_mixed()
     (void)hipFree(dSub);
 }
 
+template <bool AIsSub, class Fp8Elem, int CBSZ, int BLGP>
+void run_scale32_mixed_fpsan()
+{
+    int ndev = 0;
+    if(hipGetDeviceCount(&ndev) != hipSuccess || ndev == 0)
+        GTEST_SKIP() << "no HIP device";
+    const int    subfmt = AIsSub ? CBSZ : BLGP, w = sub_width(subfmt);
+    std::mt19937 rng = fpsan_test::make_rng();
+    const int    sa = 128, sb = 130;
+    using VF   = Value<float, Semantics::FPSan, kCC>;
+    using VFp8 = Value<Fp8Elem, Semantics::FPSan, kCC>;
+    const VF vsa(fpsan::detail::e8m0_to_float(128)), vsb(fpsan::detail::e8m0_to_float(130));
+    std::vector<float> fp8mat(AIsSub ? S2K * S2N : S2M * S2K), Cm(S2M * S2N);
+    std::vector<int>   subpay(AIsSub ? S2M * S2K : S2K * S2N);
+    for(auto& x : fp8mat)
+        x = fpsan_test::pick_int_valued<float>(rng, -3, 3);
+    for(auto& x : subpay)
+        x = (int)(rng() & ((1u << w) - 1u));
+    for(auto& x : Cm)
+        x = fpsan_test::pick_int_valued<float>(rng, -6, 6);
+    std::vector<fpsan::v8i32_native> sub(WAVE, fpsan::v8i32_native{});
+    if(AIsSub)
+        for(int i = 0; i < S2M; ++i)
+            for(int k = 0; k < S2K; ++k)
+            {
+                int lane, slot;
+                sub_mix_loc32(k, i, lane, slot);
+                set_field(sub[lane], w * slot, (unsigned)subpay[i * S2K + k], w);
+            }
+    else
+        for(int k = 0; k < S2K; ++k)
+            for(int j = 0; j < S2N; ++j)
+            {
+                int lane, slot;
+                sub_mix_loc32(k, j, lane, slot);
+                set_field(sub[lane], w * slot, (unsigned)subpay[k * S2N + j], w);
+            }
+    auto widen = [&](unsigned f) {
+        std::int32_t e = (std::int32_t)(f << (32 - w)) >> (32 - w);
+        return VF::from_fpsan_payload((std::uint32_t)e);
+    };
+    auto Av = [&](int i, int k) {
+        return AIsSub ? widen((unsigned)subpay[i * S2K + k])
+                      : fpsan::cast<float>(VFp8(Fp8Elem(fp8mat[i * S2K + k])));
+    };
+    auto Bv = [&](int k, int j) {
+        return AIsSub ? fpsan::cast<float>(VFp8(Fp8Elem(fp8mat[k * S2N + j])))
+                      : widen((unsigned)subpay[k * S2N + j]);
+    };
+    std::vector<std::uint32_t> ref(S2M * S2N);
+    for(int i = 0; i < S2M; ++i)
+        for(int j = 0; j < S2N; ++j)
+        {
+            VF dot(0.0f);
+            for(int k = 0; k < S2K; ++k)
+                dot = dot + Av(i, k) * Bv(k, j);
+            ref[i * S2N + j] = (VF(Cm[i * S2N + j]) + dot * vsa * vsb).fpsan_payload();
+        }
+    float *              dF = to_dev(fp8mat), *dC = to_dev(Cm);
+    std::uint32_t*       dD;
+    fpsan::v8i32_native* dSub;
+    HIP_CHECK(hipMalloc(&dSub, WAVE * sizeof(fpsan::v8i32_native)));
+    HIP_CHECK(
+        hipMemcpy(dSub, sub.data(), WAVE * sizeof(fpsan::v8i32_native), hipMemcpyHostToDevice));
+    HIP_CHECK(hipMalloc(&dD, S2M * S2N * sizeof(std::uint32_t)));
+    if constexpr(AIsSub)
+        k_scale32_mix_b8<Semantics::FPSan, std::uint32_t, Fp8Elem, CBSZ, BLGP>
+            <<<1, WAVE>>>(dSub, dF, dC, dD, sa, sb);
+    else
+        k_scale32_mix_a8<Semantics::FPSan, std::uint32_t, Fp8Elem, CBSZ, BLGP>
+            <<<1, WAVE>>>(dF, dSub, dC, dD, sa, sb);
+    HIP_CHECK(hipDeviceSynchronize());
+    std::vector<std::uint32_t> got(S2M * S2N);
+    HIP_CHECK(hipMemcpy(got.data(), dD, S2M * S2N * sizeof(std::uint32_t), hipMemcpyDeviceToHost));
+    for(int i = 0; i < S2M * S2N; ++i)
+        EXPECT_EQ(got[i], ref[i]) << "at " << i;
+    (void)hipFree(dF);
+    (void)hipFree(dC);
+    (void)hipFree(dD);
+    (void)hipFree(dSub);
+}
+
 TEST(ScaledMfma32x32x64_Mixed8xSub, FP8xFP4_Layout)
 {
     run_scale32_mixed<false, fp8_e4m3, 0, 4>();
@@ -3087,6 +3439,18 @@ TEST(ScaledMfma32x32x64_Mixed8xSub, FP4xFP8_Layout)
 {
     run_scale32_mixed<true, fp8_e4m3, 4, 0>();
 }
+TEST(ScaledMfma32x32x64_Mixed8xSub, FP8xFP4_Fpsan)
+{
+    run_scale32_mixed_fpsan<false, fp8_e4m3, 0, 4>();
+}
+TEST(ScaledMfma32x32x64_Mixed8xSub, FP4xFP8_Fpsan)
+{
+    run_scale32_mixed_fpsan<true, fp8_e4m3, 4, 0>();
+}
+TEST(ScaledMfma32x32x64_Mixed8xSub, FP8xFP6_Fpsan)
+{
+    run_scale32_mixed_fpsan<false, fp8_e4m3, 0, 2>();
+}
 
 // ---------------------------------------------------------------------------
 // Sparse MFMA 16x16x64 f16 (V_SMFMAC_F32_16X16X64_F16): real golden test of
@@ -3097,7 +3461,7 @@ TEST(ScaledMfma32x32x64_Mixed8xSub, FP4xFP8_Layout)
 // ---------------------------------------------------------------------------
 static constexpr int QM = 16, QN = 16, QK = 64, QC = 32; // QC = compressed K
 
-template <Semantics S, class Out>
+template <int CBSZ, int ABID, Semantics S, class Out>
 __global__ void
     k_smf64(const float* Acomp, const float* B, const float* C, const int* idxbuf, Out* D)
 {
@@ -3123,7 +3487,7 @@ __global__ void
     Value<v8h, S, kCC>               a{an};
     Value<v16h, S, kCC>              b{bn};
     Value<fpsan::v4f_native, S, kCC> c{cn};
-    auto d = fpsan::amdgcn_smfmac_f32_16x16x64_f16<0, 0, S, kCC>(a, b, c, idxbuf[lane]);
+    auto d = fpsan::amdgcn_smfmac_f32_16x16x64_f16<CBSZ, ABID, S, kCC>(a, b, c, idxbuf[lane]);
     for(int reg = 0; reg < 4; ++reg)
     {
         int i = 4 * g + reg, j = nlane;
@@ -3212,7 +3576,7 @@ TEST(SmfmacF16_16x16x64, LayoutMatchesHardware)
     float *dA = to_dev(m.A), *dB = to_dev(m.B), *dC = to_dev(m.C), *dD;
     int*   dI = to_dev(m.idxbuf);
     HIP_CHECK(hipMalloc(&dD, QM * QN * sizeof(float)));
-    k_smf64<Semantics::Float, float><<<1, WAVE>>>(dA, dB, dC, dI, dD);
+    k_smf64<0, 0, Semantics::Float, float><<<1, WAVE>>>(dA, dB, dC, dI, dD);
     HIP_CHECK(hipDeviceSynchronize());
     std::vector<float> got(QM * QN);
     HIP_CHECK(hipMemcpy(got.data(), dD, QM * QN * sizeof(float), hipMemcpyDeviceToHost));
@@ -3255,7 +3619,86 @@ TEST(SmfmacF16_16x16x64, FpsanMatchesScalarReference)
     int*           dI = to_dev(m.idxbuf);
     std::uint32_t* dD;
     HIP_CHECK(hipMalloc(&dD, QM * QN * sizeof(std::uint32_t)));
-    k_smf64<Semantics::FPSan, std::uint32_t><<<1, WAVE>>>(dA, dB, dC, dI, dD);
+    k_smf64<0, 0, Semantics::FPSan, std::uint32_t><<<1, WAVE>>>(dA, dB, dC, dI, dD);
+    HIP_CHECK(hipDeviceSynchronize());
+    std::vector<std::uint32_t> got(QM * QN);
+    HIP_CHECK(hipMemcpy(got.data(), dD, QM * QN * sizeof(std::uint32_t), hipMemcpyDeviceToHost));
+    for(int t = 0; t < QM * QN; ++t)
+        EXPECT_EQ(got[t], ref[t]) << "at " << t;
+    (void)hipFree(dA);
+    (void)hipFree(dB);
+    (void)hipFree(dC);
+    (void)hipFree(dD);
+    (void)hipFree(dI);
+}
+
+TEST(SmfmacF16_16x16x64_Modifiers, CBSZNonzeroUsesFirstIndexSetLayout)
+{
+    int ndev = 0;
+    if(hipGetDeviceCount(&ndev) != hipSuccess || ndev == 0)
+        GTEST_SKIP() << "no HIP device";
+    SmfData            m = make_smf_data();
+    std::vector<float> ref(QM * QN);
+    for(int i = 0; i < QM; ++i)
+        for(int j = 0; j < QN; ++j)
+        {
+            double acc = m.C[i * QN + j];
+            for(int q = 0; q < 16; ++q)
+            {
+                acc += (double)m.A[i * QC + 2 * q]
+                       * (double)m.B[(4 * q + m.p0[i * 16 + q]) * QN + j];
+                acc += (double)m.A[i * QC + 2 * q + 1]
+                       * (double)m.B[(4 * q + m.p1[i * 16 + q]) * QN + j];
+            }
+            ref[i * QN + j] = (float)acc;
+        }
+    float *dA = to_dev(m.A), *dB = to_dev(m.B), *dC = to_dev(m.C), *dD;
+    int*   dI = to_dev(m.idxbuf);
+    HIP_CHECK(hipMalloc(&dD, QM * QN * sizeof(float)));
+    k_smf64<1, 3, Semantics::Float, float><<<1, WAVE>>>(dA, dB, dC, dI, dD);
+    HIP_CHECK(hipDeviceSynchronize());
+    std::vector<float> got(QM * QN);
+    HIP_CHECK(hipMemcpy(got.data(), dD, QM * QN * sizeof(float), hipMemcpyDeviceToHost));
+    for(int t = 0; t < QM * QN; ++t)
+        EXPECT_EQ(bits_of(got[t]), bits_of(ref[t])) << "at " << t;
+    (void)hipFree(dA);
+    (void)hipFree(dB);
+    (void)hipFree(dC);
+    (void)hipFree(dD);
+    (void)hipFree(dI);
+}
+
+TEST(SmfmacF16_16x16x64_Modifiers, CBSZNonzeroUsesFirstIndexSetFpsan)
+{
+    int ndev = 0;
+    if(hipGetDeviceCount(&ndev) != hipSuccess || ndev == 0)
+        GTEST_SKIP() << "no HIP device";
+    SmfData m = make_smf_data();
+    using VF  = Value<float, Semantics::FPSan, kCC>;
+    using VH  = Value<_Float16, Semantics::FPSan, kCC>;
+    std::vector<std::uint32_t> ref(QM * QN);
+    for(int i = 0; i < QM; ++i)
+        for(int j = 0; j < QN; ++j)
+        {
+            VF acc(m.C[i * QN + j]);
+            for(int q = 0; q < 16; ++q)
+            {
+                acc = acc
+                      + fpsan::cast<float>(VH((_Float16)m.A[i * QC + 2 * q]))
+                            * fpsan::cast<float>(
+                                VH((_Float16)m.B[(4 * q + m.p0[i * 16 + q]) * QN + j]));
+                acc = acc
+                      + fpsan::cast<float>(VH((_Float16)m.A[i * QC + 2 * q + 1]))
+                            * fpsan::cast<float>(
+                                VH((_Float16)m.B[(4 * q + m.p1[i * 16 + q]) * QN + j]));
+            }
+            ref[i * QN + j] = acc.fpsan_payload();
+        }
+    float *        dA = to_dev(m.A), *dB = to_dev(m.B), *dC = to_dev(m.C);
+    int*           dI = to_dev(m.idxbuf);
+    std::uint32_t* dD;
+    HIP_CHECK(hipMalloc(&dD, QM * QN * sizeof(std::uint32_t)));
+    k_smf64<1, 3, Semantics::FPSan, std::uint32_t><<<1, WAVE>>>(dA, dB, dC, dI, dD);
     HIP_CHECK(hipDeviceSynchronize());
     std::vector<std::uint32_t> got(QM * QN);
     HIP_CHECK(hipMemcpy(got.data(), dD, QM * QN * sizeof(std::uint32_t), hipMemcpyDeviceToHost));

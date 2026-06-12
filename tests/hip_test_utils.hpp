@@ -67,6 +67,17 @@ inline bool device_is_gfx12()
     return std::string(prop.gcnArchName).compare(0, 5, "gfx12") == 0;
 }
 
+inline bool device_is_gfx950()
+{
+    int dev = 0;
+    if(hipGetDevice(&dev) != hipSuccess)
+        return false;
+    hipDeviceProp_t prop{};
+    if(hipGetDeviceProperties(&prop, dev) != hipSuccess)
+        return false;
+    return std::string(prop.gcnArchName).compare(0, 6, "gfx950") == 0;
+}
+
 // Allocate device memory and copy a host vector into it. Caller hipFree()s.
 template <class T>
 T* to_dev(const std::vector<T>& h)
