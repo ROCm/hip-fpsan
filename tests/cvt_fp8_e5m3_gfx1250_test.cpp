@@ -8,12 +8,12 @@
 // cvt_sr_fp8_f32_e5m3). Registered by CMake only for the gfx1250 tier.
 //
 // E5M3 is gfx1250's UNSIGNED 8-bit scale format (5 exp bits bias 15, 3 mantissa
-// bits, no sign, no inf, NaN == 0xFF, zero == 0x00, denormals) per the gfx1250
-// numeric spec. It is not in LLVM APFloat, so the authoritative reference is the
-// host codec detail::kFp8E5M3 (a clean realization of the spec's table) PLUS its
-// explicit special-value table, asserted directly here. Float-mode references
-// are host-computed and INDEPENDENT of the device builtin, so any implementation
-// that diverges from the spec fails. FPSan-mode references use the deterministic
+// bits, no sign, no inf, NaN == 0xFF, zero == 0x00, denormals). It is not in
+// LLVM APFloat, so the authoritative reference is the host codec
+// detail::kFp8E5M3 (a clean realization of that format) PLUS its explicit
+// special-value table, asserted directly here. Float-mode references are
+// host-computed and INDEPENDENT of the device builtin, so any implementation
+// that diverges from them fails. FPSan-mode references use the deterministic
 // width-8 payload resize.
 #include "fpsan/amdgcn_cvt.hpp"
 #include "fpsan/fpsan.hpp"
@@ -51,7 +51,7 @@ namespace
 
 // ===========================================================================
 // 0. Host codec matches the gfx1250 E5M3 special-value table exactly.
-// This locks the host reference itself to the authoritative spec before it
+// This locks the host reference itself to the known E5M3 special values before it
 // is used to judge the device.
 // ===========================================================================
 TEST(CvtFp8E5M3, HostCodecMatchesGuideTable)

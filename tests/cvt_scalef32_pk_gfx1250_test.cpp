@@ -13,9 +13,9 @@
 // Authoritative-correctness policy (matches the gfx950 scaled-cvt suite):
 //   Float : the wrapper forwards to the hardware builtin; the expected packed
 //           bits are computed HOST-SIDE from the OCP encoders
-//           (detail::f32_to_narrow for fp8/bf8/fp4/fp6/bf6) and the documented
-//           contiguous little-endian packed-stream layout -- NOT from the
-//           builtin. Any implementation that diverges from the spec fails here.
+//           (detail::f32_to_narrow for fp8/bf8/fp4/fp6/bf6) and the contiguous
+//           little-endian packed-stream layout -- NOT from the
+//           builtin. Any implementation that diverges from them fails here.
 //   FPSan : the wrapper equals an independent payload-domain reference built
 //           from the public Value algebra (cast + divide-by-scale).
 // Inputs are chosen exactly representable in every narrow format AND in f16/bf16

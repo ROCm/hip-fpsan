@@ -11,7 +11,7 @@
 //
 //   Float : wrapper == hardware, checked against the INDEPENDENT host OCP
 //           reference (detail::narrow_to_f32 / f32_to_narrow) -- not the
-//           builtin -- so any implementation that diverges from the spec fails here.
+//           builtin -- so any implementation that diverges from the host reference fails here.
 //   FPSan : wrapper == an independent payload-domain reference. The packed
 //           register holds 4-bit fp4 PAYLOADS per nibble; widen sign-extends
 //           4->32, narrow keeps the low 4 bits, scale multiplies (unpack) /

@@ -17,8 +17,8 @@
 //   Float : the wrapper forwards to the hardware builtin; expected element
 //           values are computed HOST-SIDE from the OCP decoder
 //           (detail::narrow_to_f32) times the host-decoded E8M0 scale -- NOT
-//           from the builtin. Any implementation that diverges from the spec
-//           fails here.
+//           from the builtin. Any implementation that diverges from the host
+//           reference fails here.
 //   FPSan : the wrapper equals an independent payload-domain reference
 //           (subbyte sign-resize, NO scale -- block scale is Float-only).
 // Each kernel runs a SINGLE lane (<<<1,1>>>), so ScaleSel=0 selects byte 0 of

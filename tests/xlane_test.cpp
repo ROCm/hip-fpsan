@@ -8,7 +8,7 @@
 // up at some other lane unchanged -- so the property under test is that
 // after the move, each lane's payload (FPSan mode) and float bits (Float
 // mode) equal the source lane's, with the source lane chosen by the
-// builtin's documented semantics. Float-mode and FPSan-mode share the same
+// builtin's semantics. Float-mode and FPSan-mode share the same
 // bit-mover, so they should agree bit-for-bit on the lane mapping.
 #include "fpsan/amdgcn_wave.hpp"
 #include "fpsan/fpsan.hpp"
@@ -342,7 +342,7 @@ TEST(Xlane, DsSwizzleFloatVsFpsanLaneMapping)
 // ---- ds_swizzle (independent host oracle of the lane map) --------------------
 // Beyond the Float==FPSan cross-mode check above, decode the ds_swizzle pattern
 // to the exact source lane and assert BOTH modes match it -- so the wrapper is
-// checked against the documented hardware lane map, not just against itself.
+// checked against the known hardware lane map, not just against itself.
 // Encoding (DS_SWIZZLE_B32 offset, silicon-grounded below):
 //   bit15=1  -> QuadPerm: within each group of 4, dst = quad_base + sel where
 //               sel = (pat >> (2*(lane&3))) & 3.

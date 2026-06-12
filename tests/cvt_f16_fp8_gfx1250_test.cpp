@@ -12,7 +12,7 @@
 // narrow<->f32 routines that fp8_test.cpp locks down), independent of the device
 // builtin. fp8 (e4m3) and bf8 (e5m2) are exactly representable in f16, so the
 // decode direction is lossless and the expected f16 equals the fp8 value. Any
-// implementation that diverges from the spec therefore shows up as a failure.
+// implementation that diverges from the host reference therefore shows up as a failure.
 // FPSan-mode references use the deterministic payload-ring cast (computed
 // independently of the device builtin).
 #include "fpsan/amdgcn_cvt.hpp"

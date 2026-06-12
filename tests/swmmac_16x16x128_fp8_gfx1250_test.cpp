@@ -203,7 +203,7 @@ namespace
 
         // For each (row, group g) pick two distinct dense positions p0<p1 in 0..3,
         // assign compressed slot 2g -> p0, 2g+1 -> p1, and stage the 2-bit
-        // selectors into the per-lane v2i32 index per the documented layout.
+        // selectors into the per-lane v2i32 index per the layout.
         std::uniform_int_distribution<int> d6(0, 5);
         const int pairs[6][2] = {{0, 1}, {0, 2}, {0, 3}, {1, 2}, {1, 3}, {2, 3}};
         for(int i = 0; i < M; ++i)

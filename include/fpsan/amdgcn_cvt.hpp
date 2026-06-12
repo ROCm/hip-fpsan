@@ -1196,7 +1196,7 @@ namespace fpsan
     // by scale -- stored = encode(val / scale). With scale == 1 this is a pure OCP
     // encode, which the golden tests assert lane-by-lane against the host
     // encoders (f32_to_narrow), independent of the device builtin, so any
-    // implementation that diverges from the spec shows up as a failure.
+    // implementation that diverges from them shows up as a failure.
     //
     // Packed output layout is the contiguous little-endian narrow stream:
     //   * pk8  fp8/bf8 : 8 bytes   -> v2u32  (byte i   = lane i).
@@ -1466,7 +1466,7 @@ namespace fpsan
     //
     // E5M3 is gfx1250's higher-precision 8-bit scale format: UNSIGNED, 5 exponent
     // bits (bias 15), 3 mantissa bits, NO sign bit, no infinity, NaN == 0xFF only,
-    // 0x00 == zero, denormals supported (per the gfx1250 numeric spec; it
+    // 0x00 == zero, denormals supported (it
     // is NOT in LLVM APFloat). The hardware reaches it by OVERLOADING the ordinary
     // f32<->fp8 convert opcodes via the CLAMP bit -- exposed in LLVM/Clang as the
     // dedicated *_e5m3 builtins whose signatures are byte-identical to the
@@ -1558,7 +1558,7 @@ namespace fpsan
     // plain payload WIDEN of each narrow code (detail::subbyte_widen<8/6/4>) with
     // NO scale applied: the block scale is a magnitude-only Float-domain effect,
     // and the payload ring tracks precision/width, not the E8M0 multiply
-    // (documented Float-only -- a single-lane payload model cannot reproduce the
+    // (Float-only -- a single-lane payload model cannot reproduce the
     // per-lane byte selection anyway). Tests pin the Float scale operand to
     // all-0x7f (E8M0 127 == x1) so Float and FPSan agree on an exact decode, plus
     // a separate Float-only case for a 2^n scale.

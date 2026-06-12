@@ -256,7 +256,7 @@ TEST(CvtPkF32, Bf8UnpackAllBytes)
 // Coverage for the rest of the PR's non-scaled cvt (cvt_sr) and the fp8
 // cvt_scalef32 ops, via round-trips through the already-validated unpack ops.
 // All references are host-computed (independent of the device builtin), so any
-// implementation that diverges from the spec shows up as a failure.
+// implementation that diverges from them shows up as a failure.
 // ---------------------------------------------------------------------------
 template <class FP8>
 struct CvtOps;

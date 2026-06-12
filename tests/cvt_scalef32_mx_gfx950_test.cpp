@@ -10,7 +10,7 @@
 // host-side reference computed by fpsan's generic narrow<->f32 conversion
 // (detail::narrow_to_f32 / f32_to_narrow, the IREE-derived OCP math), which is
 // INDEPENDENT of the device builtin. So any implementation that diverges from
-// the spec shows up as a failure here.
+// the host reference shows up as a failure here.
 //
 // We exercise the raw __builtin_amdgcn_cvt_scalef32_* directly (in fpsan's
 // Float mode these wrappers are exactly the builtin) because the FPSan

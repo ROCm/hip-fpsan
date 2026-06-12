@@ -578,7 +578,7 @@ static float scale_dec(unsigned byte, int sfmt)
 // SCALE16=false: i32 (4 bytes, byte=2*(k>>6)+((k>>2)&1));
 // SCALE16=true:  i64 (8 bytes, byte=4*(k>>6)+2*((k>>2)&1)+((k>>5)&1)).
 // SFMT selects the per-block scale FORMAT: 0=E8M0FNU, 2=E4M3FN (both are valid
-// f4xf4 scale formats per the gfx1250 scaled-WMMA verifier). The scale bytes are
+// f4xf4 scale formats). The scale bytes are
 // generated and decoded in that format; the byte->k map is format-independent.
 template <bool SCALE16, int SFMT>
 static void run_scale(const char* tag)

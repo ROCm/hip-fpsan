@@ -8,7 +8,7 @@
 // CDNA4 (gfx950), so this test is arch-agnostic.
 //
 //   * Float mode: bit-exact vs the host std::ldexp (independent reference).
-//   * FPSan mode: the wrapper must equal the documented payload-ring model --
+//   * FPSan mode: the wrapper must equal the payload-ring model --
 //     a multiply by the constant 2^n -- i.e. (v * Value(2^n)). The reference is
 //     computed independently on the host with the same payload ring.
 #include "fpsan/amdgcn_math.hpp"

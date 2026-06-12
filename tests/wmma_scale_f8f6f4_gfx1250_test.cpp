@@ -677,8 +677,8 @@ TEST(WmmaScaleF8f6f4_128, SubFp6Fp4)
 {
     run_sub_scale<2, 4>("fp6_fp4");
 }
-// E4M3FN-format scales (scale fmt immediate = 2). The gfx1250 scaled-WMMA
-// verifier permits E4M3 scales in matched configs: f4xf4 with both scales E4M3,
+// E4M3FN-format scales (scale fmt immediate = 2). On gfx1250, E4M3 scales are
+// only legal in matched configs: f4xf4 with both scales E4M3,
 // and the f4 operand of an f{8,6} x f4 mix carrying an E4M3 scale (the f{8,6}
 // side stays E8M0). Each covers a distinct decode path; checked against host
 // oracles that decode the scale bytes in the matching format.
@@ -1102,7 +1102,7 @@ TEST(WmmaScaleF8f6f4_128, MixFp4Fp8)
     run_mixed_scale<4, 0>("mix_fp4_fp8");
 }
 // E4M3-format scale on the f4 operand of an 8-bit x f4 mix (the 8-bit side stays
-// E8M0), the verifier-legal mixed E4M3 config.
+// E8M0), the legal mixed E4M3 config.
 TEST(WmmaScaleF8f6f4_128, MixFp8Fp4ScaleBE4M3)
 {
     run_mixed_scale<0, 4, 0, 2>("mix_fp8_fp4_sB_e4m3");

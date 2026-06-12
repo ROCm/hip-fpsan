@@ -425,7 +425,7 @@ namespace fpsan
         // ---- Wave32 16x16x32 WMMA fragment layout (gfx1250) -------------------------
         // The gfx1250 K=32 16-bit-operand shapes (f16/bf16). C/D is the same 16x16
         // wave32 accumulator layout as 16x16x16 (cd_m/cd_n reused below via the K=16
-        // struct). The A/B operand layout is the documented gfx12 K=16 mapping
+        // struct). The A/B operand layout is the gfx12 K=16 mapping
         // extended by the one extra K bit: bit2 of k still selects the lane half
         // (row vs row+16); bits {0,1,3,4} pack the 16-element (v16) per-lane index.
         //   half = k&1; lane = row + 16*((k>>2)&1)
@@ -798,7 +798,7 @@ namespace fpsan
         // Silicon-grounded: with fmt=2 a scale byte of E4M3(2.0) doubles the
         // block product (vs the ~2^-63 an E8M0 read would give). E5M3 is reserved by
         // the HW enum but unencoded by the toolchain, so it is intentionally not
-        // exposed. The scale verifier only allows E4M3 scales in matched configs
+        // exposed. E4M3 scales are only legal in matched configs
         // (both-E4M3 f4xf4, or the f4 side of an f4 x f{8,6} mix); this decoder is
         // the per-byte primitive, the wrappers enforce the legal combinations.
         template <int ScaleFmt>
