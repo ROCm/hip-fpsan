@@ -27,6 +27,9 @@ cmake_minimum_required(VERSION 3.21)
 
 project(fpsan LANGUAGES CXX)
 
+# Generate compile_commands.json, for tools like clangd.
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+
 # ---- reject a literal in-source build --------------------------------------
 # A nested build directory (e.g. ./build) is fine; only configuring directly
 # into the source root is rejected, since that scatters CMake's generated files
