@@ -94,12 +94,13 @@ namespace fpsan
 #endif
 
 // ---- f64 ----
-// Visible on several targets, but direct probes only lowered cleanly for gfx1100
-// in the current audited set. Keep these wrappers gfx11-only so gfx12/gfx94x/
-// gfx950 do not accidentally instantiate a Float path that their backends still
-// reject.
-#if !defined(__HIP_DEVICE_COMPILE__) \
-    || (defined(__GFX11__) && __has_builtin(__builtin_amdgcn_wave_reduce_fadd_f64))
+// Visible on several targets, but direct probes only lowered cleanly for gfx11
+// and gfx12 in the current audited set. Keep these wrappers off gfx94x/gfx950 so
+// those targets do not accidentally instantiate a Float path that their backends
+// still reject.
+#if !defined(__HIP_DEVICE_COMPILE__)               \
+    || ((defined(__GFX11__) || defined(__GFX12__)) \
+        && __has_builtin(__builtin_amdgcn_wave_reduce_fadd_f64))
     FPSAN_DEFINE_WAVE_REDUCE(amdgcn_wave_reduce_fadd_f64,
                              double,
                              r + other,

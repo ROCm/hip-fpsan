@@ -43,6 +43,24 @@ static __device__ inline float lane_input_float(int lane)
     return static_cast<float>(lane * 7 + 1) - 100.f;
 }
 
+#if FPSAN_TEST_FORCE_WAVE_SIZE == 64
+static bool device_is_rdna4()
+{
+    int dev = 0;
+    if(hipGetDevice(&dev) != hipSuccess)
+        return false;
+    hipDeviceProp_t prop{};
+    if(hipGetDeviceProperties(&prop, dev) != hipSuccess)
+        return false;
+    return std::strncmp(prop.gcnArchName, "gfx120", 6) == 0;
+}
+
+static bool ds_permute_uses_full_wave64()
+{
+    return device_is_rdna4() || device_is_gfx950();
+}
+#endif
+
 // ---- readlane ---------------------------------------------------------------
 template <Semantics S, class Out>
 __global__ void k_readlane(Out* out, int from)
@@ -191,14 +209,13 @@ void test_ds_bpermute_xor(int off)
     HIP_CHECK(hipMemcpy(got.data(), d_out, LANES * sizeof(Out), hipMemcpyDeviceToHost));
     using V = Value<float, S, kCC>;
 #if FPSAN_TEST_FORCE_WAVE_SIZE == 64
-    const bool gfx950_fullwave = device_is_gfx950();
+    const bool fullwave64 = ds_permute_uses_full_wave64();
 #endif
     for(int i = 0; i < LANES; ++i)
     {
         int src_lane = i ^ off;
 #if FPSAN_TEST_FORCE_WAVE_SIZE == 64
-        // gfx11 wave64 DS lane selection is modulo 32; gfx950 crosses the full wave.
-        if(!gfx950_fullwave)
+        if(!fullwave64)
             src_lane = (i & ~31) | (src_lane & 31);
 #endif
         const float src = static_cast<float>(src_lane * 7 + 1) - 100.f;
@@ -230,8 +247,7 @@ TEST(Xlane, DsBpermuteXorFpsan16)
     test_ds_bpermute_xor<Semantics::Triton>(16);
 }
 #if FPSAN_TEST_FORCE_WAVE_SIZE == 64
-// RDNA3 DS permute lane selection is modulo 32 even in wave64, so cover the
-// largest same-half XOR here. Cross-half exchange is covered by permlane64.
+// off=31 covers the largest same-half XOR in W64 mode.
 TEST(Xlane, DsBpermuteXorFloat31)
 {
     test_ds_bpermute_xor<Semantics::Native>(31);
@@ -240,13 +256,13 @@ TEST(Xlane, DsBpermuteXorFpsan31)
 {
     test_ds_bpermute_xor<Semantics::Triton>(31);
 }
-// off=32 is the important negative boundary: DS applies the low 5 address
-// bits, so this is an identity within each 32-lane half, not a cross-half move.
-TEST(Xlane, DsBpermuteXorFloat32Modulo)
+// off=32 is the cross-half boundary: gfx11 expects modulo-32 lane selection,
+// while RDNA4/gfx950 expect a full-wave exchange.
+TEST(Xlane, DsBpermuteXorFloat32Boundary)
 {
     test_ds_bpermute_xor<Semantics::Native>(32);
 }
-TEST(Xlane, DsBpermuteXorFpsan32Modulo)
+TEST(Xlane, DsBpermuteXorFpsan32Boundary)
 {
     test_ds_bpermute_xor<Semantics::Triton>(32);
 }
@@ -284,14 +300,13 @@ void test_ds_permute_xor(int off)
     HIP_CHECK(hipMemcpy(got.data(), d_out, LANES * sizeof(Out), hipMemcpyDeviceToHost));
     using V = Value<float, S, kCC>;
 #if FPSAN_TEST_FORCE_WAVE_SIZE == 64
-    const bool gfx950_fullwave = device_is_gfx950();
+    const bool fullwave64 = ds_permute_uses_full_wave64();
 #endif
     for(int i = 0; i < LANES; ++i)
     {
         int src_lane = i ^ off;
 #if FPSAN_TEST_FORCE_WAVE_SIZE == 64
-        // gfx11 wave64 DS lane selection is modulo 32; gfx950 crosses the full wave.
-        if(!gfx950_fullwave)
+        if(!fullwave64)
             src_lane = (i & ~31) | (src_lane & 31);
 #endif
         // Lane i was written by the selected source lane.
@@ -324,8 +339,7 @@ TEST(Xlane, DsPermuteXorFpsan16)
     test_ds_permute_xor<Semantics::Triton>(16);
 }
 #if FPSAN_TEST_FORCE_WAVE_SIZE == 64
-// RDNA3 DS permute lane selection is modulo 32 even in wave64, so cover the
-// largest same-half XOR here. Cross-half exchange is covered by permlane64.
+// off=31 covers the largest same-half XOR in W64 mode.
 TEST(Xlane, DsPermuteXorFloat31)
 {
     test_ds_permute_xor<Semantics::Native>(31);
@@ -334,13 +348,13 @@ TEST(Xlane, DsPermuteXorFpsan31)
 {
     test_ds_permute_xor<Semantics::Triton>(31);
 }
-// off=32 is the important negative boundary: DS applies the low 5 address
-// bits, so this is an identity within each 32-lane half, not a cross-half move.
-TEST(Xlane, DsPermuteXorFloat32Modulo)
+// off=32 is the cross-half boundary: gfx11 expects modulo-32 lane selection,
+// while RDNA4/gfx950 expect a full-wave exchange.
+TEST(Xlane, DsPermuteXorFloat32Boundary)
 {
     test_ds_permute_xor<Semantics::Native>(32);
 }
-TEST(Xlane, DsPermuteXorFpsan32Modulo)
+TEST(Xlane, DsPermuteXorFpsan32Boundary)
 {
     test_ds_permute_xor<Semantics::Triton>(32);
 }
@@ -547,6 +561,68 @@ TEST(Xlane, MovDppIdentityFloat)
 TEST(Xlane, MovDppIdentityFpsan)
 {
     test_mov_dpp_identity<Semantics::Triton>();
+}
+
+// ---- update_dpp (quad swap plus row-mask blend with old value) ---------------
+static int dpp_quad_src(int lane, unsigned ctrl)
+{
+    const int base = lane & ~3;
+    return base + int((ctrl >> (2 * (lane & 3))) & 3u);
+}
+
+template <Semantics S, class Out>
+__global__ void k_update_dpp_quad_swap_row_mask(Out* out)
+{
+    const int            lane = threadIdx.x;
+    Value<float, S, kCC> old{lane_input_float(lane) + 1000.f};
+    Value<float, S, kCC> v{lane_input_float(lane)};
+    auto                 r = fpsan::amdgcn_update_dpp<0xB1, 0x5, 0xF, false>(old, v);
+    if constexpr(S == Semantics::Native)
+        out[lane] = static_cast<float>(r);
+    else
+        out[lane] = r.fpsan_payload();
+}
+
+template <Semantics S>
+void test_update_dpp_quad_swap_row_mask()
+{
+    int ndev = 0;
+    if(hipGetDeviceCount(&ndev) != hipSuccess || ndev == 0)
+        GTEST_SKIP() << "no HIP device";
+    using Out = std::conditional_t<S == Semantics::Native, float, std::uint32_t>;
+    Out* d_out;
+    HIP_CHECK(hipMalloc(&d_out, LANES * sizeof(Out)));
+    k_update_dpp_quad_swap_row_mask<S><<<1, LANES>>>(d_out);
+    HIP_CHECK(hipDeviceSynchronize());
+    std::vector<Out> got(LANES);
+    HIP_CHECK(hipMemcpy(got.data(), d_out, LANES * sizeof(Out), hipMemcpyDeviceToHost));
+    using V = Value<float, S, kCC>;
+    for(int i = 0; i < LANES; ++i)
+    {
+        const int  row            = (i >> 4) & 3;
+        const bool row_is_enabled = (0x5 & (1 << row)) != 0;
+        const int  src_lane       = row_is_enabled ? dpp_quad_src(i, 0xB1) : i;
+        float      src            = static_cast<float>(src_lane * 7 + 1) - 100.f;
+        if(!row_is_enabled)
+            src += 1000.f;
+        V   src_v{src};
+        Out expected;
+        if constexpr(S == Semantics::Native)
+            expected = static_cast<float>(src_v);
+        else
+            expected = src_v.fpsan_payload();
+        EXPECT_EQ(got[i], expected) << "lane " << i;
+    }
+    (void)hipFree(d_out);
+}
+
+TEST(Xlane, UpdateDppQuadSwapRowMaskFloat)
+{
+    test_update_dpp_quad_swap_row_mask<Semantics::Native>();
+}
+TEST(Xlane, UpdateDppQuadSwapRowMaskFpsan)
+{
+    test_update_dpp_quad_swap_row_mask<Semantics::Triton>();
 }
 
 #if !defined(__HIP_DEVICE_COMPILE__) || __has_builtin(__builtin_amdgcn_mov_dpp8)
@@ -820,6 +896,16 @@ TEST(Xlane, DsBpermuteFiXorFpsan1)
 {
     test_ds_bpermute_fi_xor<Semantics::Triton>(1);
 }
+#if FPSAN_TEST_FORCE_WAVE_SIZE == 64
+TEST(Xlane, DsBpermuteFiXorFloat32)
+{
+    test_ds_bpermute_fi_xor<Semantics::Native>(32);
+}
+TEST(Xlane, DsBpermuteFiXorFpsan32)
+{
+    test_ds_bpermute_fi_xor<Semantics::Triton>(32);
+}
+#endif
 #endif // __has_builtin(__builtin_amdgcn_ds_bpermute_fi_b32)
 
 // ---- permlane16 / permlanex16 (independent host oracle of the lane map) ------

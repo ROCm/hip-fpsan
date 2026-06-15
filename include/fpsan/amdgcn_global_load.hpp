@@ -5,7 +5,9 @@
 // ----------------------------------------------------------------------------
 // FPSan wrappers for the gfx12 (RDNA4) matrix-transposed global loads:
 //
-//   global_load_tr_b128 (wave32, v8 of f16 / bf16 per lane)
+//   global_load_tr_b128 (wave32, v8 of f16 / bf16 per lane;
+//                        wave64, v4 of f16 / bf16 per lane)
+//   global_load_tr_b64  (wave64, v4 of fp8 / bf8 per lane)
 //
 // These instructions read 128 bits per lane from global memory with the
 // cooperative-transpose lane mapping the WMMA operand layout expects, so a
@@ -30,19 +32,18 @@
 // memory -- the instruction's contract. The builtin call is gated to the
 // device pass; in the HIP host pass the wrapper is a visible stub.
 //
-// Wavefront size. The b128 form on wave32 (RDNA4 default) reads 8 elements
-// per lane. There is a wave64 form (`_v4f16`/`_v4bf16`, 4 elements per
-// lane) which is NOT exposed here -- gfx12 normally runs wave32, the wave64
-// variants do not appear in `__has_builtin` against `--offload-arch=gfx1201`,
-// and adding them would require a parallel set of wrappers gated on
-// wavefrontsize.
+// Wavefront size. RDNA4 exposes the b128 form as v8 f16/bf16 on wave32 and
+// v4 f16/bf16 on wave64. RDNA4 also exposes a wave64 b64 form as one i32 per
+// lane, which is the 4-byte fp8/bf8 fragment shape. Each wrapper is gated on
+// the matching builtin so wave32-only and wave64-only compiler surfaces stay
+// separate.
 //
 // HIP/device-only. Opt-in (not pulled by <fpsan/fpsan.hpp>).
 // ----------------------------------------------------------------------------
 #ifndef FPSAN_AMDGCN_GLOBAL_LOAD_HPP
 #define FPSAN_AMDGCN_GLOBAL_LOAD_HPP
 
-#include "fpsan/amdgcn_matrix.hpp" // v8h_native / v8bf_native / v8e4m3_native
+#include "fpsan/amdgcn_matrix.hpp" // fragment aliases used by matrix loads
 #include "fpsan/detail/traits.hpp" // detail::vector_element_t
 #include "fpsan/value.hpp"
 
@@ -104,6 +105,63 @@ namespace fpsan
         })
         return Value<v8bf_native, S, C>::from_storage_bits(bits);
     }
+#endif
+
+    // ---- global_load_tr_b128 : 16-bit elements (f16 / bf16), wave64 -----------
+    // Reads 4 consecutive 16-bit values per lane from global memory, transposed.
+#if !defined(__HIP_DEVICE_COMPILE__) || __has_builtin(__builtin_amdgcn_global_load_tr_b128_v4f16)
+    template <Semantics S, Conversions C>
+    FPSAN_DEVICE Value<v4h_native, S, C>
+                 amdgcn_global_load_tr_b128_f16_w64(const Value<_Float16, S, C>* gptr)
+    {
+        using Bits = typename Value<v4h_native, S, C>::bits_type;
+        Bits bits{};
+        (void)gptr;
+        FPSAN_GL_DEVICE_ONLY({
+            using v4fp16 = __fp16 __attribute__((ext_vector_type(4)));
+            auto raw = __builtin_amdgcn_global_load_tr_b128_v4f16((v4fp16 FPSAN_GL_GLOBAL*)(gptr));
+            bits     = __builtin_bit_cast(Bits, raw);
+        })
+        return Value<v4h_native, S, C>::from_storage_bits(bits);
+    }
+#endif
+
+#if !defined(__HIP_DEVICE_COMPILE__) || __has_builtin(__builtin_amdgcn_global_load_tr_b128_v4bf16)
+    template <Semantics S, Conversions C>
+    FPSAN_DEVICE Value<v4bf_native, S, C>
+                 amdgcn_global_load_tr_b128_bf16_w64(const Value<__bf16, S, C>* gptr)
+    {
+        using Bits = typename Value<v4bf_native, S, C>::bits_type;
+        Bits bits{};
+        (void)gptr;
+        FPSAN_GL_DEVICE_ONLY({
+            auto raw
+                = __builtin_amdgcn_global_load_tr_b128_v4bf16((v4bf_native FPSAN_GL_GLOBAL*)(gptr));
+            bits = __builtin_bit_cast(Bits, raw);
+        })
+        return Value<v4bf_native, S, C>::from_storage_bits(bits);
+    }
+#endif
+
+    // ---- global_load_tr_b64 : 8-bit elements (fp8 / bf8), wave64 -------------
+    // Reads 4 consecutive bytes per lane transposed into one v4 fp8/bf8 fragment.
+#if !defined(__HIP_DEVICE_COMPILE__) || __has_builtin(__builtin_amdgcn_global_load_tr_b64_i32)
+#define FPSAN_DEFINE_GLOBAL_LOAD_TR_B64_W64(NAME, FRAG)                                          \
+    template <Semantics S, Conversions C>                                                        \
+    FPSAN_DEVICE Value<FRAG, S, C> NAME(const Value<detail::vector_element_t<FRAG>, S, C>* gptr) \
+    {                                                                                            \
+        using Bits = typename Value<FRAG, S, C>::bits_type;                                      \
+        Bits bits{};                                                                             \
+        (void)gptr;                                                                              \
+        FPSAN_GL_DEVICE_ONLY({                                                                   \
+            auto raw = __builtin_amdgcn_global_load_tr_b64_i32((int FPSAN_GL_GLOBAL*)(gptr));    \
+            bits     = __builtin_bit_cast(Bits, raw);                                            \
+        })                                                                                       \
+        return Value<FRAG, S, C>::from_storage_bits(bits);                                       \
+    }
+    FPSAN_DEFINE_GLOBAL_LOAD_TR_B64_W64(amdgcn_global_load_tr_b64_fp8_w64, v4e4m3_native)
+    FPSAN_DEFINE_GLOBAL_LOAD_TR_B64_W64(amdgcn_global_load_tr_b64_bf8_w64, v4e5m2_native)
+#undef FPSAN_DEFINE_GLOBAL_LOAD_TR_B64_W64
 #endif
 
     // ---- global_load_tr16_b128 : 16-bit elements (f16 / bf16), wave32 ----------

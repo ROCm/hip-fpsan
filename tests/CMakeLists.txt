@@ -81,10 +81,14 @@ function(fpsan_add_compile_fail_test name src)
   set_tests_properties(${name} PROPERTIES WILL_FAIL TRUE)
 endfunction()
 
-function(fpsan_enable_gfx11_wave64 name)
+function(fpsan_enable_wave64 name)
   target_compile_definitions(${name} PRIVATE FPSAN_TEST_FORCE_WAVE_SIZE=64)
   target_compile_options(${name}
                          PRIVATE $<$<COMPILE_LANGUAGE:HIP>:-mwavefrontsize64>)
+endfunction()
+
+function(fpsan_enable_gfx11_wave64 name)
+  fpsan_enable_wave64(${name})
 endfunction()
 
 # ---- build canary: proves the toolchain + INTERFACE target + ctest work even
@@ -198,11 +202,36 @@ if(TARGET GTest::gtest_main)
     # K=32 builtin emits an instruction gfx1250 cannot decode, so it is excluded
     # on gfx1250.
     if(_fpsan_has_rdna4)
+      fpsan_add_test(fpsan_global_load_tr_gfx12_w64_test
+                     global_load_tr_test.cpp TEST_PREFIX GFX12W64.)
       fpsan_add_test(fpsan_wmma_gfx12_test wmma_gfx12_test.cpp)
+      fpsan_add_test(fpsan_wmma_gfx12_w64_test wmma_gfx12_test.cpp)
       fpsan_add_test(fpsan_swmmac_gfx12_test swmmac_gfx12_test.cpp)
+      fpsan_add_test(fpsan_swmmac_gfx12_w64_test swmmac_gfx12_w64_test.cpp)
+      fpsan_add_test(fpsan_xlane_gfx12_w64_test xlane_test.cpp TEST_PREFIX GFX12W64.)
+      fpsan_add_test(fpsan_classify_gfx12_w64_test classify_test.cpp TEST_PREFIX GFX12W64.)
+      fpsan_add_test(fpsan_wave_gfx12_w64_test wave_test.cpp TEST_PREFIX GFX12W64.)
       set_target_properties(fpsan_wmma_gfx12_test
+                            fpsan_global_load_tr_gfx12_w64_test
+                            fpsan_wmma_gfx12_w64_test
                             fpsan_swmmac_gfx12_test
+                            fpsan_swmmac_gfx12_w64_test
+                            fpsan_xlane_gfx12_w64_test
+                            fpsan_classify_gfx12_w64_test
+                            fpsan_wave_gfx12_w64_test
                             PROPERTIES HIP_ARCHITECTURES "${_fpsan_rdna4_arches}")
+      target_compile_definitions(fpsan_wmma_gfx12_w64_test
+                                 PRIVATE FPSAN_TEST_GFX12_WAVE64=1)
+      target_compile_definitions(fpsan_global_load_tr_gfx12_w64_test
+                                 PRIVATE FPSAN_TEST_GLOBAL_LOAD_TR_W64=1)
+      target_compile_definitions(fpsan_wave_gfx12_w64_test
+                                 PRIVATE FPSAN_TEST_ENABLE_WAVE_F64=1)
+      fpsan_enable_wave64(fpsan_global_load_tr_gfx12_w64_test)
+      fpsan_enable_wave64(fpsan_wmma_gfx12_w64_test)
+      fpsan_enable_wave64(fpsan_swmmac_gfx12_w64_test)
+      fpsan_enable_wave64(fpsan_xlane_gfx12_w64_test)
+      fpsan_enable_wave64(fpsan_classify_gfx12_w64_test)
+      fpsan_enable_wave64(fpsan_wave_gfx12_w64_test)
     endif()
     if(_fpsan_has_gfx11)
       fpsan_add_test(fpsan_wmma_gfx11_test wmma_gfx11_test.cpp)

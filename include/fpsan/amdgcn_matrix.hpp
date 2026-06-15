@@ -52,7 +52,9 @@ namespace fpsan
     // Native vector aliases for the gfx12 16x16x16 WMMA builtin ABI. Per-lane
     // fragment widths: A,B = 8 elements of the input type, C,D = 8 elements of the
     // output type.
+    using v4h_native  = _Float16 __attribute__((ext_vector_type(4)));
     using v4f_native  = float __attribute__((ext_vector_type(4)));
+    using v4bf_native = __bf16 __attribute__((ext_vector_type(4)));
     using v8h_native  = _Float16 __attribute__((ext_vector_type(8)));
     using v8f_native  = float __attribute__((ext_vector_type(8)));
     using v8bf_native = __bf16 __attribute__((ext_vector_type(8)));
@@ -235,6 +237,7 @@ namespace fpsan
     using v4amd_e5m2_native = detail::v4_fragment<amd_fp8_e5m2>;
 
     // The builtin ABI packs the 8-byte fp8 fragment into a 2-element i32 vector.
+    using v4i16_native = short __attribute__((ext_vector_type(4)));
     using v2i32_native = int __attribute__((ext_vector_type(2)));
     // ... and the 32-byte K=64 fp8 fragment into an 8-element i32 vector.
     using v8i32_native = int __attribute__((ext_vector_type(8)));
@@ -326,7 +329,8 @@ namespace fpsan
         {
             FPSAN_DEVICE static int ab_lane(int row_or_col, int k)
             {
-                return row_or_col + 16 * ((k >> 2) & 1);
+                const int lane = row_or_col + 16 * ((k >> 2) & 1);
+                return __builtin_amdgcn_wavefrontsize() == 64 ? lane + 32 * ((k >> 3) & 1) : lane;
             }
             FPSAN_DEVICE static int ab_reg(int k)
             {
@@ -339,11 +343,15 @@ namespace fpsan
             // Storage index into the 8-element A/B fragment for (reg, half).
             FPSAN_DEVICE static int ab_index(int k)
             {
+                if(__builtin_amdgcn_wavefrontsize() == 64)
+                    return 2 * ((k >> 1) & 1) + ab_half(k);
                 return 2 * ab_reg(k) + ab_half(k);
             }
             // The (m, n) this lane's D/C register e holds.
             FPSAN_DEVICE static int cd_m(int lane, int e)
             {
+                if(__builtin_amdgcn_wavefrontsize() == 64)
+                    return e + 8 * ((lane >> 4) & 1) + 4 * (lane >> 5);
                 return e + 8 * (lane >> 4);
             }
             FPSAN_DEVICE static int cd_n(int lane)
@@ -365,10 +373,10 @@ namespace fpsan
             using DFrag     = Value<CVec, S, C>;
             using AccScalar = typename DFrag::element_type;
             using Acc       = Value<AccScalar, S, C>;
-            const int lane  = wave_lane();
+            const int lane  = wave_lane_full();
             const int n     = Wmma16x16x16Layout::cd_n(lane);
             DFrag     d{};
-            for(int e = 0; e < 8; ++e)
+            for(int e = 0; e < static_cast<int>(DFrag::lanes); ++e)
             {
                 const int m   = Wmma16x16x16Layout::cd_m(lane, e);
                 Acc       acc = c.get(e); // C[m][n], co-located with D register e
@@ -1693,6 +1701,152 @@ namespace fpsan
 #undef FPSAN_DEFINE_WMMA_16X16X16_FP8
 
 #endif // __has_builtin(__builtin_amdgcn_wmma_f32_16x16x16_f16_w32_gfx12)
+
+#if !defined(__HIP_DEVICE_COMPILE__) \
+    || __has_builtin(__builtin_amdgcn_wmma_f32_16x16x16_f16_w64_gfx12)
+
+    template <Semantics S, Conversions C>
+    FPSAN_DEVICE Value<v4f_native, S, C> amdgcn_wmma_f32_16x16x16_f16_w64(Value<v4h_native, S, C> a,
+                                                                          Value<v4h_native, S, C> b,
+                                                                          Value<v4f_native, S, C> c)
+    {
+        if constexpr(S == Semantics::Native)
+        {
+            v4f_native d = __builtin_amdgcn_wmma_f32_16x16x16_f16_w64_gfx12(
+                a.to_float(), b.to_float(), c.to_float());
+            return Value<v4f_native, S, C>(d);
+        }
+        else
+        {
+            return detail::wmma_16x16x16_dataflow(a, b, c);
+        }
+    }
+
+    template <Semantics S, Conversions C>
+    FPSAN_DEVICE Value<v4f_native, S, C> amdgcn_wmma_f32_16x16x16_bf16_w64(
+        Value<v4bf_native, S, C> a, Value<v4bf_native, S, C> b, Value<v4f_native, S, C> c)
+    {
+        if constexpr(S == Semantics::Native)
+        {
+            const v4i16_native ai = __builtin_bit_cast(v4i16_native, a.to_float());
+            const v4i16_native bi = __builtin_bit_cast(v4i16_native, b.to_float());
+            v4f_native d = __builtin_amdgcn_wmma_f32_16x16x16_bf16_w64_gfx12(ai, bi, c.to_float());
+            return Value<v4f_native, S, C>(d);
+        }
+        else
+        {
+            return detail::wmma_16x16x16_dataflow(a, b, c);
+        }
+    }
+
+    template <Semantics S, Conversions C>
+    FPSAN_DEVICE Value<v4h_native, S, C> amdgcn_wmma_f16_16x16x16_f16_w64(Value<v4h_native, S, C> a,
+                                                                          Value<v4h_native, S, C> b,
+                                                                          Value<v4h_native, S, C> c)
+    {
+        if constexpr(S == Semantics::Native)
+        {
+            v4h_native d = __builtin_amdgcn_wmma_f16_16x16x16_f16_w64_gfx12(
+                a.to_float(), b.to_float(), c.to_float());
+            return Value<v4h_native, S, C>(d);
+        }
+        else
+        {
+            return detail::wmma_16x16x16_dataflow(a, b, c);
+        }
+    }
+
+    template <Semantics S, Conversions C>
+    FPSAN_DEVICE Value<v4bf_native, S, C> amdgcn_wmma_bf16_16x16x16_bf16_w64(
+        Value<v4bf_native, S, C> a, Value<v4bf_native, S, C> b, Value<v4bf_native, S, C> c)
+    {
+        if constexpr(S == Semantics::Native)
+        {
+            const v4i16_native ai = __builtin_bit_cast(v4i16_native, a.to_float());
+            const v4i16_native bi = __builtin_bit_cast(v4i16_native, b.to_float());
+            const v4i16_native ci = __builtin_bit_cast(v4i16_native, c.to_float());
+            const v4i16_native di = __builtin_amdgcn_wmma_bf16_16x16x16_bf16_w64_gfx12(ai, bi, ci);
+            return Value<v4bf_native, S, C>(__builtin_bit_cast(v4bf_native, di));
+        }
+        else
+        {
+            return detail::wmma_16x16x16_dataflow(a, b, c);
+        }
+    }
+
+    template <Semantics S, Conversions C>
+    FPSAN_DEVICE Value<v4f_native, S, C> amdgcn_wmma_f32_16x16x16_fp8_fp8_w64(
+        Value<v4e4m3_native, S, C> a, Value<v4e4m3_native, S, C> b, Value<v4f_native, S, C> c)
+    {
+        if constexpr(S == Semantics::Native)
+        {
+            v4f_native d = __builtin_amdgcn_wmma_f32_16x16x16_fp8_fp8_w64_gfx12(
+                __builtin_bit_cast(int, a.to_float()),
+                __builtin_bit_cast(int, b.to_float()),
+                c.to_float());
+            return Value<v4f_native, S, C>(d);
+        }
+        else
+        {
+            return detail::wmma_16x16x16_dataflow(a, b, c);
+        }
+    }
+
+    template <Semantics S, Conversions C>
+    FPSAN_DEVICE Value<v4f_native, S, C> amdgcn_wmma_f32_16x16x16_fp8_bf8_w64(
+        Value<v4e4m3_native, S, C> a, Value<v4e5m2_native, S, C> b, Value<v4f_native, S, C> c)
+    {
+        if constexpr(S == Semantics::Native)
+        {
+            v4f_native d = __builtin_amdgcn_wmma_f32_16x16x16_fp8_bf8_w64_gfx12(
+                __builtin_bit_cast(int, a.to_float()),
+                __builtin_bit_cast(int, b.to_float()),
+                c.to_float());
+            return Value<v4f_native, S, C>(d);
+        }
+        else
+        {
+            return detail::wmma_16x16x16_dataflow(a, b, c);
+        }
+    }
+
+    template <Semantics S, Conversions C>
+    FPSAN_DEVICE Value<v4f_native, S, C> amdgcn_wmma_f32_16x16x16_bf8_fp8_w64(
+        Value<v4e5m2_native, S, C> a, Value<v4e4m3_native, S, C> b, Value<v4f_native, S, C> c)
+    {
+        if constexpr(S == Semantics::Native)
+        {
+            v4f_native d = __builtin_amdgcn_wmma_f32_16x16x16_bf8_fp8_w64_gfx12(
+                __builtin_bit_cast(int, a.to_float()),
+                __builtin_bit_cast(int, b.to_float()),
+                c.to_float());
+            return Value<v4f_native, S, C>(d);
+        }
+        else
+        {
+            return detail::wmma_16x16x16_dataflow(a, b, c);
+        }
+    }
+
+    template <Semantics S, Conversions C>
+    FPSAN_DEVICE Value<v4f_native, S, C> amdgcn_wmma_f32_16x16x16_bf8_bf8_w64(
+        Value<v4e5m2_native, S, C> a, Value<v4e5m2_native, S, C> b, Value<v4f_native, S, C> c)
+    {
+        if constexpr(S == Semantics::Native)
+        {
+            v4f_native d = __builtin_amdgcn_wmma_f32_16x16x16_bf8_bf8_w64_gfx12(
+                __builtin_bit_cast(int, a.to_float()),
+                __builtin_bit_cast(int, b.to_float()),
+                c.to_float());
+            return Value<v4f_native, S, C>(d);
+        }
+        else
+        {
+            return detail::wmma_16x16x16_dataflow(a, b, c);
+        }
+    }
+
+#endif // __has_builtin(__builtin_amdgcn_wmma_f32_16x16x16_f16_w64_gfx12)
 
 // =============================================================================
 // gfx1250 wave32 16x16x32 WMMA wrappers (K=32, 16-bit operands: f16 / bf16).
