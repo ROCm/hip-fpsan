@@ -16,6 +16,7 @@
 # Options:
 #   -DFPSAN_BUILD_TESTS=ON|OFF      (default ON)  build and register the tests
 #   -DFPSAN_BUILD_EXAMPLES=ON|OFF   (default ON)  build the tutorial examples
+#   -DFPSAN_BUILD_BENCHMARKS=ON|OFF (default OFF) build benchmark binaries
 #   -DFPSAN_ENABLE_HIP=ON|OFF       (default: ON when a HIP toolchain is found,
 #                                    else OFF)    compile tests/examples as HIP.
 #       The default flows from CMAKE_HIP_COMPILER, derived from ROCM_PATH
@@ -42,6 +43,7 @@ endif()
 
 option(FPSAN_BUILD_TESTS "Build the FPSan test suite" ON)
 option(FPSAN_BUILD_EXAMPLES "Build the tutorial examples" ON)
+option(FPSAN_BUILD_BENCHMARKS "Build FPSan benchmark binaries" OFF)
 
 # ---- HIP toolchain detection -----------------------------------------------
 # Follow the ROCm-library convention (rocPRIM, rocThrust, hipBLASLt): discover
@@ -138,4 +140,8 @@ endif()
 
 if(FPSAN_BUILD_EXAMPLES)
   add_subdirectory(examples)
+endif()
+
+if(FPSAN_BUILD_BENCHMARKS)
+  add_subdirectory(benchmarks)
 endif()

@@ -16,6 +16,8 @@
 //    namespace-detail narrow_to_f32 / f32_to_narrow primitives).
 #include "fpsan/fpsan.hpp"
 
+#include "fpsan_semantics.hpp"
+
 #include <gtest/gtest.h>
 
 #include <cmath>
@@ -141,30 +143,43 @@ TEST(Fp8, ExhaustiveFloatRoundTripAmdE5M2)
 
 // ---- FPSan fixed points ----------------------------------------------------
 
-template <class FP8>
+template <class FP8, Semantics S>
 void fpsan_fixed_points()
 {
-    using V = Value<FP8, Semantics::Triton, Conversions::Explicit>;
-    // 0 -> payload 0; 1 -> payload 1; -1 -> payload 0xFF.
-    EXPECT_EQ(int(V(FP8(0.0f)).fpsan_payload()), 0);
-    EXPECT_EQ(int(V(FP8(1.0f)).fpsan_payload()), 1);
-    EXPECT_EQ(int(V(FP8(-1.0f)).fpsan_payload()), 0xFF);
+    using V = Value<FP8, S, Conversions::Explicit>;
+    using B = typename V::bits_type;
+    // 0 and 1 are universal fixed points of any homomorphic (or Triton) encoding.
+    EXPECT_EQ(B(V(FP8(0.0f)).fpsan_payload()), B(0)) << "S=" << int(S);
+    EXPECT_EQ(B(V(FP8(1.0f)).fpsan_payload()), B(1)) << "S=" << int(S);
+    // -1 is the additive inverse of 1 everywhere; its stored residue is Triton's
+    // all-ones byte (0xFF) or the algebraic n-1.
+    EXPECT_TRUE(V(FP8(-1.0f)) == -V(FP8(1.0f))) << "S=" << int(S);
+    if constexpr(S == Semantics::Triton)
+        EXPECT_EQ(int(V(FP8(-1.0f)).fpsan_payload()), 0xFF);
+    else
+        EXPECT_EQ(B(V(FP8(-1.0f)).fpsan_payload()), static_cast<B>(V::alg_cfg().n - 1));
+}
+template <class FP8>
+void fpsan_fixed_points_all()
+{
+    fpsan_test::for_each_fpsan_semantics(
+        [](auto sem) { fpsan_fixed_points<FP8, decltype(sem)::value>(); });
 }
 TEST(Fp8, FpsanFixedPointsE4M3)
 {
-    fpsan_fixed_points<fp8_e4m3>();
+    fpsan_fixed_points_all<fp8_e4m3>();
 }
 TEST(Fp8, FpsanFixedPointsE5M2)
 {
-    fpsan_fixed_points<fp8_e5m2>();
+    fpsan_fixed_points_all<fp8_e5m2>();
 }
 TEST(Fp8, FpsanFixedPointsAmdE4M3)
 {
-    fpsan_fixed_points<amd_fp8_e4m3>();
+    fpsan_fixed_points_all<amd_fp8_e4m3>();
 }
 TEST(Fp8, FpsanFixedPointsAmdE5M2)
 {
-    fpsan_fixed_points<amd_fp8_e5m2>();
+    fpsan_fixed_points_all<amd_fp8_e5m2>();
 }
 
 // ---- FPSan cast<fp8> <-> cast<float> round trip ----------------------------
@@ -172,10 +187,10 @@ TEST(Fp8, FpsanFixedPointsAmdE5M2)
 // cast<fp8>(Value<float>) truncates back to 8 bits. Composition is the identity
 // on the original payload for every bit pattern.
 
-template <class FP8>
+template <class FP8, Semantics S>
 void fpsan_cast_roundtrip()
 {
-    using V8 = Value<FP8, Semantics::Triton, Conversions::Explicit>;
+    using V8 = Value<FP8, S, Conversions::Explicit>;
     for(int i = 0; i < 256; ++i)
     {
         std::uint8_t b = static_cast<std::uint8_t>(i);
@@ -185,24 +200,36 @@ void fpsan_cast_roundtrip()
         auto wide = fpsan::cast<float>(v);
         auto back = fpsan::cast<FP8>(wide);
         EXPECT_EQ(int(back.fpsan_payload()), int(v.fpsan_payload()))
-            << "bits 0x" << std::hex << int(b);
+            << "S=" << int(S) << " bits 0x" << std::hex << int(b);
     }
+}
+// fp8 <-> f32 round trip holds where the cast is a homomorphism (Triton's signed
+// resize, a single-prime field's cast tower); the composite two-moduli rings
+// carry no cast homomorphism, so the round trip is not asserted there.
+template <class FP8>
+void fpsan_cast_roundtrip_all()
+{
+    fpsan_test::for_each_fpsan_semantics([](auto sem) {
+        constexpr Semantics S = decltype(sem)::value;
+        if constexpr(fpsan_test::flavor_has_cast_homomorphism<FP8, S>())
+            fpsan_cast_roundtrip<FP8, S>();
+    });
 }
 TEST(Fp8, FpsanCastRoundTripE4M3)
 {
-    fpsan_cast_roundtrip<fp8_e4m3>();
+    fpsan_cast_roundtrip_all<fp8_e4m3>();
 }
 TEST(Fp8, FpsanCastRoundTripE5M2)
 {
-    fpsan_cast_roundtrip<fp8_e5m2>();
+    fpsan_cast_roundtrip_all<fp8_e5m2>();
 }
 TEST(Fp8, FpsanCastRoundTripAmdE4M3)
 {
-    fpsan_cast_roundtrip<amd_fp8_e4m3>();
+    fpsan_cast_roundtrip_all<amd_fp8_e4m3>();
 }
 TEST(Fp8, FpsanCastRoundTripAmdE5M2)
 {
-    fpsan_cast_roundtrip<amd_fp8_e5m2>();
+    fpsan_cast_roundtrip_all<amd_fp8_e5m2>();
 }
 
 // ---- Float-mode cast matches native conversion -----------------------------

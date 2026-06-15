@@ -4,3 +4,16 @@
 # Typically a user-created symlink to the build directory, to enable discovery
 # by clangd.
 compile_commands.json
+
+# TeX build byproducts. PDFs under docs/ may be checked in intentionally.
+*.aux
+*.bbl
+*.bcf
+*.blg
+*.fls
+*.fdb_latexmk
+*.log
+*.out
+*.run.xml
+*.synctex.gz
+*.toc

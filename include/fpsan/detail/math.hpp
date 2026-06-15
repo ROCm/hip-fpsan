@@ -133,6 +133,54 @@ namespace fpsan
             return (tagged * mult) & c.full_mask;
         }
 
+        // ---- generic extern / libdevice fallback (Triton parity) -------------------
+        // The named tagged ops above cover a fixed enumerated set. For any *other*
+        // (unmodeled) elementwise call -- a new intrinsic, an arbitrary libdevice
+        // symbol -- this produces a deterministic, symbol-distinct,
+        // argument-order-sensitive tag, the only structure an opaque function can
+        // honor. The scheme is a bit-for-bit transcription of Triton's extern path
+        // (FpSanitizer.cpp: stableStringHash + fpsanVariadicExternTagged), so a
+        // symbol tagged here matches the payload Triton's sanitizer pass emits for
+        // the same symbol.
+
+        // FNV-1a 64-bit, == Triton's stableStringHash. constexpr so a symbol literal
+        // folds to a compile-time constant at the call site.
+        FPSAN_HOST_DEVICE constexpr u64 stable_string_hash(const char* s)
+        {
+            u64 h = 14695981039346656037ull;
+            for(; *s != '\0'; ++s)
+            {
+                h ^= static_cast<u64>(static_cast<unsigned char>(*s));
+                h *= 1099511628211ull;
+            }
+            return h;
+        }
+
+        // Rotate-left within the format width (== Triton's rotateLeftIntByAmount):
+        // mixing operand i by a rotation of i makes the tag argument-order-sensitive.
+        FPSAN_HOST_DEVICE constexpr u64 rotl_width(const MixConfig& c, u64 v, unsigned amount)
+        {
+            const unsigned w = c.bit_width;
+            amount %= w;
+            v &= c.full_mask;
+            if(amount == 0)
+                return v;
+            return ((v << amount) | (v >> (w - amount))) & c.full_mask;
+        }
+
+        // tag = (sum_i rotl(payload_i, i)) XOR nameHash, all mod 2^w -- exactly
+        // Triton's fpsanVariadicExternTagged (operands here are already embedded
+        // payloads, as Triton embeds float operands before mixing).
+        template <class... P>
+        FPSAN_HOST_DEVICE constexpr u64
+            payload_extern_tagged(const MixConfig& c, u64 name_hash, P... operands)
+        {
+            u64      acc = 0;
+            unsigned i   = 0;
+            ((acc = (acc + rotl_width(c, static_cast<u64>(operands), i++)) & c.full_mask), ...);
+            return (acc ^ (name_hash & c.full_mask)) & c.full_mask;
+        }
+
         // ---- modular: fma, frem, min/max -------------------------------------------
         FPSAN_HOST_DEVICE constexpr u64 payload_fma(const MixConfig& c, u64 a, u64 b, u64 cc)
         {

@@ -21,6 +21,8 @@
 #include "fpsan/amdgcn_cvt.hpp"
 #include "fpsan/fpsan.hpp"
 
+#include "fpsan_semantics.hpp"
+
 #include "hip_test_utils.hpp"
 #include "test_random.hpp"
 
@@ -39,7 +41,6 @@ using fpsan::detail::kFp4E2M1;
 using fpsan::detail::narrow_to_f32;
 
 static constexpr Conversions kCC = Conversions::Explicit;
-using VF                         = Value<float, Semantics::Triton, kCC>;
 
 namespace
 {
@@ -172,93 +173,109 @@ TEST(CvtScalef32Fp4Wrap, FloatScaleDirection)
 
 // Unpack plumbing: packed holds fp4 payloads; widen sign-extends 4->32, then
 // *scale. Reference is explicit sext + public Value multiply.
+template <Semantics S>
 __global__ void k_fpsan_unpack(unsigned packed, float scale, unsigned* out)
 {
-    auto r = fpsan::amdgcn_cvt_scalef32_pk_f32_fp4<1, Semantics::Triton, kCC>(packed, VF{scale});
-    out[0] = r.get(0).fpsan_payload();
-    out[1] = r.get(1).fpsan_payload();
+    using VF = Value<float, S, kCC>;
+    auto r   = fpsan::amdgcn_cvt_scalef32_pk_f32_fp4<1, S, kCC>(packed, VF{scale});
+    out[0]   = r.get(0).fpsan_payload();
+    out[1]   = r.get(1).fpsan_payload();
 }
 
 TEST(CvtScalef32Fp4Wrap, FpsanUnpackSelAndWiden)
 {
     if(!have_device())
         GTEST_SKIP() << "no HIP device";
-    // Put nibble payloads 0x3 and 0xF (=-1 after sext) in byte Sel=1.
-    unsigned    packed = (0x3u << 8) | (0xFu << 12);
-    const float scale  = 2.0f;
-    unsigned*   dO;
-    HIP_CHECK(hipMalloc(&dO, 2 * sizeof(unsigned)));
-    k_fpsan_unpack<<<1, 1>>>(packed, scale, dO);
-    HIP_CHECK(hipDeviceSynchronize());
-    auto     got  = from_dev(dO, 2);
-    unsigned ref0 = (VF::from_fpsan_payload(static_cast<std::uint32_t>(sext4(0x3))) * VF{scale})
-                        .fpsan_payload();
-    unsigned ref1 = (VF::from_fpsan_payload(static_cast<std::uint32_t>(sext4(0xF))) * VF{scale})
-                        .fpsan_payload();
-    EXPECT_EQ(got[0], ref0);
-    EXPECT_EQ(got[1], ref1);
-    (void)hipFree(dO);
+    fpsan_test::for_each_fpsan_semantics([&](auto sem) {
+        constexpr Semantics S = decltype(sem)::value;
+        using VF              = Value<float, S, kCC>;
+        // Put nibble payloads 0x3 and 0xF (=-1 after sext) in byte Sel=1.
+        unsigned    packed = (0x3u << 8) | (0xFu << 12);
+        const float scale  = 2.0f;
+        unsigned*   dO;
+        HIP_CHECK(hipMalloc(&dO, 2 * sizeof(unsigned)));
+        k_fpsan_unpack<S><<<1, 1>>>(packed, scale, dO);
+        HIP_CHECK(hipDeviceSynchronize());
+        auto     got  = from_dev(dO, 2);
+        unsigned ref0 = (VF::from_fpsan_payload(static_cast<std::uint32_t>(sext4(0x3))) * VF{scale})
+                            .fpsan_payload();
+        unsigned ref1 = (VF::from_fpsan_payload(static_cast<std::uint32_t>(sext4(0xF))) * VF{scale})
+                            .fpsan_payload();
+        EXPECT_EQ(got[0], ref0);
+        EXPECT_EQ(got[1], ref1);
+        (void)hipFree(dO);
+    });
 }
 
 // Pack plumbing + divide-by-scale: nibble = low4(payload(a/scale)), placed at
 // Sel, `old` preserved. Reference uses public Value division.
+template <Semantics S>
 __global__ void k_fpsan_pack(unsigned old, float a, float b, float scale, unsigned* out)
 {
-    *out = fpsan::amdgcn_cvt_scalef32_pk_fp4_f32<2, Semantics::Triton, kCC>(
-        old, VF{a}, VF{b}, VF{scale});
+    using VF = Value<float, S, kCC>;
+    *out     = fpsan::amdgcn_cvt_scalef32_pk_fp4_f32<2, S, kCC>(old, VF{a}, VF{b}, VF{scale});
 }
 
 TEST(CvtScalef32Fp4Wrap, FpsanPackSelDivideAndPreserve)
 {
     if(!have_device())
         GTEST_SKIP() << "no HIP device";
-    const unsigned old = 0xDEADBEEFu;
-    std::mt19937   rng = fpsan_test::make_rng();
-    unsigned*      dO;
-    HIP_CHECK(hipMalloc(&dO, sizeof(unsigned)));
-    for(int t = 0; t < 32; ++t)
-    {
-        float       a     = fpsan_test::pick_int_valued<float>(rng, -6, 6);
-        float       b     = fpsan_test::pick_int_valued<float>(rng, -6, 6);
-        const float scale = 2.0f;
-        k_fpsan_pack<<<1, 1>>>(old, a, b, scale, dO);
-        HIP_CHECK(hipDeviceSynchronize());
-        unsigned got  = from_dev(dO, 1)[0];
-        unsigned na   = (VF{a} / VF{scale}).fpsan_payload() & 0xF;
-        unsigned nb   = (VF{b} / VF{scale}).fpsan_payload() & 0xF;
-        unsigned pair = na | (nb << 4);
-        unsigned mask = 0xFFu << (8 * 2);
-        EXPECT_EQ(got, (old & ~mask) | (pair << (8 * 2))) << "a=" << a << " b=" << b;
-    }
-    (void)hipFree(dO);
+    fpsan_test::for_each_fpsan_semantics([&](auto sem) {
+        constexpr Semantics S = decltype(sem)::value;
+        using VF              = Value<float, S, kCC>;
+        const unsigned old    = 0xDEADBEEFu;
+        std::mt19937   rng    = fpsan_test::make_rng();
+        unsigned*      dO;
+        HIP_CHECK(hipMalloc(&dO, sizeof(unsigned)));
+        for(int t = 0; t < 32; ++t)
+        {
+            float       a     = fpsan_test::pick_int_valued<float>(rng, -6, 6);
+            float       b     = fpsan_test::pick_int_valued<float>(rng, -6, 6);
+            const float scale = 2.0f;
+            k_fpsan_pack<S><<<1, 1>>>(old, a, b, scale, dO);
+            HIP_CHECK(hipDeviceSynchronize());
+            unsigned got  = from_dev(dO, 1)[0];
+            unsigned na   = (VF{a} / VF{scale}).fpsan_payload() & 0xF;
+            unsigned nb   = (VF{b} / VF{scale}).fpsan_payload() & 0xF;
+            unsigned pair = na | (nb << 4);
+            unsigned mask = 0xFFu << (8 * 2);
+            EXPECT_EQ(got, (old & ~mask) | (pair << (8 * 2))) << "a=" << a << " b=" << b;
+        }
+        (void)hipFree(dO);
+    });
 }
 
 // sr_pk_fp4_f32: exact (seed-invariant) packing matches the deterministic pack.
+template <Semantics S>
 __global__ void k_fpsan_srpack(float a, float b, unsigned seed, unsigned* out)
 {
-    *out = fpsan::amdgcn_cvt_scalef32_sr_pk_fp4_f32<0, Semantics::Triton, kCC>(
-        0u, VF{a}, VF{b}, seed, VF{1.0f});
+    using VF = Value<float, S, kCC>;
+    *out = fpsan::amdgcn_cvt_scalef32_sr_pk_fp4_f32<0, S, kCC>(0u, VF{a}, VF{b}, seed, VF{1.0f});
 }
 
 TEST(CvtScalef32Fp4Wrap, FpsanSrPackMatchesDeterministic)
 {
     if(!have_device())
         GTEST_SKIP() << "no HIP device";
-    unsigned* dO;
-    HIP_CHECK(hipMalloc(&dO, sizeof(unsigned)));
-    for(int ca = 0; ca < 8; ++ca)
-        for(int cb = 0; cb < 8; ++cb)
-        {
-            float a = narrow_to_f32(unsigned(ca), kFp4E2M1);
-            float b = narrow_to_f32(unsigned(cb), kFp4E2M1);
-            k_fpsan_srpack<<<1, 1>>>(a, b, 0xdeadbeefu, dO);
-            HIP_CHECK(hipDeviceSynchronize());
-            unsigned got = from_dev(dO, 1)[0] & 0xFF;
-            unsigned na  = VF{a}.fpsan_payload() & 0xF;
-            unsigned nb  = VF{b}.fpsan_payload() & 0xF;
-            EXPECT_EQ(got, na | (nb << 4)) << "a=" << ca << " b=" << cb;
-        }
-    (void)hipFree(dO);
+    fpsan_test::for_each_fpsan_semantics([&](auto sem) {
+        constexpr Semantics S = decltype(sem)::value;
+        using VF              = Value<float, S, kCC>;
+        unsigned* dO;
+        HIP_CHECK(hipMalloc(&dO, sizeof(unsigned)));
+        for(int ca = 0; ca < 8; ++ca)
+            for(int cb = 0; cb < 8; ++cb)
+            {
+                float a = narrow_to_f32(unsigned(ca), kFp4E2M1);
+                float b = narrow_to_f32(unsigned(cb), kFp4E2M1);
+                k_fpsan_srpack<S><<<1, 1>>>(a, b, 0xdeadbeefu, dO);
+                HIP_CHECK(hipDeviceSynchronize());
+                unsigned got = from_dev(dO, 1)[0] & 0xFF;
+                unsigned na  = VF{a}.fpsan_payload() & 0xF;
+                unsigned nb  = VF{b}.fpsan_payload() & 0xF;
+                EXPECT_EQ(got, na | (nb << 4)) << "a=" << ca << " b=" << cb;
+            }
+        (void)hipFree(dO);
+    });
 }
 
 // f16/bf16 unpack/pack: Float mode vs OCP host ref (round-trip through the f32

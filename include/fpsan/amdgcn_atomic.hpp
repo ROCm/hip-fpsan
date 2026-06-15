@@ -62,9 +62,24 @@ namespace fpsan
         }
         else
         {
-            unsigned old = atomicAdd(reinterpret_cast<unsigned*>(addr),
-                                     static_cast<unsigned>(v.fpsan_payload()));
-            return Value<float, S, C>::from_fpsan_payload(static_cast<std::uint32_t>(old));
+            // A bare integer atomicAdd accumulates the payload mod 2^w. That is the
+            // Triton's ring exactly, but NOT the algebraic models' Z/nZ -- so use a
+            // CAS loop and let Value's operator+ apply the correct per-semantics add
+            // (mod 2^w for Triton, mod n for the algebraic variants). Lock-
+            // free; returns the OLD value, like the hardware atomic. (cf. pk_add.)
+            using V      = Value<float, S, C>;
+            auto*    p   = reinterpret_cast<unsigned*>(addr);
+            unsigned old = *p;
+            for(;;)
+            {
+                const V oldV = V::from_storage_bits(__builtin_bit_cast(typename V::bits_type, old));
+                const V newV = oldV + v;
+                const unsigned newbits = __builtin_bit_cast(unsigned, newV.to_storage_bits());
+                const unsigned witness = atomicCAS(p, old, newbits);
+                if(witness == old)
+                    return oldV;
+                old = witness;
+            }
         }
     }
 
@@ -165,9 +180,23 @@ namespace fpsan
         }
         else
         {
-            unsigned long long old = atomicAdd(reinterpret_cast<unsigned long long*>(addr),
-                                               static_cast<unsigned long long>(v.fpsan_payload()));
-            return Value<double, S, C>::from_fpsan_payload(static_cast<std::uint64_t>(old));
+            // CAS loop with the per-semantics add (mod 2^w Triton, mod n algebraic
+            // models); a bare integer atomicAdd would be mod 2^64 only. See the f32
+            // wrapper above. Returns the OLD value.
+            using V                = Value<double, S, C>;
+            auto*              p   = reinterpret_cast<unsigned long long*>(addr);
+            unsigned long long old = *p;
+            for(;;)
+            {
+                const V oldV = V::from_storage_bits(__builtin_bit_cast(typename V::bits_type, old));
+                const V newV = oldV + v;
+                const unsigned long long newbits
+                    = __builtin_bit_cast(unsigned long long, newV.to_storage_bits());
+                const unsigned long long witness = atomicCAS(p, old, newbits);
+                if(witness == old)
+                    return oldV;
+                old = witness;
+            }
         }
     }
 

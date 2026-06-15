@@ -19,6 +19,8 @@
 #include "fpsan/amdgcn_math.hpp"
 #include "fpsan/fpsan.hpp"
 
+#include "fpsan_semantics.hpp"
+
 #include "hip_test_utils.hpp"
 #include "test_random.hpp"
 
@@ -125,6 +127,7 @@ namespace
 } // namespace
 
 #define AMDGCN_MATH_UNARY_KERNEL(NAME, FT, BUILTIN, FPSAN_OP)                                    \
+    template <Semantics S>                                                                       \
     __global__ void k_##NAME(const FT*                                              in,          \
                              FT*                                                    direct,      \
                              FT*                                                    wrapper,     \
@@ -136,9 +139,9 @@ namespace
         direct[i]   = BUILTIN(x);                                                                \
         Value<FT, Semantics::Native, kCC> vf{x};                                                 \
         wrapper[i] = fpsan::NAME<Semantics::Native, kCC>(vf).to_float();                         \
-        Value<FT, Semantics::Triton, kCC> vp{x};                                                 \
+        Value<FT, S, kCC> vp{x};                                                                 \
         pay_direct[i]  = fpsan::FPSAN_OP(vp).fpsan_payload();                                    \
-        pay_wrapper[i] = fpsan::NAME<Semantics::Triton, kCC>(vp).fpsan_payload();                \
+        pay_wrapper[i] = fpsan::NAME<S, kCC>(vp).fpsan_payload();                                \
     }
 
 AMDGCN_MATH_UNARY_KERNEL(amdgcn_rcpf, float, __builtin_amdgcn_rcpf, rcp)
@@ -166,6 +169,7 @@ AMDGCN_MATH_UNARY_KERNEL(amdgcn_fracth, _Float16, __builtin_amdgcn_fracth, fract
 #undef AMDGCN_MATH_UNARY_KERNEL
 
 #define AMDGCN_MATH_FMED3_KERNEL(NAME, FT, BUILTIN)                                              \
+    template <Semantics S>                                                                       \
     __global__ void k_##NAME(const FT*                                              a,           \
                              const FT*                                              b,           \
                              const FT*                                              c,           \
@@ -178,115 +182,54 @@ AMDGCN_MATH_UNARY_KERNEL(amdgcn_fracth, _Float16, __builtin_amdgcn_fracth, fract
         direct[i]   = BUILTIN(a[i], b[i], c[i]);                                                 \
         Value<FT, Semantics::Native, kCC> af{a[i]}, bf{b[i]}, cf{c[i]};                          \
         wrapper[i] = fpsan::NAME<Semantics::Native, kCC>(af, bf, cf).to_float();                 \
-        Value<FT, Semantics::Triton, kCC> ap{a[i]}, bp{b[i]}, cp{c[i]};                          \
+        Value<FT, S, kCC> ap{a[i]}, bp{b[i]}, cp{c[i]};                                          \
         pay_direct[i]  = fpsan::fmed3(ap, bp, cp).fpsan_payload();                               \
-        pay_wrapper[i] = fpsan::NAME<Semantics::Triton, kCC>(ap, bp, cp).fpsan_payload();        \
+        pay_wrapper[i] = fpsan::NAME<S, kCC>(ap, bp, cp).fpsan_payload();                        \
     }
 
 AMDGCN_MATH_FMED3_KERNEL(amdgcn_fmed3f, float, __builtin_amdgcn_fmed3f)
 AMDGCN_MATH_FMED3_KERNEL(amdgcn_fmed3h, _Float16, __builtin_amdgcn_fmed3h)
 #undef AMDGCN_MATH_FMED3_KERNEL
 
-template <class FT>
-void run_unary(void (*kernel)(const FT*,
-                              FT*,
-                              FT*,
-                              typename Value<FT, Semantics::Triton, kCC>::bits_type*,
-                              typename Value<FT, Semantics::Triton, kCC>::bits_type*),
-               const std::vector<FT>& inputs)
-{
-    if(!have_device())
-        GTEST_SKIP() << "no HIP device";
-
-    using Bits = typename Value<FT, Semantics::Triton, kCC>::bits_type;
-    FT*   dIn  = to_dev(inputs);
-    FT *  dDirect, *dWrapper;
-    Bits *dPayDirect, *dPayWrapper;
-    HIP_CHECK(hipMalloc(&dDirect, kScalarN * sizeof(FT)));
-    HIP_CHECK(hipMalloc(&dWrapper, kScalarN * sizeof(FT)));
-    HIP_CHECK(hipMalloc(&dPayDirect, kScalarN * sizeof(Bits)));
-    HIP_CHECK(hipMalloc(&dPayWrapper, kScalarN * sizeof(Bits)));
-
-    kernel<<<1, kScalarN>>>(dIn, dDirect, dWrapper, dPayDirect, dPayWrapper);
-    HIP_CHECK(hipDeviceSynchronize());
-
-    std::vector<FT>   direct(kScalarN), wrapper(kScalarN);
-    std::vector<Bits> pay_direct(kScalarN), pay_wrapper(kScalarN);
-    HIP_CHECK(hipMemcpy(direct.data(), dDirect, kScalarN * sizeof(FT), hipMemcpyDeviceToHost));
-    HIP_CHECK(hipMemcpy(wrapper.data(), dWrapper, kScalarN * sizeof(FT), hipMemcpyDeviceToHost));
-    HIP_CHECK(
-        hipMemcpy(pay_direct.data(), dPayDirect, kScalarN * sizeof(Bits), hipMemcpyDeviceToHost));
-    HIP_CHECK(
-        hipMemcpy(pay_wrapper.data(), dPayWrapper, kScalarN * sizeof(Bits), hipMemcpyDeviceToHost));
-
-    for(int i = 0; i < kScalarN; ++i)
-    {
-        EXPECT_EQ(bits_of(wrapper[i]), bits_of(direct[i])) << "Float lane " << i;
-        EXPECT_EQ(pay_wrapper[i], pay_direct[i]) << "FPSan lane " << i;
-    }
-
-    (void)hipFree(dIn);
-    (void)hipFree(dDirect);
-    (void)hipFree(dWrapper);
-    (void)hipFree(dPayDirect);
-    (void)hipFree(dPayWrapper);
-}
-
-template <class FT>
-void run_fmed3(void (*kernel)(const FT*,
-                              const FT*,
-                              const FT*,
-                              FT*,
-                              FT*,
-                              typename Value<FT, Semantics::Triton, kCC>::bits_type*,
-                              typename Value<FT, Semantics::Triton, kCC>::bits_type*))
-{
-    if(!have_device())
-        GTEST_SKIP() << "no HIP device";
-
-    using Bits = typename Value<FT, Semantics::Triton, kCC>::bits_type;
-    auto  a    = make_signed_inputs<FT>();
-    auto  b    = make_signed_inputs<FT>();
-    auto  c    = make_signed_inputs<FT>();
-    FT *  dA = to_dev(a), *dB = to_dev(b), *dC = to_dev(c);
-    FT *  dDirect, *dWrapper;
-    Bits *dPayDirect, *dPayWrapper;
-    HIP_CHECK(hipMalloc(&dDirect, kScalarN * sizeof(FT)));
-    HIP_CHECK(hipMalloc(&dWrapper, kScalarN * sizeof(FT)));
-    HIP_CHECK(hipMalloc(&dPayDirect, kScalarN * sizeof(Bits)));
-    HIP_CHECK(hipMalloc(&dPayWrapper, kScalarN * sizeof(Bits)));
-
-    kernel<<<1, kScalarN>>>(dA, dB, dC, dDirect, dWrapper, dPayDirect, dPayWrapper);
-    HIP_CHECK(hipDeviceSynchronize());
-
-    std::vector<FT>   direct(kScalarN), wrapper(kScalarN);
-    std::vector<Bits> pay_direct(kScalarN), pay_wrapper(kScalarN);
-    HIP_CHECK(hipMemcpy(direct.data(), dDirect, kScalarN * sizeof(FT), hipMemcpyDeviceToHost));
-    HIP_CHECK(hipMemcpy(wrapper.data(), dWrapper, kScalarN * sizeof(FT), hipMemcpyDeviceToHost));
-    HIP_CHECK(
-        hipMemcpy(pay_direct.data(), dPayDirect, kScalarN * sizeof(Bits), hipMemcpyDeviceToHost));
-    HIP_CHECK(
-        hipMemcpy(pay_wrapper.data(), dPayWrapper, kScalarN * sizeof(Bits), hipMemcpyDeviceToHost));
-
-    for(int i = 0; i < kScalarN; ++i)
-    {
-        EXPECT_EQ(bits_of(wrapper[i]), bits_of(direct[i])) << "Float lane " << i;
-        EXPECT_EQ(pay_wrapper[i], pay_direct[i]) << "FPSan lane " << i;
-    }
-
-    (void)hipFree(dA);
-    (void)hipFree(dB);
-    (void)hipFree(dC);
-    (void)hipFree(dDirect);
-    (void)hipFree(dWrapper);
-    (void)hipFree(dPayDirect);
-    (void)hipFree(dPayWrapper);
-}
-
-#define AMDGCN_MATH_UNARY_TEST(NAME, FT, INPUTS) \
-    TEST(AmdgcnMath, NAME)                       \
-    {                                            \
-        run_unary<FT>(k_##NAME, INPUTS<FT>());   \
+#define AMDGCN_MATH_UNARY_TEST(NAME, FT, INPUTS)                                                   \
+    TEST(AmdgcnMath, NAME)                                                                         \
+    {                                                                                              \
+        if(!have_device())                                                                         \
+            GTEST_SKIP() << "no HIP device";                                                       \
+        using Bits   = typename Value<FT, Semantics::Triton, kCC>::bits_type;                      \
+        auto  inputs = INPUTS<FT>();                                                               \
+        FT*   dIn    = to_dev(inputs);                                                             \
+        FT *  dDirect, *dWrapper;                                                                  \
+        Bits *dPayDirect, *dPayWrapper;                                                            \
+        HIP_CHECK(hipMalloc(&dDirect, kScalarN * sizeof(FT)));                                     \
+        HIP_CHECK(hipMalloc(&dWrapper, kScalarN * sizeof(FT)));                                    \
+        HIP_CHECK(hipMalloc(&dPayDirect, kScalarN * sizeof(Bits)));                                \
+        HIP_CHECK(hipMalloc(&dPayWrapper, kScalarN * sizeof(Bits)));                               \
+        fpsan_test::for_each_fpsan_semantics([&](auto sem) {                                       \
+            k_##NAME<decltype(sem)::value>                                                         \
+                <<<1, kScalarN>>>(dIn, dDirect, dWrapper, dPayDirect, dPayWrapper);                \
+            HIP_CHECK(hipDeviceSynchronize());                                                     \
+            std::vector<FT>   direct(kScalarN), wrapper(kScalarN);                                 \
+            std::vector<Bits> pay_direct(kScalarN), pay_wrapper(kScalarN);                         \
+            HIP_CHECK(                                                                             \
+                hipMemcpy(direct.data(), dDirect, kScalarN * sizeof(FT), hipMemcpyDeviceToHost));  \
+            HIP_CHECK(hipMemcpy(                                                                   \
+                wrapper.data(), dWrapper, kScalarN * sizeof(FT), hipMemcpyDeviceToHost));          \
+            HIP_CHECK(hipMemcpy(                                                                   \
+                pay_direct.data(), dPayDirect, kScalarN * sizeof(Bits), hipMemcpyDeviceToHost));   \
+            HIP_CHECK(hipMemcpy(                                                                   \
+                pay_wrapper.data(), dPayWrapper, kScalarN * sizeof(Bits), hipMemcpyDeviceToHost)); \
+            for(int i = 0; i < kScalarN; ++i)                                                      \
+            {                                                                                      \
+                EXPECT_EQ(bits_of(wrapper[i]), bits_of(direct[i])) << "Float lane " << i;          \
+                EXPECT_EQ(pay_wrapper[i], pay_direct[i]) << "FPSan lane " << i;                    \
+            }                                                                                      \
+        });                                                                                        \
+        (void)hipFree(dIn);                                                                        \
+        (void)hipFree(dDirect);                                                                    \
+        (void)hipFree(dWrapper);                                                                   \
+        (void)hipFree(dPayDirect);                                                                 \
+        (void)hipFree(dPayWrapper);                                                                \
     }
 
 AMDGCN_MATH_UNARY_TEST(amdgcn_rcpf, float, make_positive_inputs)
@@ -313,15 +256,54 @@ AMDGCN_MATH_UNARY_TEST(amdgcn_cosh, _Float16, make_signed_inputs)
 AMDGCN_MATH_UNARY_TEST(amdgcn_fracth, _Float16, make_signed_inputs)
 #undef AMDGCN_MATH_UNARY_TEST
 
-TEST(AmdgcnMath, amdgcn_fmed3f)
-{
-    run_fmed3<float>(k_amdgcn_fmed3f);
-}
+#define AMDGCN_MATH_FMED3_TEST(NAME, FT)                                                           \
+    TEST(AmdgcnMath, NAME)                                                                         \
+    {                                                                                              \
+        if(!have_device())                                                                         \
+            GTEST_SKIP() << "no HIP device";                                                       \
+        using Bits = typename Value<FT, Semantics::Triton, kCC>::bits_type;                        \
+        auto  a    = make_signed_inputs<FT>();                                                     \
+        auto  b    = make_signed_inputs<FT>();                                                     \
+        auto  c    = make_signed_inputs<FT>();                                                     \
+        FT *  dA = to_dev(a), *dB = to_dev(b), *dC = to_dev(c);                                    \
+        FT *  dDirect, *dWrapper;                                                                  \
+        Bits *dPayDirect, *dPayWrapper;                                                            \
+        HIP_CHECK(hipMalloc(&dDirect, kScalarN * sizeof(FT)));                                     \
+        HIP_CHECK(hipMalloc(&dWrapper, kScalarN * sizeof(FT)));                                    \
+        HIP_CHECK(hipMalloc(&dPayDirect, kScalarN * sizeof(Bits)));                                \
+        HIP_CHECK(hipMalloc(&dPayWrapper, kScalarN * sizeof(Bits)));                               \
+        fpsan_test::for_each_fpsan_semantics([&](auto sem) {                                       \
+            k_##NAME<decltype(sem)::value>                                                         \
+                <<<1, kScalarN>>>(dA, dB, dC, dDirect, dWrapper, dPayDirect, dPayWrapper);         \
+            HIP_CHECK(hipDeviceSynchronize());                                                     \
+            std::vector<FT>   direct(kScalarN), wrapper(kScalarN);                                 \
+            std::vector<Bits> pay_direct(kScalarN), pay_wrapper(kScalarN);                         \
+            HIP_CHECK(                                                                             \
+                hipMemcpy(direct.data(), dDirect, kScalarN * sizeof(FT), hipMemcpyDeviceToHost));  \
+            HIP_CHECK(hipMemcpy(                                                                   \
+                wrapper.data(), dWrapper, kScalarN * sizeof(FT), hipMemcpyDeviceToHost));          \
+            HIP_CHECK(hipMemcpy(                                                                   \
+                pay_direct.data(), dPayDirect, kScalarN * sizeof(Bits), hipMemcpyDeviceToHost));   \
+            HIP_CHECK(hipMemcpy(                                                                   \
+                pay_wrapper.data(), dPayWrapper, kScalarN * sizeof(Bits), hipMemcpyDeviceToHost)); \
+            for(int i = 0; i < kScalarN; ++i)                                                      \
+            {                                                                                      \
+                EXPECT_EQ(bits_of(wrapper[i]), bits_of(direct[i])) << "Float lane " << i;          \
+                EXPECT_EQ(pay_wrapper[i], pay_direct[i]) << "FPSan lane " << i;                    \
+            }                                                                                      \
+        });                                                                                        \
+        (void)hipFree(dA);                                                                         \
+        (void)hipFree(dB);                                                                         \
+        (void)hipFree(dC);                                                                         \
+        (void)hipFree(dDirect);                                                                    \
+        (void)hipFree(dWrapper);                                                                   \
+        (void)hipFree(dPayDirect);                                                                 \
+        (void)hipFree(dPayWrapper);                                                                \
+    }
 
-TEST(AmdgcnMath, amdgcn_fmed3h)
-{
-    run_fmed3<_Float16>(k_amdgcn_fmed3h);
-}
+AMDGCN_MATH_FMED3_TEST(amdgcn_fmed3f, float)
+AMDGCN_MATH_FMED3_TEST(amdgcn_fmed3h, _Float16)
+#undef AMDGCN_MATH_FMED3_TEST
 
 // tanhf/tanhh need the tanh-insts feature and log_clampf is backend-deferred
 // on the audited targets, so this shared file intentionally leaves them out.
@@ -343,6 +325,7 @@ using v2i16 = short __attribute__((ext_vector_type(2)));
 // ---- fdot2: v2h x v2h -> f32 -----------------------------------------------
 #if FPSAN_TEST_ENABLE_FDOT2 \
     && (!defined(__HIP_DEVICE_COMPILE__) || __has_builtin(__builtin_amdgcn_fdot2))
+template <Semantics S>
 __global__ void k_fdot2_pair(const v2h*     a,
                              const v2h*     b,
                              const float*   c,
@@ -358,13 +341,12 @@ __global__ void k_fdot2_pair(const v2h*     a,
     Value<v2h, Semantics::Native, kCC>   va{ai}, vb{bi};
     Value<float, Semantics::Native, kCC> vc{ci};
     wrapper[i] = static_cast<float>(fpsan::amdgcn_fdot2<false, Semantics::Native, kCC>(va, vb, vc));
-    Value<v2h, Semantics::Triton, kCC>   vap{ai}, vbp{bi};
-    Value<float, Semantics::Triton, kCC> vcp{ci};
+    Value<v2h, S, kCC>   vap{ai}, vbp{bi};
+    Value<float, S, kCC> vcp{ci};
     auto expanded = vcp + fpsan::cast<float>(vap.get(0)) * fpsan::cast<float>(vbp.get(0))
                     + fpsan::cast<float>(vap.get(1)) * fpsan::cast<float>(vbp.get(1));
-    pay_direct[i] = expanded.fpsan_payload();
-    pay_wrapper[i]
-        = fpsan::amdgcn_fdot2<false, Semantics::Triton, kCC>(vap, vbp, vcp).fpsan_payload();
+    pay_direct[i]  = expanded.fpsan_payload();
+    pay_wrapper[i] = fpsan::amdgcn_fdot2<false, S, kCC>(vap, vbp, vcp).fpsan_payload();
 }
 #endif
 
@@ -374,6 +356,7 @@ __global__ void k_fdot2_pair(const v2h*     a,
         || (__has_builtin(__builtin_amdgcn_fdot2_f16_f16)      \
             && __has_builtin(__builtin_amdgcn_fdot2_bf16_bf16) \
             && __has_builtin(__builtin_amdgcn_fdot2_f32_bf16)))
+template <Semantics S>
 __global__ void k_fdot2_f16_f16_pair(const v2h*      a,
                                      const v2h*      b,
                                      const _Float16* c,
@@ -390,15 +373,16 @@ __global__ void k_fdot2_f16_f16_pair(const v2h*      a,
     Value<_Float16, Semantics::Native, kCC> vc{ci};
     wrapper[i]
         = static_cast<_Float16>(fpsan::amdgcn_fdot2_f16_f16<Semantics::Native, kCC>(va, vb, vc));
-    Value<v2h, Semantics::Triton, kCC>      vap{ai}, vbp{bi};
-    Value<_Float16, Semantics::Triton, kCC> vcp{ci};
-    auto expanded  = vcp + vap.get(0) * vbp.get(0) + vap.get(1) * vbp.get(1);
-    pay_direct[i]  = static_cast<std::uint16_t>(expanded.fpsan_payload());
-    pay_wrapper[i] = static_cast<std::uint16_t>(
-        fpsan::amdgcn_fdot2_f16_f16<Semantics::Triton, kCC>(vap, vbp, vcp).fpsan_payload());
+    Value<v2h, S, kCC>      vap{ai}, vbp{bi};
+    Value<_Float16, S, kCC> vcp{ci};
+    auto                    expanded = vcp + vap.get(0) * vbp.get(0) + vap.get(1) * vbp.get(1);
+    pay_direct[i]                    = static_cast<std::uint16_t>(expanded.fpsan_payload());
+    pay_wrapper[i]                   = static_cast<std::uint16_t>(
+        fpsan::amdgcn_fdot2_f16_f16<S, kCC>(vap, vbp, vcp).fpsan_payload());
 }
 
 // ---- fdot2_bf16_bf16: v2bf x v2bf -> bf16 ----------------------------------
+template <Semantics S>
 __global__ void k_fdot2_bf16_bf16_pair(const v2bf*    a,
                                        const v2bf*    b,
                                        const __bf16*  c,
@@ -419,15 +403,16 @@ __global__ void k_fdot2_bf16_bf16_pair(const v2bf*    a,
     Value<__bf16, Semantics::Native, kCC> vc{ci};
     wrapper[i]
         = static_cast<__bf16>(fpsan::amdgcn_fdot2_bf16_bf16<Semantics::Native, kCC>(va, vb, vc));
-    Value<v2bf, Semantics::Triton, kCC>   vap{ai}, vbp{bi};
-    Value<__bf16, Semantics::Triton, kCC> vcp{ci};
-    auto expanded  = vcp + vap.get(0) * vbp.get(0) + vap.get(1) * vbp.get(1);
-    pay_direct[i]  = static_cast<std::uint16_t>(expanded.fpsan_payload());
-    pay_wrapper[i] = static_cast<std::uint16_t>(
-        fpsan::amdgcn_fdot2_bf16_bf16<Semantics::Triton, kCC>(vap, vbp, vcp).fpsan_payload());
+    Value<v2bf, S, kCC>   vap{ai}, vbp{bi};
+    Value<__bf16, S, kCC> vcp{ci};
+    auto                  expanded = vcp + vap.get(0) * vbp.get(0) + vap.get(1) * vbp.get(1);
+    pay_direct[i]                  = static_cast<std::uint16_t>(expanded.fpsan_payload());
+    pay_wrapper[i]                 = static_cast<std::uint16_t>(
+        fpsan::amdgcn_fdot2_bf16_bf16<S, kCC>(vap, vbp, vcp).fpsan_payload());
 }
 
 // ---- fdot2_f32_bf16: v2bf x v2bf -> f32 ------------------------------------
+template <Semantics S>
 __global__ void k_fdot2_f32_bf16_pair(const v2bf*    a,
                                       const v2bf*    b,
                                       const float*   c,
@@ -446,13 +431,12 @@ __global__ void k_fdot2_f32_bf16_pair(const v2bf*    a,
     Value<float, Semantics::Native, kCC> vc{ci};
     wrapper[i] = static_cast<float>(
         fpsan::amdgcn_fdot2_f32_bf16<false, Semantics::Native, kCC>(va, vb, vc));
-    Value<v2bf, Semantics::Triton, kCC>  vap{ai}, vbp{bi};
-    Value<float, Semantics::Triton, kCC> vcp{ci};
+    Value<v2bf, S, kCC>  vap{ai}, vbp{bi};
+    Value<float, S, kCC> vcp{ci};
     auto expanded = vcp + fpsan::cast<float>(vap.get(0)) * fpsan::cast<float>(vbp.get(0))
                     + fpsan::cast<float>(vap.get(1)) * fpsan::cast<float>(vbp.get(1));
     pay_direct[i]  = expanded.fpsan_payload();
-    pay_wrapper[i] = fpsan::amdgcn_fdot2_f32_bf16<false, Semantics::Triton, kCC>(vap, vbp, vcp)
-                         .fpsan_payload();
+    pay_wrapper[i] = fpsan::amdgcn_fdot2_f32_bf16<false, S, kCC>(vap, vbp, vcp).fpsan_payload();
 }
 #endif
 
@@ -523,21 +507,23 @@ TEST(AmdgcnMath, fdot2_FloatAndFpsan)
     HIP_CHECK(hipMalloc(&dWrap, kFDot2N * sizeof(float)));
     HIP_CHECK(hipMalloc(&dPdir, kFDot2N * sizeof(std::uint32_t)));
     HIP_CHECK(hipMalloc(&dPwrap, kFDot2N * sizeof(std::uint32_t)));
-    k_fdot2_pair<<<1, kFDot2N>>>(dA, dB, dC, dDir, dWrap, dPdir, dPwrap);
-    HIP_CHECK(hipDeviceSynchronize());
-    std::vector<float>         dir(kFDot2N), wrap(kFDot2N);
-    std::vector<std::uint32_t> pdir(kFDot2N), pwrap(kFDot2N);
-    HIP_CHECK(hipMemcpy(dir.data(), dDir, kFDot2N * sizeof(float), hipMemcpyDeviceToHost));
-    HIP_CHECK(hipMemcpy(wrap.data(), dWrap, kFDot2N * sizeof(float), hipMemcpyDeviceToHost));
-    HIP_CHECK(
-        hipMemcpy(pdir.data(), dPdir, kFDot2N * sizeof(std::uint32_t), hipMemcpyDeviceToHost));
-    HIP_CHECK(
-        hipMemcpy(pwrap.data(), dPwrap, kFDot2N * sizeof(std::uint32_t), hipMemcpyDeviceToHost));
-    for(int i = 0; i < kFDot2N; ++i)
-    {
-        EXPECT_EQ(bits_u32(wrap[i]), bits_u32(dir[i])) << "Float lane " << i;
-        EXPECT_EQ(pwrap[i], pdir[i]) << "FPSan lane " << i;
-    }
+    fpsan_test::for_each_fpsan_semantics([&](auto sem) {
+        k_fdot2_pair<decltype(sem)::value><<<1, kFDot2N>>>(dA, dB, dC, dDir, dWrap, dPdir, dPwrap);
+        HIP_CHECK(hipDeviceSynchronize());
+        std::vector<float>         dir(kFDot2N), wrap(kFDot2N);
+        std::vector<std::uint32_t> pdir(kFDot2N), pwrap(kFDot2N);
+        HIP_CHECK(hipMemcpy(dir.data(), dDir, kFDot2N * sizeof(float), hipMemcpyDeviceToHost));
+        HIP_CHECK(hipMemcpy(wrap.data(), dWrap, kFDot2N * sizeof(float), hipMemcpyDeviceToHost));
+        HIP_CHECK(
+            hipMemcpy(pdir.data(), dPdir, kFDot2N * sizeof(std::uint32_t), hipMemcpyDeviceToHost));
+        HIP_CHECK(hipMemcpy(
+            pwrap.data(), dPwrap, kFDot2N * sizeof(std::uint32_t), hipMemcpyDeviceToHost));
+        for(int i = 0; i < kFDot2N; ++i)
+        {
+            EXPECT_EQ(bits_u32(wrap[i]), bits_u32(dir[i])) << "Float lane " << i;
+            EXPECT_EQ(pwrap[i], pdir[i]) << "FPSan lane " << i;
+        }
+    });
     (void)hipFree(dA);
     (void)hipFree(dB);
     (void)hipFree(dC);
@@ -569,24 +555,27 @@ TEST(AmdgcnMath, fdot2_f16_f16_FloatAndFpsan)
     HIP_CHECK(hipMalloc(&dWrap, kFDot2N * sizeof(_Float16)));
     HIP_CHECK(hipMalloc(&dPdir, kFDot2N * sizeof(std::uint16_t)));
     HIP_CHECK(hipMalloc(&dPwrap, kFDot2N * sizeof(std::uint16_t)));
-    k_fdot2_f16_f16_pair<<<1, kFDot2N>>>(dA, dB, dC, dDir, dWrap, dPdir, dPwrap);
-    HIP_CHECK(hipDeviceSynchronize());
-    std::vector<_Float16>      dir(kFDot2N), wrap(kFDot2N);
-    std::vector<std::uint16_t> pdir(kFDot2N), pwrap(kFDot2N);
-    HIP_CHECK(hipMemcpy(dir.data(), dDir, kFDot2N * sizeof(_Float16), hipMemcpyDeviceToHost));
-    HIP_CHECK(hipMemcpy(wrap.data(), dWrap, kFDot2N * sizeof(_Float16), hipMemcpyDeviceToHost));
-    HIP_CHECK(
-        hipMemcpy(pdir.data(), dPdir, kFDot2N * sizeof(std::uint16_t), hipMemcpyDeviceToHost));
-    HIP_CHECK(
-        hipMemcpy(pwrap.data(), dPwrap, kFDot2N * sizeof(std::uint16_t), hipMemcpyDeviceToHost));
-    for(int i = 0; i < kFDot2N; ++i)
-    {
-        std::uint16_t bw = 0, bd = 0;
-        std::memcpy(&bw, &wrap[i], sizeof bw);
-        std::memcpy(&bd, &dir[i], sizeof bd);
-        EXPECT_EQ(bw, bd) << "Float lane " << i;
-        EXPECT_EQ(pwrap[i], pdir[i]) << "FPSan lane " << i;
-    }
+    fpsan_test::for_each_fpsan_semantics([&](auto sem) {
+        k_fdot2_f16_f16_pair<decltype(sem)::value>
+            <<<1, kFDot2N>>>(dA, dB, dC, dDir, dWrap, dPdir, dPwrap);
+        HIP_CHECK(hipDeviceSynchronize());
+        std::vector<_Float16>      dir(kFDot2N), wrap(kFDot2N);
+        std::vector<std::uint16_t> pdir(kFDot2N), pwrap(kFDot2N);
+        HIP_CHECK(hipMemcpy(dir.data(), dDir, kFDot2N * sizeof(_Float16), hipMemcpyDeviceToHost));
+        HIP_CHECK(hipMemcpy(wrap.data(), dWrap, kFDot2N * sizeof(_Float16), hipMemcpyDeviceToHost));
+        HIP_CHECK(
+            hipMemcpy(pdir.data(), dPdir, kFDot2N * sizeof(std::uint16_t), hipMemcpyDeviceToHost));
+        HIP_CHECK(hipMemcpy(
+            pwrap.data(), dPwrap, kFDot2N * sizeof(std::uint16_t), hipMemcpyDeviceToHost));
+        for(int i = 0; i < kFDot2N; ++i)
+        {
+            std::uint16_t bw = 0, bd = 0;
+            std::memcpy(&bw, &wrap[i], sizeof bw);
+            std::memcpy(&bd, &dir[i], sizeof bd);
+            EXPECT_EQ(bw, bd) << "Float lane " << i;
+            EXPECT_EQ(pwrap[i], pdir[i]) << "FPSan lane " << i;
+        }
+    });
     (void)hipFree(dA);
     (void)hipFree(dB);
     (void)hipFree(dC);
@@ -615,24 +604,27 @@ TEST(AmdgcnMath, fdot2_bf16_bf16_FloatAndFpsan)
     HIP_CHECK(hipMalloc(&dWrap, kFDot2N * sizeof(__bf16)));
     HIP_CHECK(hipMalloc(&dPdir, kFDot2N * sizeof(std::uint16_t)));
     HIP_CHECK(hipMalloc(&dPwrap, kFDot2N * sizeof(std::uint16_t)));
-    k_fdot2_bf16_bf16_pair<<<1, kFDot2N>>>(dA, dB, dC, dDir, dWrap, dPdir, dPwrap);
-    HIP_CHECK(hipDeviceSynchronize());
-    std::vector<__bf16>        dir(kFDot2N), wrap(kFDot2N);
-    std::vector<std::uint16_t> pdir(kFDot2N), pwrap(kFDot2N);
-    HIP_CHECK(hipMemcpy(dir.data(), dDir, kFDot2N * sizeof(__bf16), hipMemcpyDeviceToHost));
-    HIP_CHECK(hipMemcpy(wrap.data(), dWrap, kFDot2N * sizeof(__bf16), hipMemcpyDeviceToHost));
-    HIP_CHECK(
-        hipMemcpy(pdir.data(), dPdir, kFDot2N * sizeof(std::uint16_t), hipMemcpyDeviceToHost));
-    HIP_CHECK(
-        hipMemcpy(pwrap.data(), dPwrap, kFDot2N * sizeof(std::uint16_t), hipMemcpyDeviceToHost));
-    for(int i = 0; i < kFDot2N; ++i)
-    {
-        std::uint16_t bw = 0, bd = 0;
-        std::memcpy(&bw, &wrap[i], sizeof bw);
-        std::memcpy(&bd, &dir[i], sizeof bd);
-        EXPECT_EQ(bw, bd) << "Float lane " << i;
-        EXPECT_EQ(pwrap[i], pdir[i]) << "FPSan lane " << i;
-    }
+    fpsan_test::for_each_fpsan_semantics([&](auto sem) {
+        k_fdot2_bf16_bf16_pair<decltype(sem)::value>
+            <<<1, kFDot2N>>>(dA, dB, dC, dDir, dWrap, dPdir, dPwrap);
+        HIP_CHECK(hipDeviceSynchronize());
+        std::vector<__bf16>        dir(kFDot2N), wrap(kFDot2N);
+        std::vector<std::uint16_t> pdir(kFDot2N), pwrap(kFDot2N);
+        HIP_CHECK(hipMemcpy(dir.data(), dDir, kFDot2N * sizeof(__bf16), hipMemcpyDeviceToHost));
+        HIP_CHECK(hipMemcpy(wrap.data(), dWrap, kFDot2N * sizeof(__bf16), hipMemcpyDeviceToHost));
+        HIP_CHECK(
+            hipMemcpy(pdir.data(), dPdir, kFDot2N * sizeof(std::uint16_t), hipMemcpyDeviceToHost));
+        HIP_CHECK(hipMemcpy(
+            pwrap.data(), dPwrap, kFDot2N * sizeof(std::uint16_t), hipMemcpyDeviceToHost));
+        for(int i = 0; i < kFDot2N; ++i)
+        {
+            std::uint16_t bw = 0, bd = 0;
+            std::memcpy(&bw, &wrap[i], sizeof bw);
+            std::memcpy(&bd, &dir[i], sizeof bd);
+            EXPECT_EQ(bw, bd) << "Float lane " << i;
+            EXPECT_EQ(pwrap[i], pdir[i]) << "FPSan lane " << i;
+        }
+    });
     (void)hipFree(dA);
     (void)hipFree(dB);
     (void)hipFree(dC);
@@ -658,21 +650,24 @@ TEST(AmdgcnMath, fdot2_f32_bf16_FloatAndFpsan)
     HIP_CHECK(hipMalloc(&dWrap, kFDot2N * sizeof(float)));
     HIP_CHECK(hipMalloc(&dPdir, kFDot2N * sizeof(std::uint32_t)));
     HIP_CHECK(hipMalloc(&dPwrap, kFDot2N * sizeof(std::uint32_t)));
-    k_fdot2_f32_bf16_pair<<<1, kFDot2N>>>(dA, dB, dC, dDir, dWrap, dPdir, dPwrap);
-    HIP_CHECK(hipDeviceSynchronize());
-    std::vector<float>         dir(kFDot2N), wrap(kFDot2N);
-    std::vector<std::uint32_t> pdir(kFDot2N), pwrap(kFDot2N);
-    HIP_CHECK(hipMemcpy(dir.data(), dDir, kFDot2N * sizeof(float), hipMemcpyDeviceToHost));
-    HIP_CHECK(hipMemcpy(wrap.data(), dWrap, kFDot2N * sizeof(float), hipMemcpyDeviceToHost));
-    HIP_CHECK(
-        hipMemcpy(pdir.data(), dPdir, kFDot2N * sizeof(std::uint32_t), hipMemcpyDeviceToHost));
-    HIP_CHECK(
-        hipMemcpy(pwrap.data(), dPwrap, kFDot2N * sizeof(std::uint32_t), hipMemcpyDeviceToHost));
-    for(int i = 0; i < kFDot2N; ++i)
-    {
-        EXPECT_EQ(bits_u32(wrap[i]), bits_u32(dir[i])) << "Float lane " << i;
-        EXPECT_EQ(pwrap[i], pdir[i]) << "FPSan lane " << i;
-    }
+    fpsan_test::for_each_fpsan_semantics([&](auto sem) {
+        k_fdot2_f32_bf16_pair<decltype(sem)::value>
+            <<<1, kFDot2N>>>(dA, dB, dC, dDir, dWrap, dPdir, dPwrap);
+        HIP_CHECK(hipDeviceSynchronize());
+        std::vector<float>         dir(kFDot2N), wrap(kFDot2N);
+        std::vector<std::uint32_t> pdir(kFDot2N), pwrap(kFDot2N);
+        HIP_CHECK(hipMemcpy(dir.data(), dDir, kFDot2N * sizeof(float), hipMemcpyDeviceToHost));
+        HIP_CHECK(hipMemcpy(wrap.data(), dWrap, kFDot2N * sizeof(float), hipMemcpyDeviceToHost));
+        HIP_CHECK(
+            hipMemcpy(pdir.data(), dPdir, kFDot2N * sizeof(std::uint32_t), hipMemcpyDeviceToHost));
+        HIP_CHECK(hipMemcpy(
+            pwrap.data(), dPwrap, kFDot2N * sizeof(std::uint32_t), hipMemcpyDeviceToHost));
+        for(int i = 0; i < kFDot2N; ++i)
+        {
+            EXPECT_EQ(bits_u32(wrap[i]), bits_u32(dir[i])) << "Float lane " << i;
+            EXPECT_EQ(pwrap[i], pdir[i]) << "FPSan lane " << i;
+        }
+    });
     (void)hipFree(dA);
     (void)hipFree(dB);
     (void)hipFree(dC);
@@ -696,6 +691,7 @@ using v4e4 = fpsan::v4e4m3_native;
 using v4e5 = fpsan::v4e5m2_native;
 
 #define DOT4_PAIR_KERNEL(NAME, AV, BV, BUILTIN)                                                    \
+    template <Semantics S>                                                                         \
     __global__ void k_##NAME##_pair(const unsigned* a,                                             \
                                     const unsigned* b,                                             \
                                     const float*    c,                                             \
@@ -714,14 +710,14 @@ using v4e5 = fpsan::v4e5m2_native;
         Value<BV, Semantics::Native, kCC>    bvF{bv};                                              \
         Value<float, Semantics::Native, kCC> cF{ci};                                               \
         wrapper[i] = static_cast<float>(fpsan::NAME<Semantics::Native, kCC>(avF, bvF, cF));        \
-        Value<AV, Semantics::Triton, kCC>    avP{av};                                              \
-        Value<BV, Semantics::Triton, kCC>    bvP{bv};                                              \
-        Value<float, Semantics::Triton, kCC> cP{ci};                                               \
-        auto                                 expanded = cP;                                        \
+        Value<AV, S, kCC>    avP{av};                                                              \
+        Value<BV, S, kCC>    bvP{bv};                                                              \
+        Value<float, S, kCC> cP{ci};                                                               \
+        auto                 expanded = cP;                                                        \
         for(int k = 0; k < 4; ++k)                                                                 \
             expanded = expanded + fpsan::cast<float>(avP.get(k)) * fpsan::cast<float>(bvP.get(k)); \
         pay_direct[i]  = expanded.fpsan_payload();                                                 \
-        pay_wrapper[i] = fpsan::NAME<Semantics::Triton, kCC>(avP, bvP, cP).fpsan_payload();        \
+        pay_wrapper[i] = fpsan::NAME<S, kCC>(avP, bvP, cP).fpsan_payload();                        \
     }
 
 DOT4_PAIR_KERNEL(amdgcn_dot4_f32_fp8_fp8, v4e4, v4e4, __builtin_amdgcn_dot4_f32_fp8_fp8)
@@ -772,21 +768,25 @@ namespace
         HIP_CHECK(hipMalloc(&dWrap, kDot4N * sizeof(float)));                                      \
         HIP_CHECK(hipMalloc(&dPdir, kDot4N * sizeof(std::uint32_t)));                              \
         HIP_CHECK(hipMalloc(&dPwrap, kDot4N * sizeof(std::uint32_t)));                             \
-        k_##NAME##_pair<<<1, kDot4N>>>(dA, dB, dC, dDir, dWrap, dPdir, dPwrap);                    \
-        HIP_CHECK(hipDeviceSynchronize());                                                         \
-        std::vector<float>         dir(kDot4N), wrap(kDot4N);                                      \
-        std::vector<std::uint32_t> pdir(kDot4N), pwrap(kDot4N);                                    \
-        HIP_CHECK(hipMemcpy(dir.data(), dDir, kDot4N * sizeof(float), hipMemcpyDeviceToHost));     \
-        HIP_CHECK(hipMemcpy(wrap.data(), dWrap, kDot4N * sizeof(float), hipMemcpyDeviceToHost));   \
-        HIP_CHECK(                                                                                 \
-            hipMemcpy(pdir.data(), dPdir, kDot4N * sizeof(std::uint32_t), hipMemcpyDeviceToHost)); \
-        HIP_CHECK(hipMemcpy(                                                                       \
-            pwrap.data(), dPwrap, kDot4N * sizeof(std::uint32_t), hipMemcpyDeviceToHost));         \
-        for(int i = 0; i < kDot4N; ++i)                                                            \
-        {                                                                                          \
-            EXPECT_EQ(bits_u32(wrap[i]), bits_u32(dir[i])) << "Float lane " << i;                  \
-            EXPECT_EQ(pwrap[i], pdir[i]) << "FPSan lane " << i;                                    \
-        }                                                                                          \
+        fpsan_test::for_each_fpsan_semantics([&](auto sem) {                                       \
+            k_##NAME##_pair<decltype(sem)::value>                                                  \
+                <<<1, kDot4N>>>(dA, dB, dC, dDir, dWrap, dPdir, dPwrap);                           \
+            HIP_CHECK(hipDeviceSynchronize());                                                     \
+            std::vector<float>         dir(kDot4N), wrap(kDot4N);                                  \
+            std::vector<std::uint32_t> pdir(kDot4N), pwrap(kDot4N);                                \
+            HIP_CHECK(hipMemcpy(dir.data(), dDir, kDot4N * sizeof(float), hipMemcpyDeviceToHost)); \
+            HIP_CHECK(                                                                             \
+                hipMemcpy(wrap.data(), dWrap, kDot4N * sizeof(float), hipMemcpyDeviceToHost));     \
+            HIP_CHECK(hipMemcpy(                                                                   \
+                pdir.data(), dPdir, kDot4N * sizeof(std::uint32_t), hipMemcpyDeviceToHost));       \
+            HIP_CHECK(hipMemcpy(                                                                   \
+                pwrap.data(), dPwrap, kDot4N * sizeof(std::uint32_t), hipMemcpyDeviceToHost));     \
+            for(int i = 0; i < kDot4N; ++i)                                                        \
+            {                                                                                      \
+                EXPECT_EQ(bits_u32(wrap[i]), bits_u32(dir[i])) << "Float lane " << i;              \
+                EXPECT_EQ(pwrap[i], pdir[i]) << "FPSan lane " << i;                                \
+            }                                                                                      \
+        });                                                                                        \
         (void)hipFree(dA);                                                                         \
         (void)hipFree(dB);                                                                         \
         (void)hipFree(dC);                                                                         \

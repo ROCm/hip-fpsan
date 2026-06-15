@@ -21,6 +21,8 @@
 #include "fpsan/amdgcn_ds.hpp"
 #include "fpsan/fpsan.hpp"
 
+#include "fpsan_semantics.hpp"
+
 #include "hip_test_utils.hpp"
 
 #include <hip/hip_runtime.h>
@@ -215,12 +217,14 @@ TEST(DsReadTr16, MatchesBuiltinAndFpsanMovesSameBits)
     const int N   = WAVE * 4;
     auto      raw = run<std::uint16_t>(k_tr16_raw, N);
     auto      flt = run<std::uint16_t>(k_tr16_wrap<Semantics::Native>, N);
-    auto      fps = run<std::uint16_t>(k_tr16_wrap<Semantics::Triton>, N);
     for(int i = 0; i < N; ++i)
-    {
         EXPECT_EQ(flt[i], raw[i]) << "Float wrapper != builtin at " << i;
-        EXPECT_EQ(fps[i], raw[i]) << "FPSan wrapper != builtin at " << i;
-    }
+    fpsan_test::for_each_fpsan_semantics([&](auto sem) {
+        constexpr Semantics S   = decltype(sem)::value;
+        auto                fps = run<std::uint16_t>(k_tr16_wrap<S>, N);
+        for(int i = 0; i < N; ++i)
+            EXPECT_EQ(fps[i], raw[i]) << "FPSan wrapper != builtin at " << i;
+    });
 }
 
 TEST(DsReadTr8, MatchesBuiltinAndFpsanMovesSameBits)
@@ -230,12 +234,14 @@ TEST(DsReadTr8, MatchesBuiltinAndFpsanMovesSameBits)
     const int N   = WAVE * 8;
     auto      raw = run<std::uint8_t>(k_tr8_raw, N);
     auto      flt = run<std::uint8_t>(k_tr8_wrap<Semantics::Native>, N);
-    auto      fps = run<std::uint8_t>(k_tr8_wrap<Semantics::Triton>, N);
     for(int i = 0; i < N; ++i)
-    {
         EXPECT_EQ(flt[i], raw[i]) << "Float wrapper != builtin at " << i;
-        EXPECT_EQ(fps[i], raw[i]) << "FPSan wrapper != builtin at " << i;
-    }
+    fpsan_test::for_each_fpsan_semantics([&](auto sem) {
+        constexpr Semantics S   = decltype(sem)::value;
+        auto                fps = run<std::uint8_t>(k_tr8_wrap<S>, N);
+        for(int i = 0; i < N; ++i)
+            EXPECT_EQ(fps[i], raw[i]) << "FPSan wrapper != builtin at " << i;
+    });
 }
 
 TEST(DsReadTr4, MatchesBuiltinAndFpsanMovesSameBits)
@@ -245,12 +251,14 @@ TEST(DsReadTr4, MatchesBuiltinAndFpsanMovesSameBits)
     const int N   = WAVE * 2;
     auto      raw = run<std::uint32_t>(k_tr4_raw, N);
     auto      flt = run<std::uint32_t>(k_tr4_wrap<Semantics::Native>, N);
-    auto      fps = run<std::uint32_t>(k_tr4_wrap<Semantics::Triton>, N);
     for(int i = 0; i < N; ++i)
-    {
         EXPECT_EQ(flt[i], raw[i]) << "Float wrapper != builtin at " << i;
-        EXPECT_EQ(fps[i], raw[i]) << "FPSan wrapper != builtin at " << i;
-    }
+    fpsan_test::for_each_fpsan_semantics([&](auto sem) {
+        constexpr Semantics S   = decltype(sem)::value;
+        auto                fps = run<std::uint32_t>(k_tr4_wrap<S>, N);
+        for(int i = 0; i < N; ++i)
+            EXPECT_EQ(fps[i], raw[i]) << "FPSan wrapper != builtin at " << i;
+    });
 }
 
 TEST(DsReadTr6, MatchesBuiltinAndFpsanMovesSameBits)
@@ -260,10 +268,12 @@ TEST(DsReadTr6, MatchesBuiltinAndFpsanMovesSameBits)
     const int N   = WAVE * 3;
     auto      raw = run<std::uint32_t>(k_tr6_raw, N);
     auto      flt = run<std::uint32_t>(k_tr6_wrap<Semantics::Native>, N);
-    auto      fps = run<std::uint32_t>(k_tr6_wrap<Semantics::Triton>, N);
     for(int i = 0; i < N; ++i)
-    {
         EXPECT_EQ(flt[i], raw[i]) << "Float wrapper != builtin at " << i;
-        EXPECT_EQ(fps[i], raw[i]) << "FPSan wrapper != builtin at " << i;
-    }
+    fpsan_test::for_each_fpsan_semantics([&](auto sem) {
+        constexpr Semantics S   = decltype(sem)::value;
+        auto                fps = run<std::uint32_t>(k_tr6_wrap<S>, N);
+        for(int i = 0; i < N; ++i)
+            EXPECT_EQ(fps[i], raw[i]) << "FPSan wrapper != builtin at " << i;
+    });
 }

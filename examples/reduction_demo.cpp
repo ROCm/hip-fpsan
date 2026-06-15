@@ -4,7 +4,7 @@
 // examples/reduction_demo.cpp
 //
 // Demo: sum N=256 values three different ways on the GPU, showing that
-// Float-mode results disagree (because f32 add is not associative) while FPSan
+// native-mode results disagree (because f32 add is not associative) while FPSan
 // results all agree bit-for-bit (because the FPSan payload ring is integer add
 // mod 2^32 -- associative + commutative -- so the reduction tree shape does not
 // matter).
@@ -48,7 +48,7 @@
 // no-op for these values -- the cast machinery is exercised, but the input
 // precision isn't a moving part.
 //
-// Returns nonzero from main() if the predictions don't hold (Float results
+// Returns nonzero from main() if the predictions don't hold (native results
 // all agree, or FPSan results disagree), so the example is also a
 // load-bearing ctest that catches regressions in the demonstrated invariants.
 
@@ -328,7 +328,7 @@ int main()
     HIP_CHECK(hipMalloc(&d_in, N * sizeof(float)));
     HIP_CHECK(hipMemcpy(d_in, input.data(), N * sizeof(float), hipMemcpyHostToDevice));
 
-    // --- Float mode.
+    // --- native mode.
     const float cpu_f = cpu_naive<Semantics::Native>(input.data());
 
     float* d_wfred_f;
@@ -366,7 +366,7 @@ int main()
 
     // --- Report.
     std::printf("Device %s (warpSize=%d).\n", props.gcnArchName, wave);
-    std::printf("Float-mode reductions (sum of 256 bf16-cast values, "
+    std::printf("native-mode reductions (sum of 256 bf16-cast values, "
                 "accumulated in f32):\n");
     show_float("CPU naive  (sequential)", cpu_f);
     show_float("wfred      (wave butterfly)", wfred_f);
@@ -379,7 +379,7 @@ int main()
     // --- Invariants.
     bool float_disagree = !(cpu_f == wfred_f && wfred_f == wmma_f);
     bool fpsan_agree    = (cpu_p == wfred_p && wfred_p == wmma_p);
-    std::printf("\nFloat results %s.\n",
+    std::printf("\nnative results %s.\n",
                 float_disagree ? "DISAGREE (expected: non-associative f32 add)"
                                : "all AGREE (unexpected for this input)");
     std::printf("FPSan results %s.\n",

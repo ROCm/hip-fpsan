@@ -12,6 +12,8 @@
 #include "fpsan/amdgcn_cvt.hpp"
 #include "fpsan/fpsan.hpp"
 
+#include "fpsan_semantics.hpp"
+
 #include "hip_test_utils.hpp"
 #include "test_random.hpp"
 
@@ -31,7 +33,6 @@ using fpsan::detail::kFp6E2M3;
 using fpsan::detail::narrow_to_f32;
 
 static constexpr Conversions kCC = Conversions::Explicit;
-using VF                         = Value<float, Semantics::Triton, kCC>;
 using v6u                        = unsigned __attribute__((ext_vector_type(6)));
 
 namespace
@@ -175,12 +176,14 @@ TEST(CvtScalef32Fp6Wrap, FloatPack2xpk16ExactBits)
 
 // Unpack: packed v6u32 holds 6-bit payloads (host-packed independently); wrapper
 // widens (sext 6->32) and multiplies by scale.
+template <Semantics S>
 __global__ void k_fpsan_unpack(const unsigned* in6, unsigned* out, float scale)
 {
+    using VF = Value<float, S, kCC>;
     v6u s;
     for(int i = 0; i < 6; ++i)
         s[i] = in6[i];
-    auto r = fpsan::amdgcn_cvt_scalef32_pk32_f32_fp6<Semantics::Triton, kCC>(s, VF{scale});
+    auto r = fpsan::amdgcn_cvt_scalef32_pk32_f32_fp6<S, kCC>(s, VF{scale});
     for(int i = 0; i < 32; ++i)
         out[i] = r.get(i).fpsan_payload();
 }
@@ -189,45 +192,51 @@ TEST(CvtScalef32Fp6Wrap, FpsanUnpackWidenAndScale)
 {
     if(!have_device())
         GTEST_SKIP() << "no HIP device";
-    std::uint8_t payloads[32];
-    std::mt19937 rng = fpsan_test::make_rng();
-    for(int i = 0; i < 32; ++i)
-        payloads[i] = std::uint8_t(rng() & 0x3F);
-    unsigned packed[6];
-    host_pack6(payloads, 32, packed);
-    std::vector<unsigned> hp(packed, packed + 6);
-    unsigned*             dIn = to_dev(hp);
-    unsigned*             dO;
-    HIP_CHECK(hipMalloc(&dO, 32 * sizeof(unsigned)));
-    const float scale = 2.0f;
-    k_fpsan_unpack<<<1, 1>>>(dIn, dO, scale);
-    HIP_CHECK(hipDeviceSynchronize());
-    auto got = from_dev(dO, 32);
-    for(int i = 0; i < 32; ++i)
-    {
-        unsigned ref
-            = (VF::from_fpsan_payload(static_cast<std::uint32_t>(sext6(payloads[i]))) * VF{scale})
-                  .fpsan_payload();
-        EXPECT_EQ(got[i], ref) << "elem " << i;
-    }
-    (void)hipFree(dIn);
-    (void)hipFree(dO);
+    fpsan_test::for_each_fpsan_semantics([&](auto sem) {
+        constexpr Semantics S = decltype(sem)::value;
+        using VF              = Value<float, S, kCC>;
+        std::uint8_t payloads[32];
+        std::mt19937 rng = fpsan_test::make_rng();
+        for(int i = 0; i < 32; ++i)
+            payloads[i] = std::uint8_t(rng() & 0x3F);
+        unsigned packed[6];
+        host_pack6(payloads, 32, packed);
+        std::vector<unsigned> hp(packed, packed + 6);
+        unsigned*             dIn = to_dev(hp);
+        unsigned*             dO;
+        HIP_CHECK(hipMalloc(&dO, 32 * sizeof(unsigned)));
+        const float scale = 2.0f;
+        k_fpsan_unpack<S><<<1, 1>>>(dIn, dO, scale);
+        HIP_CHECK(hipDeviceSynchronize());
+        auto got = from_dev(dO, 32);
+        for(int i = 0; i < 32; ++i)
+        {
+            unsigned ref = (VF::from_fpsan_payload(static_cast<std::uint32_t>(sext6(payloads[i])))
+                            * VF{scale})
+                               .fpsan_payload();
+            EXPECT_EQ(got[i], ref) << "elem " << i;
+        }
+        (void)hipFree(dIn);
+        (void)hipFree(dO);
+    });
 }
 
 // Pack (2xpk16): wrapper divides by scale, narrows to 6 bits, interleaves.
 // Decode the result with the independent host_extract6 and compare to the
 // public Value division payload truncated to 6 bits.
+template <Semantics S>
 __global__ void k_fpsan_pack(const float* in, unsigned* out, float scale)
 {
+    using VF = Value<float, S, kCC>;
     fpsan::v16f_native_cvt lo, hi;
     for(int i = 0; i < 16; ++i)
     {
         lo[i] = in[i];
         hi[i] = in[16 + i];
     }
-    v6u r = fpsan::amdgcn_cvt_scalef32_2xpk16_fp6_f32<Semantics::Triton, kCC>(
-        Value<fpsan::v16f_native_cvt, Semantics::Triton, kCC>{lo},
-        Value<fpsan::v16f_native_cvt, Semantics::Triton, kCC>{hi},
+    v6u r = fpsan::amdgcn_cvt_scalef32_2xpk16_fp6_f32<S, kCC>(
+        Value<fpsan::v16f_native_cvt, S, kCC>{lo},
+        Value<fpsan::v16f_native_cvt, S, kCC>{hi},
         VF{scale});
     for(int i = 0; i < 6; ++i)
         out[i] = r[i];
@@ -237,26 +246,30 @@ TEST(CvtScalef32Fp6Wrap, FpsanPackDivideInterleave)
 {
     if(!have_device())
         GTEST_SKIP() << "no HIP device";
-    std::vector<float> in(32);
-    std::mt19937       rng = fpsan_test::make_rng();
-    for(auto& x : in)
-        x = fpsan_test::pick_int_valued<float>(rng, -7, 7);
-    const float scale = 2.0f;
-    float*      dIn   = to_dev(in);
-    unsigned*   dO;
-    HIP_CHECK(hipMalloc(&dO, 6 * sizeof(unsigned)));
-    k_fpsan_pack<<<1, 1>>>(dIn, dO, scale);
-    HIP_CHECK(hipDeviceSynchronize());
-    auto got = from_dev(dO, 6);
-    for(int k = 0; k < 16; ++k)
-    {
-        unsigned refLo = (VF{in[k]} / VF{scale}).fpsan_payload() & 0x3F;
-        unsigned refHi = (VF{in[16 + k]} / VF{scale}).fpsan_payload() & 0x3F;
-        EXPECT_EQ(host_extract6(got.data(), 2 * k), refLo) << "lo " << k;
-        EXPECT_EQ(host_extract6(got.data(), 2 * k + 1), refHi) << "hi " << k;
-    }
-    (void)hipFree(dIn);
-    (void)hipFree(dO);
+    fpsan_test::for_each_fpsan_semantics([&](auto sem) {
+        constexpr Semantics S = decltype(sem)::value;
+        using VF              = Value<float, S, kCC>;
+        std::vector<float> in(32);
+        std::mt19937       rng = fpsan_test::make_rng();
+        for(auto& x : in)
+            x = fpsan_test::pick_int_valued<float>(rng, -7, 7);
+        const float scale = 2.0f;
+        float*      dIn   = to_dev(in);
+        unsigned*   dO;
+        HIP_CHECK(hipMalloc(&dO, 6 * sizeof(unsigned)));
+        k_fpsan_pack<S><<<1, 1>>>(dIn, dO, scale);
+        HIP_CHECK(hipDeviceSynchronize());
+        auto got = from_dev(dO, 6);
+        for(int k = 0; k < 16; ++k)
+        {
+            unsigned refLo = (VF{in[k]} / VF{scale}).fpsan_payload() & 0x3F;
+            unsigned refHi = (VF{in[16 + k]} / VF{scale}).fpsan_payload() & 0x3F;
+            EXPECT_EQ(host_extract6(got.data(), 2 * k), refLo) << "lo " << k;
+            EXPECT_EQ(host_extract6(got.data(), 2 * k + 1), refHi) << "hi " << k;
+        }
+        (void)hipFree(dIn);
+        (void)hipFree(dO);
+    });
 }
 
 #endif // has builtin

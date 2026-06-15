@@ -27,6 +27,7 @@
 #include "fpsan/amdgcn_wave.hpp"
 #include "fpsan/fpsan.hpp"
 
+#include "fpsan_semantics.hpp"
 #include "hip_test_utils.hpp"
 #include "test_random.hpp"
 
@@ -133,12 +134,12 @@ __global__ void k_wave_float(const typename T::FT* in, typename T::FT* out)
         *out = static_cast<typename T::FT>(r);
 }
 
-template <class T, int Strategy>
+template <class T, int Strategy, Semantics S>
 __global__ void k_wave_fpsan(const typename T::FT* in, typename T::Bits* out)
 {
-    const int                                     lane = threadIdx.x;
-    Value<typename T::FT, Semantics::Triton, kCC> v{in[lane]};
-    auto r = T::template call<Strategy, Semantics::Triton>(v);
+    const int                     lane = threadIdx.x;
+    Value<typename T::FT, S, kCC> v{in[lane]};
+    auto                          r = T::template call<Strategy, S>(v);
     if(lane == 0)
         *out = r.fpsan_payload();
 }
@@ -218,7 +219,7 @@ void run_float_matches_host_butterfly()
     }
 }
 
-template <class T>
+template <class T, Semantics S>
 void run_fpsan_matches_host_butterfly()
 {
     const int W = device_wave_size();
@@ -227,16 +228,16 @@ void run_fpsan_matches_host_butterfly()
     using FT   = typename T::FT;
     using Bits = typename T::Bits;
     auto in    = make_lane_inputs<FT>(W);
-    using F    = Value<FT, Semantics::Triton, kCC>;
+    using F    = Value<FT, S, kCC>;
     std::vector<F> lane_vals(W);
     for(int i = 0; i < W; ++i)
         lane_vals[i] = F{in[i]};
-    F ref = T::template host_butterfly<Semantics::Triton>(lane_vals.data(), W);
+    F ref = T::template host_butterfly<S>(lane_vals.data(), W);
 
     FT*   dIn = to_dev(in);
     Bits* dOut;
     HIP_CHECK(hipMalloc(&dOut, sizeof(Bits)));
-    k_wave_fpsan<T, 0><<<1, W>>>(dIn, dOut);
+    k_wave_fpsan<T, 0, S><<<1, W>>>(dIn, dOut);
     HIP_CHECK(hipDeviceSynchronize());
     Bits got = Bits(0);
     HIP_CHECK(hipMemcpy(&got, dOut, sizeof(Bits), hipMemcpyDeviceToHost));
@@ -249,7 +250,7 @@ void run_fpsan_matches_host_butterfly()
 // which is a *different* reduction order than the device butterfly. For the
 // associative + commutative payload ops (fadd, fmin, fmax) the two must agree;
 // this is a stronger statement than "matches a same-shaped butterfly".
-template <class T>
+template <class T, Semantics S>
 void run_fpsan_matches_seq_fold()
 {
     if constexpr(!T::sequential_is_safe)
@@ -264,16 +265,16 @@ void run_fpsan_matches_seq_fold()
         using FT   = typename T::FT;
         using Bits = typename T::Bits;
         auto in    = make_lane_inputs<FT>(W);
-        using F    = Value<FT, Semantics::Triton, kCC>;
+        using F    = Value<FT, S, kCC>;
         std::vector<F> lane_vals(W);
         for(int i = 0; i < W; ++i)
             lane_vals[i] = F{in[i]};
-        F ref = T::template host_seq_fold<Semantics::Triton>(lane_vals.data(), W);
+        F ref = T::template host_seq_fold<S>(lane_vals.data(), W);
 
         FT*   dIn = to_dev(in);
         Bits* dOut;
         HIP_CHECK(hipMalloc(&dOut, sizeof(Bits)));
-        k_wave_fpsan<T, 0><<<1, W>>>(dIn, dOut);
+        k_wave_fpsan<T, 0, S><<<1, W>>>(dIn, dOut);
         HIP_CHECK(hipDeviceSynchronize());
         Bits got = Bits(0);
         HIP_CHECK(hipMemcpy(&got, dOut, sizeof(Bits), hipMemcpyDeviceToHost));
@@ -283,7 +284,7 @@ void run_fpsan_matches_seq_fold()
     }
 }
 
-template <class T>
+template <class T, Semantics S>
 void run_fpsan_strategy_invariant()
 {
     const int W = device_wave_size();
@@ -295,11 +296,11 @@ void run_fpsan_strategy_invariant()
     FT*   dIn  = to_dev(in);
     Bits* dOut;
     HIP_CHECK(hipMalloc(&dOut, sizeof(Bits)));
-    k_wave_fpsan<T, 0><<<1, W>>>(dIn, dOut);
+    k_wave_fpsan<T, 0, S><<<1, W>>>(dIn, dOut);
     HIP_CHECK(hipDeviceSynchronize());
     Bits got0 = Bits(0);
     HIP_CHECK(hipMemcpy(&got0, dOut, sizeof(Bits), hipMemcpyDeviceToHost));
-    k_wave_fpsan<T, 1><<<1, W>>>(dIn, dOut);
+    k_wave_fpsan<T, 1, S><<<1, W>>>(dIn, dOut);
     HIP_CHECK(hipDeviceSynchronize());
     Bits got1 = Bits(0);
     HIP_CHECK(hipMemcpy(&got1, dOut, sizeof(Bits), hipMemcpyDeviceToHost));
@@ -311,22 +312,25 @@ void run_fpsan_strategy_invariant()
 // ---------------------------------------------------------------------------
 // Per-Trait TEST instantiations.
 // ---------------------------------------------------------------------------
-#define WAVE_TESTS(Trait)                          \
-    TEST(Trait, FloatMatchesHostButterfly)         \
-    {                                              \
-        run_float_matches_host_butterfly<Trait>(); \
-    }                                              \
-    TEST(Trait, FpsanMatchesHostButterfly)         \
-    {                                              \
-        run_fpsan_matches_host_butterfly<Trait>(); \
-    }                                              \
-    TEST(Trait, FpsanMatchesSeqFold)               \
-    {                                              \
-        run_fpsan_matches_seq_fold<Trait>();       \
-    }                                              \
-    TEST(Trait, FpsanStrategyInvariant)            \
-    {                                              \
-        run_fpsan_strategy_invariant<Trait>();     \
+#define WAVE_TESTS(Trait)                                                                       \
+    TEST(Trait, FloatMatchesHostButterfly)                                                      \
+    {                                                                                           \
+        run_float_matches_host_butterfly<Trait>();                                              \
+    }                                                                                           \
+    TEST(Trait, FpsanMatchesHostButterfly)                                                      \
+    {                                                                                           \
+        fpsan_test::for_each_fpsan_semantics(                                                   \
+            [](auto sem) { run_fpsan_matches_host_butterfly<Trait, decltype(sem)::value>(); }); \
+    }                                                                                           \
+    TEST(Trait, FpsanMatchesSeqFold)                                                            \
+    {                                                                                           \
+        fpsan_test::for_each_fpsan_semantics(                                                   \
+            [](auto sem) { run_fpsan_matches_seq_fold<Trait, decltype(sem)::value>(); });       \
+    }                                                                                           \
+    TEST(Trait, FpsanStrategyInvariant)                                                         \
+    {                                                                                           \
+        fpsan_test::for_each_fpsan_semantics(                                                   \
+            [](auto sem) { run_fpsan_strategy_invariant<Trait, decltype(sem)::value>(); });     \
     }
 
 WAVE_TESTS(WaveFaddF32)

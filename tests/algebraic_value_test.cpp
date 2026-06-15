@@ -1,0 +1,825 @@
+// Copyright (c) 2026 Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
+//
+// End-to-end test of the algebraic Semantics wired into Value<>.
+//   c++ -std=c++17 -I include tests/algebraic_value_test.cpp -o /tmp/algv && /tmp/algv
+// ----------------------------------------------------------------------------
+#include "fpsan/cast.hpp"
+#include "fpsan/detail/fp8.hpp"
+#include "fpsan/math.hpp"
+#include "fpsan/value.hpp"
+
+#include <cstdio>
+
+using namespace fpsan;
+template <Semantics S>
+using F = Value<float, S, Conversions::Explicit>;
+template <Semantics S>
+using D = Value<double, S, Conversions::Explicit>;
+
+static long pass = 0, fail = 0;
+static void check(bool ok, const char* msg)
+{
+    if(ok)
+        ++pass;
+    else
+    {
+        ++fail;
+        std::printf("  FAIL: %s\n", msg);
+    }
+}
+
+// Generic multiply-accumulate over an arbitrary index order -- the exact shape
+// the MMA dataflows use (acc = acc + a*b). Written once, instantiated for any
+// Semantics: this is the orthogonality the intrinsic layer relies on.
+template <class V>
+static V mac(const float* a, const float* b, int n, const int* order)
+{
+    V acc{0.0f};
+    for(int i = 0; i < n; ++i)
+        acc = acc + V{a[order[i]]} * V{b[order[i]]};
+    return acc;
+}
+
+static void checkf(bool ok, const char* tag, const char* what)
+{
+    char buf[192];
+    std::snprintf(buf, sizeof buf, "%s: %s", tag, what);
+    check(ok, buf);
+}
+
+// ===========================================================================
+// Scorecard batteries: one function per scorecard SECTION, run for EVERY
+// applicable variant so no row can silently regress. (See algebraic-fpsan.md.)
+// ===========================================================================
+
+// "ring axioms and exact value relations" -- hold in every algebraic model
+// (the leaf encoding is itself a ring homomorphism, so identities of the exact
+// values hold of the fingerprints). Use small dyadic rationals -- all units.
+template <class V>
+static void battery_ring(const char* tag)
+{
+    checkf(V{0.0f} + V{2.5f} == V{2.5f}, tag, "0+x == x");
+    checkf(V{1.0f} * V{2.5f} == V{2.5f}, tag, "1*x == x");
+    checkf(V{2.5f} - V{2.5f} == V{0.0f}, tag, "x-x == 0");
+    checkf(V{2.0f} + V{2.0f} == V{4.0f}, tag, "constant fold 2+2 == 4");
+    checkf(V{2.0f} * V{3.0f} == V{6.0f}, tag, "constant fold 2*3 == 6");
+    checkf(V{0.5f} + V{0.5f} == V{1.0f}, tag, "constant fold 0.5+0.5 == 1");
+    checkf(V{1.5f} + V{1.5f} == V{2.0f} * V{1.5f}, tag, "symbolic x+x == 2x");
+    {
+        V a{2.5f};
+        checkf((a + V{1.0f}) * (a - V{1.0f}) == a * a - V{1.0f}, tag, "symbolic (x+1)(x-1)==x^2-1");
+    }
+    {
+        V a{2.0f}, b{3.0f};
+        checkf((a + b) * (a + b) == a * a + V{2.0f} * a * b + b * b,
+               tag,
+               "symbolic (a+b)^2 == a^2+2ab+b^2");
+    }
+    checkf(V{1.1f} + V{2.2f} == V{2.2f} + V{1.1f}, tag, "commutativity");
+    checkf((V{1.1f} + V{2.2f}) + V{3.3f} == V{1.1f} + (V{2.2f} + V{3.3f}), tag, "associativity");
+    {
+        V a{2.5f}, b{1.25f}, c{0.5f};
+        checkf(a * (b + c) == a * b + a * c, tag, "distributivity");
+    }
+}
+
+// "division & field structure". For a field, division is total; for the composite
+// rings it holds on units -- the small integers below are units (huge primes).
+template <class V>
+static void battery_division(const char* tag)
+{
+    long xx = 0, abb = 0, n = 0;
+    for(int i = 1; i <= 50; ++i)
+        for(int j = 1; j <= 7; ++j, ++n)
+        {
+            V a{(float)i}, b{(float)j};
+            xx += (a / a == V{1.0f});
+            abb += ((a / b) * b == a);
+        }
+    checkf(xx == n, tag, "x/x == 1 (on units)");
+    checkf(abb == n, tag, "(a/b)*b == a (b a unit)");
+}
+
+// "infinity & NaN" -- the projective extension, identical across all variants.
+template <class V>
+static void battery_infnan(const char* tag)
+{
+    const V inf = V{1.0f} / V{0.0f};
+    const V nan = V{0.0f} / V{0.0f};
+    checkf(inf == V{2.0f} / V{0.0f}, tag, "1/0 is a single unsigned inf");
+    checkf(V{1.0f} / inf == V{0.0f}, tag, "1/inf == 0");
+    checkf(V{3.0f} + inf == inf, tag, "x + inf == inf");
+    checkf(V{3.0f} * inf == inf, tag, "x * inf == inf");
+    checkf(inf + inf == nan, tag, "inf +- inf -> NaN");
+    checkf(inf - inf == nan, tag, "inf - inf -> NaN");
+    checkf(V{0.0f} * inf == nan, tag, "0 * inf -> NaN");
+    checkf(inf / inf == nan, tag, "inf / inf -> NaN");
+    checkf(nan == nan, tag, "NaN deterministic (compares equal to itself)");
+    checkf(nan + V{1.0f} == nan, tag, "NaN absorbing under +");
+    checkf(nan * V{2.0f} == nan, tag, "NaN absorbing under *");
+}
+
+// "algebraic functions: roots". sqrt/rsqrt are multiplicative power maps in every
+// variant; cbrt is a perfect cube root where 3 is coprime to the group order
+// (Field/SophieGermain) and a tag otherwise (Pythagorean).
+template <class V>
+static void battery_roots(const char* tag, bool has_cbrt)
+{
+    checkf(V::alg_cfg().has_cbrt == has_cbrt, tag, "has_cbrt matches the variant");
+    long  ms = 0, rinv = 0, rcons = 0, sq = 0, n = 0;
+    float xs[] = {
+        1.f, 2.f, 3.f, 5.f, 7.f, 11.f, 13.f, 17.f, 19.f, 23.f, 0.5f, 1.5f, 6.f, 0.25f, 0.75f, 10.f};
+    for(float u : xs)
+    {
+        V a{u};
+        rinv += (rsqrt(a) * sqrt(a) == V{1.0f});
+        rcons += (rsqrt(a) == V{1.0f} / sqrt(a));
+        for(float v : xs)
+        {
+            V b{v};
+            ms += (sqrt(a * b) == sqrt(a) * sqrt(b)); // multiplicative: universal
+            sq += (sqrt(a) * sqrt(a) == a); // round-trip: square residues only
+            ++n;
+        }
+    }
+    checkf(ms == n, tag, "sqrt(x*y) == sqrt(x)*sqrt(y) (multiplicative)");
+    // sqrt(x)^2 == x holds on the square residues only -- a proper, nonempty subset
+    // (1 is always a square, not every value is). Field ~1/2, SG ~1/4, Pyth ~1/8.
+    checkf(sq > 0 && sq < n, tag, "sqrt(x)^2 == x on the square residues (not all)");
+    checkf(rinv == (long)(sizeof xs / sizeof *xs), tag, "rsqrt(x)*sqrt(x) == 1");
+    checkf(rcons == (long)(sizeof xs / sizeof *xs), tag, "rsqrt == 1/sqrt");
+    if(has_cbrt)
+    {
+        long mc = 0, c3 = 0;
+        for(float u : xs)
+            for(float v : xs)
+            {
+                V a{u}, b{v};
+                mc += (cbrt(a * b) == cbrt(a) * cbrt(b));
+                c3 += (cbrt(a) * cbrt(a) * cbrt(a) == a);
+            }
+        checkf(mc == n, tag, "cbrt(x*y) == cbrt(x)*cbrt(y)");
+        checkf(c3 == n, tag, "cbrt(x)^3 == x (perfect)");
+    }
+    else
+    {
+        checkf(cbrt(V{7.0f}) == cbrt(V{7.0f}), tag, "cbrt deterministic (tag)");
+        checkf(cbrt(V{2.0f} * V{3.0f}) != cbrt(V{2.0f}) * cbrt(V{3.0f}),
+               tag,
+               "cbrt NOT multiplicative (tag)");
+    }
+}
+
+// "transcendental functions". two_moduli (SophieGermain/Pythagorean): exp/exp2/
+// exp10 and their log inverses are genuine homomorphisms; otherwise (Field) every
+// one is a tag (no homomorphism).
+template <class V>
+static void battery_transcendental(const char* tag, bool two_moduli)
+{
+    float as[] = {0.5f, 1.0f, 1.5f, 2.0f, -1.0f, 0.25f, 3.0f};
+    float ms[] = {1.0f, 2.0f, 3.0f, 5.0f, 0.5f, 1.5f, 7.0f};
+    long  e = 0, e2 = 0, e10 = 0, l = 0, l2 = 0, l10 = 0, invc = 0, na = 0, nm = 0;
+    for(float u : as)
+        for(float v : as)
+        {
+            V a{u}, b{v};
+            e += (exp(a + b) == exp(a) * exp(b));
+            e2 += (exp2(a + b) == exp2(a) * exp2(b));
+            e10 += (exp10(a + b) == exp10(a) * exp10(b));
+            ++na;
+        }
+    for(float u : ms)
+        for(float v : ms)
+        {
+            V a{u}, b{v};
+            l += (log(a * b) == log(a) + log(b));
+            l2 += (log2(a * b) == log2(a) + log2(b));
+            l10 += (log10(a * b) == log10(a) + log10(b));
+            invc += (exp(log(exp(a))) == exp(a));
+            ++nm;
+        }
+    if(two_moduli)
+    {
+        checkf(e == na, tag, "exp(a+b) == exp(a)*exp(b)");
+        checkf(e2 == na, tag, "exp2(a+b) == exp2(a)*exp2(b)");
+        checkf(e10 == na, tag, "exp10(a+b) == exp10(a)*exp10(b)");
+        checkf(l == nm, tag, "log(x*y) == log(x)+log(y)");
+        checkf(l2 == nm, tag, "log2(x*y) == log2(x)+log2(y)");
+        checkf(l10 == nm, tag, "log10(x*y) == log10(x)+log10(y)");
+        checkf(invc == nm, tag, "exp(log(exp v)) == exp v");
+        checkf(exp2(V{2.0f}) != exp(V{2.0f}) && exp10(V{2.0f}) != exp(V{2.0f})
+                   && exp10(V{2.0f}) != exp2(V{2.0f}),
+               tag,
+               "exp/exp2/exp10 are distinct bases");
+    }
+    else
+    {
+        // Field (and any non-two-moduli): every exp/log base is a tag.
+        checkf(e < na && e2 < na && e10 < na, tag, "exp/exp2/exp10 NOT homomorphisms (tag)");
+        checkf(l < nm && l2 < nm && l10 < nm, tag, "log/log2/log10 NOT homomorphisms (tag)");
+    }
+}
+
+// "sin/cos". has_trig (Pythagorean): genuine angle-addition + cos^2+sin^2==1;
+// otherwise sin/cos are tags (angle-addition fails).
+template <class V>
+static void battery_trig(const char* tag, bool has_trig)
+{
+    float xs[] = {0.5f, 1.0f, 1.5f, 2.0f, 3.0f, -1.0f, 0.25f};
+    long  ok = 0, n = 0;
+    for(float u : xs)
+        for(float v : xs)
+        {
+            V    a{u}, b{v};
+            bool c1 = (cos(a + b) == cos(a) * cos(b) - sin(a) * sin(b));
+            bool c2 = (sin(a + b) == sin(a) * cos(b) + cos(a) * sin(b));
+            ok += (c1 && c2);
+            ++n;
+        }
+    if(has_trig)
+    {
+        checkf(cos(V{0.0f}) == V{1.0f} && sin(V{0.0f}) == V{0.0f}, tag, "cos(0)==1, sin(0)==0");
+        checkf(ok == n, tag, "sin/cos angle-addition");
+        checkf(cos(V{1.3f}) * cos(V{1.3f}) + sin(V{1.3f}) * sin(V{1.3f}) == V{1.0f},
+               tag,
+               "cos^2 + sin^2 == 1");
+    }
+    else
+    {
+        checkf(ok < n, tag, "sin/cos are tags (no angle-addition)");
+    }
+}
+
+// "miscellaneous": min/max/comparisons do NOT follow the IEEE numeric order
+// (scorecard ❌, shared by all incl. Triton), but they are deterministic,
+// commutative, and reassociation-invariant -- the sanitizer property that must
+// not regress.
+template <class V>
+static void battery_misc(const char* tag)
+{
+    checkf(min(V{1.0f}, V{2.0f}) == min(V{2.0f}, V{1.0f}), tag, "min commutes");
+    checkf(max(V{1.0f}, V{2.0f}) == max(V{2.0f}, V{1.0f}), tag, "max commutes");
+    checkf(max(min(V{3.0f}, V{1.0f}), V{2.0f}) == max(V{2.0f}, min(V{1.0f}, V{3.0f})),
+           tag,
+           "min/max reassociation-invariant");
+}
+
+template <class V>
+static void battery_fast_field(const char* tag)
+{
+    battery_misc<V>(tag);
+    battery_ring<V>(tag);
+    battery_infnan<V>(tag);
+    battery_transcendental<V>(tag, false);
+    battery_trig<V>(tag, false);
+
+    V a{7.0f}, b{3.0f};
+    checkf(V{0.0f} / b == V{0.0f}, tag, "fast division preserves 0/x == 0");
+    checkf(a / V{1.0f} == a, tag, "fast division preserves x/1 == x");
+    checkf(a / b == a / b, tag, "fast division deterministic");
+    checkf(a / a != V{1.0f}, tag, "fast division is tagged, not x/x == 1");
+    checkf((a / b) * b != a, tag, "fast division is not a field inverse");
+    checkf(sqrt(a * b) != sqrt(a) * sqrt(b), tag, "fast sqrt is tagged, not multiplicative");
+    checkf(cbrt(a) * cbrt(a) * cbrt(a) != a, tag, "fast cbrt is tagged, not a cube root");
+    checkf(rsqrt(a) * sqrt(a) != V{1.0f}, tag, "fast rsqrt is tagged, not reciprocal sqrt");
+}
+
+// Run the whole scorecard over one variant (T = a Value<...> type).
+template <class Fld, class SG, class Py>
+static void run_scorecard(const char* fld_tag, const char* sg_tag, const char* py_tag)
+{
+    battery_misc<Fld>(fld_tag);
+    battery_misc<SG>(sg_tag);
+    battery_misc<Py>(py_tag);
+    battery_ring<Fld>(fld_tag);
+    battery_ring<SG>(sg_tag);
+    battery_ring<Py>(py_tag);
+    battery_division<Fld>(fld_tag);
+    battery_division<SG>(sg_tag);
+    battery_division<Py>(py_tag);
+    battery_infnan<Fld>(fld_tag);
+    battery_infnan<SG>(sg_tag);
+    battery_infnan<Py>(py_tag);
+    battery_roots<Fld>(fld_tag, true);
+    battery_roots<SG>(sg_tag, true);
+    battery_roots<Py>(py_tag, false);
+    battery_transcendental<Fld>(fld_tag, false);
+    battery_transcendental<SG>(sg_tag, true);
+    battery_transcendental<Py>(py_tag, true);
+    battery_trig<Fld>(fld_tag, false);
+    battery_trig<SG>(sg_tag, false);
+    battery_trig<Py>(py_tag, true);
+}
+
+static void check_field_cast_tower_constants(detail::AlgVariant v, const char* tag)
+{
+    constexpr unsigned widths[] = {4, 8, 16, 32, 64};
+    detail::u64        orders[5]{};
+    for(unsigned i = 0; i < 5; ++i)
+    {
+        const detail::u64 p = detail::alg_field_prime(v, widths[i]);
+        const detail::u64 g = detail::alg_field_root(v, widths[i]);
+        orders[i]           = p - 1;
+
+        char msg[192];
+        std::snprintf(msg, sizeof msg, "p_%u is an 11 mod 12 Field prime", widths[i]);
+        checkf(p != 0 && p % 12 == 11, tag, msg);
+
+        std::snprintf(
+            msg, sizeof msg, "g_%u^3 is primitive if g_%u is primitive", widths[i], widths[i]);
+        checkf(g != 0 && detail::alg_gcd(3, orders[i]) == 1, tag, msg);
+    }
+
+    for(unsigned i = 0; i < 5; ++i)
+        for(unsigned j = i + 1; j < 5; ++j)
+        {
+            char msg[192];
+            std::snprintf(msg, sizeof msg, "p_%u-1 divides p_%u-1", widths[i], widths[j]);
+            checkf(orders[j] % orders[i] == 0, tag, msg);
+
+            const detail::u64 cofactor = orders[j] / orders[i];
+            std::snprintf(msg,
+                          sizeof msg,
+                          "(p_%u-1)/(p_%u-1) is coprime to p_%u-1",
+                          widths[j],
+                          widths[i],
+                          widths[i]);
+            checkf(detail::alg_gcd(cofactor, orders[i]) == 1, tag, msg);
+        }
+}
+
+int main()
+{
+    using Alg = F<Semantics::Field>;
+    using Scr = F<Semantics::Triton>; // Triton model
+
+    // ---- systematic scorecard coverage: every section x every variant --------
+    // (float width). The "2" twins run the same batteries to lock in that an
+    // independent prime gives the same algebra. Double is covered below.
+    run_scorecard<F<Semantics::Field>,
+                  F<Semantics::SophieGermainRing>,
+                  F<Semantics::PythagoreanRing>>("field", "SophieGermain", "Pythagorean");
+    run_scorecard<F<Semantics::Field2>,
+                  F<Semantics::SophieGermainRing2>,
+                  F<Semantics::PythagoreanRing2>>("field2", "SophieGermain2", "Pythagorean2");
+    battery_fast_field<F<Semantics::FieldFast>>("fieldFast");
+    battery_fast_field<F<Semantics::FieldFast2>>("fieldFast2");
+    {
+        // Triton contrast: the value-faithful rows FAIL (the encoding
+        // is a non-homomorphic scramble), while the pure ring identities still hold.
+        checkf(Scr{2.0f} + Scr{2.0f} != Scr{4.0f}, "triton", "2+2 != 4 (no value fidelity)");
+        checkf(Scr{2.0f} * Scr{3.0f} != Scr{6.0f}, "triton", "2*3 != 6");
+        checkf(Scr{1.5f} + Scr{1.5f} != Scr{2.0f} * Scr{1.5f}, "triton", "x+x != 2x");
+        Scr a{1.1f}, b{2.2f}, c{0.5f};
+        checkf(
+            a * (b + c) == a * b + a * c, "triton", "distributivity still holds (ring identity)");
+        checkf((a + b) + c == a + (b + c), "triton", "associativity still holds");
+    }
+    // "collisions re-rollable": a fresh prime (the "2" twin) gives independent
+    // blind spots -- the same value maps to a different residue under each.
+    checkf(F<Semantics::Field>{0.5f}.fpsan_payload() != F<Semantics::Field2>{0.5f}.fpsan_payload(),
+           "re-rollable",
+           "field vs field2 distinct moduli");
+    check_field_cast_tower_constants(detail::AlgVariant::Field1, "field cast tower");
+    check_field_cast_tower_constants(detail::AlgVariant::Field2, "field2 cast tower");
+    checkf(F<Semantics::Field>::alg_cfg().n == F<Semantics::FieldWithMulCasts>::alg_cfg().n,
+           "field mirror",
+           "Field and FieldWithMulCasts share the same prime");
+    checkf(F<Semantics::Field>::alg_cfg().n == F<Semantics::FieldFast>::alg_cfg().n,
+           "field mirror",
+           "Field and FieldFast share the same prime");
+    checkf(F<Semantics::Field2>::alg_cfg().n == F<Semantics::FieldWithMulCasts2>::alg_cfg().n,
+           "field mirror",
+           "Field2 and FieldWithMulCasts2 share the same prime");
+    checkf(F<Semantics::Field2>::alg_cfg().n == F<Semantics::FieldFast2>::alg_cfg().n,
+           "field mirror",
+           "Field2 and FieldFast2 share the same prime");
+    checkf(F<Semantics::Field>{0.5f}.fpsan_payload()
+               == F<Semantics::FieldWithMulCasts>{0.5f}.fpsan_payload(),
+           "field mirror",
+           "Field and FieldWithMulCasts share finite fingerprints");
+    checkf(F<Semantics::Field>{0.5f}.fpsan_payload()
+               == F<Semantics::FieldFast>{0.5f}.fpsan_payload(),
+           "field mirror",
+           "Field and FieldFast share finite fingerprints");
+    checkf(F<Semantics::Field2>{0.5f}.fpsan_payload()
+               == F<Semantics::FieldWithMulCasts2>{0.5f}.fpsan_payload(),
+           "field mirror",
+           "Field2 and FieldWithMulCasts2 share finite fingerprints");
+    checkf(F<Semantics::Field2>{0.5f}.fpsan_payload()
+               == F<Semantics::FieldFast2>{0.5f}.fpsan_payload(),
+           "field mirror",
+           "Field2 and FieldFast2 share finite fingerprints");
+    checkf(F<Semantics::SophieGermainRing>{0.5f}.fpsan_payload()
+               != F<Semantics::SophieGermainRing2>{0.5f}.fpsan_payload(),
+           "re-rollable",
+           "SophieGermain vs twin distinct moduli");
+    checkf(F<Semantics::PythagoreanRing>{0.5f}.fpsan_payload()
+               != F<Semantics::PythagoreanRing2>{0.5f}.fpsan_payload(),
+           "re-rollable",
+           "Pythagorean vs twin distinct moduli");
+
+    // ---- algebraic: rational identities hold within a width ----
+    check((Alg{2.0f} + Alg{2.0f}) == Alg{4.0f}, "alg: 2+2 == 4");
+    check((Alg{3.0f} * Alg{3.0f}) == Alg{9.0f}, "alg: 3*3 == 9");
+    check((Alg{1.5f} + Alg{1.5f}) == (Alg{2.0f} * Alg{1.5f}), "alg: x+x == 2x");
+    {
+        Alg a{2.5f}, b{1.25f}, c{0.5f};
+        check(a * (b + c) == a * b + a * c, "alg: distributivity");
+    }
+    // field: x/x == 1 for every nonzero value
+    {
+        long ok = 0, n = 0;
+        for(int i = 1; i <= 300; ++i, ++n)
+            ok += ((Alg{(float)i} / Alg{(float)i}) == Alg{1.0f});
+        check(ok == n, "alg: x/x == 1 (field)");
+    }
+    // commutativity / associativity
+    check(Alg{1.1f} + Alg{2.2f} == Alg{2.2f} + Alg{1.1f}, "alg: a+b == b+a");
+    check((Alg{1.1f} + Alg{2.2f}) + Alg{3.3f} == Alg{1.1f} + (Alg{2.2f} + Alg{3.3f}),
+          "alg: associativity");
+
+    // ---- contrast: Triton (FPSan) does NOT see value coincidences ----
+    check((Scr{2.0f} + Scr{2.0f}) != Scr{4.0f}, "fpsan Triton: 2+2 != 4");
+
+    // ---- a second prime variant is independent but obeys the same identities -
+    using Alg2 = F<Semantics::Field2>;
+    check((Alg2{2.0f} + Alg2{2.0f}) == Alg2{4.0f}, "alg2: 2+2 == 4");
+
+    // ---- the Exponentials variant honors exp(a+b) == exp(a)*exp(b) ----
+    using Exp = F<Semantics::SophieGermainRing>;
+    check(exp(Exp{0.0f}) == Exp{1.0f}, "exp: exp(0) == 1");
+    {
+        long  ok = 0, n = 0;
+        float xs[] = {0.5f, 1.0f, 1.5f, 2.0f, -1.0f, 0.25f, 3.0f};
+        for(float u : xs)
+            for(float v : xs)
+            {
+                Exp a{u}, b{v};
+                ok += (exp(a + b) == exp(a) * exp(b));
+                ++n;
+            }
+        check(ok == n, "exp: exp(a+b) == exp(a)*exp(b) (Exponentials variant)");
+    }
+    // the Field variant has no exp homomorphism (exp is a tag there)
+    check(exp(Alg{1.25f} + Alg{2.5f}) != exp(Alg{1.25f}) * exp(Alg{2.5f}),
+          "field: exp is NOT a homomorphism (tag)");
+
+    // Exp2 is an independent variant: its own exp homomorphism, distinct modulus.
+    using Exp2 = F<Semantics::SophieGermainRing2>;
+    check(exp(Exp2{1.5f} + Exp2{2.5f}) == exp(Exp2{1.5f}) * exp(Exp2{2.5f}),
+          "exp2-variant: exp(a+b)==exp(a)*exp(b)");
+    // 0.5 -> (n+1)/2 differs between the two moduli (small integers wouldn't).
+    check(Exp{0.5f}.fpsan_payload() != Exp2{0.5f}.fpsan_payload(),
+          "Exp1 and Exp2 use distinct moduli (different residue for 0.5)");
+
+    // ---- log: the Exp variant honors log(x*y) == log(x) + log(y) ----
+    check(log(Exp{1.0f}) == Exp{0.0f}, "log: log(1) == 0");
+    {
+        long  ok = 0, n = 0;
+        float xs[] = {1.0f, 2.0f, 3.0f, 5.0f, 0.5f, 1.5f, 7.0f};
+        for(float u : xs)
+            for(float v : xs)
+            {
+                Exp a{u}, b{v};
+                ok += (log(a * b) == log(a) + log(b));
+                ++n;
+            }
+        check(ok == n, "log: log(x*y) == log(x)+log(y) (Exp variant, dlog homomorphism)");
+    }
+    // log inverts exp on the exp-image: exp(log(exp v)) == exp v
+    check(exp(log(exp(Exp{1.5f}))) == exp(Exp{1.5f}), "log: exp(log(exp v)) == exp v");
+    // Field variant: log is a tag, not a homomorphism
+    check(log(Alg{2.0f} * Alg{3.0f}) != log(Alg{2.0f}) + log(Alg{3.0f}),
+          "field: log is NOT a homomorphism (tag)");
+
+    // ---- Trigonometry variant: genuine sin/cos angle-addition (order-d rotation)
+    using Trig = F<Semantics::PythagoreanRing>;
+    check(cos(Trig{0.0f}) == Trig{1.0f}, "trig: cos(0) == 1");
+    check(sin(Trig{0.0f}) == Trig{0.0f}, "trig: sin(0) == 0");
+    {
+        long  ok = 0, n = 0;
+        float xs[] = {0.5f, 1.0f, 1.5f, 2.0f, 3.0f, -1.0f, 0.25f};
+        for(float u : xs)
+            for(float v : xs)
+            {
+                Trig a{u}, b{v};
+                bool c1 = (cos(a + b) == cos(a) * cos(b) - sin(a) * sin(b));
+                bool c2 = (sin(a + b) == sin(a) * cos(b) + cos(a) * sin(b));
+                ok += (c1 && c2);
+                ++n;
+            }
+        check(ok == n, "trig: angle-addition for sin & cos (Trig variant)");
+    }
+    check(cos(Trig{1.3f}) * cos(Trig{1.3f}) + sin(Trig{1.3f}) * sin(Trig{1.3f}) == Trig{1.0f},
+          "trig: cos^2 + sin^2 == 1");
+    // a Trig variant ALSO carries exp + log (p=4d+1 keeps the d-channel)
+    check(exp(Trig{1.0f} + Trig{2.0f}) == exp(Trig{1.0f}) * exp(Trig{2.0f}),
+          "trig: exp homomorphism still holds");
+    check(log(Trig{2.0f} * Trig{3.0f}) == log(Trig{2.0f}) + log(Trig{3.0f}),
+          "trig: log homomorphism still holds");
+    // the Exp variant has NO angle-addition (sin/cos are tags there)
+    check(cos(Exp{0.5f} + Exp{1.0f})
+              != cos(Exp{0.5f}) * cos(Exp{1.0f}) - sin(Exp{0.5f}) * sin(Exp{1.0f}),
+          "exp-variant: sin/cos are tagged (no angle-addition)");
+
+    // ---- exp2 / log2: a second homomorphism pair on the same order-d channel ----
+    check(exp2(Exp{0.0f}) == Exp{1.0f}, "exp2: exp2(0) == 1");
+    check(log2(Exp{1.0f}) == Exp{0.0f}, "log2: log2(1) == 0");
+    {
+        long  ok = 0, n = 0;
+        float xs[] = {0.5f, 1.0f, 1.5f, 2.0f, -1.0f, 0.25f, 3.0f};
+        for(float u : xs)
+            for(float v : xs)
+            {
+                Exp a{u}, b{v};
+                ok += (exp2(a + b) == exp2(a) * exp2(b));
+                ++n;
+            }
+        check(ok == n, "exp2: exp2(a+b) == exp2(a)*exp2(b) (Exponentials variant)");
+    }
+    {
+        long  ok = 0, n = 0;
+        float xs[] = {1.0f, 2.0f, 3.0f, 5.0f, 0.5f, 1.5f, 7.0f};
+        for(float u : xs)
+            for(float v : xs)
+            {
+                Exp a{u}, b{v};
+                ok += (log2(a * b) == log2(a) + log2(b));
+                ++n;
+            }
+        check(ok == n, "log2: log2(x*y) == log2(x)+log2(y) (Exp variant, dlog homomorphism)");
+    }
+    check(exp2(log2(exp2(Exp{1.5f}))) == exp2(Exp{1.5f}), "log2: exp2(log2(exp2 v)) == exp2 v");
+    // exp2 uses a distinct base, so it is NOT the same fingerprint as exp
+    check(exp2(Exp{2.0f}) != exp(Exp{2.0f}), "exp2 != exp (distinct base change)");
+    // exp2/log2 carry over to the Trig variant (also a two-moduli channel)
+    check(exp2(Trig{1.0f} + Trig{2.0f}) == exp2(Trig{1.0f}) * exp2(Trig{2.0f}),
+          "trig: exp2 homomorphism still holds");
+    check(log2(Trig{2.0f} * Trig{3.0f}) == log2(Trig{2.0f}) + log2(Trig{3.0f}),
+          "trig: log2 homomorphism still holds");
+    // Field variant: exp2/log2 are tags, not homomorphisms
+    check(exp2(Alg{1.25f} + Alg{2.5f}) != exp2(Alg{1.25f}) * exp2(Alg{2.5f}),
+          "field: exp2 is NOT a homomorphism (tag)");
+    check(log2(Alg{2.0f} * Alg{3.0f}) != log2(Alg{2.0f}) + log2(Alg{3.0f}),
+          "field: log2 is NOT a homomorphism (tag)");
+
+    // ---- exp10 / log10: the base-10 members of the same family ----
+    check(exp10(Exp{0.0f}) == Exp{1.0f}, "exp10: exp10(0) == 1");
+    check(log10(Exp{1.0f}) == Exp{0.0f}, "log10: log10(1) == 0");
+    {
+        long  e10 = 0, l10 = 0, inv = 0, n = 0;
+        float xs[] = {0.5f, 1.0f, 1.5f, 2.0f, 3.0f, 5.0f, 7.0f};
+        for(float u : xs)
+            for(float v : xs)
+            {
+                Exp a{u}, b{v};
+                e10 += (exp10(a + b) == exp10(a) * exp10(b));
+                l10 += (log10(a * b) == log10(a) + log10(b));
+                inv += (exp10(log10(exp10(a))) == exp10(a));
+                ++n;
+            }
+        check(e10 == n, "exp10: exp10(a+b) == exp10(a)*exp10(b) (Exponentials variant)");
+        check(l10 == n, "log10: log10(x*y) == log10(x)+log10(y)");
+        check(inv == n, "log10: exp10(log10(exp10 v)) == exp10 v");
+    }
+    // the three bases are distinct fingerprints (e, 2, 10)
+    check(exp10(Exp{2.0f}) != exp(Exp{2.0f}) && exp10(Exp{2.0f}) != exp2(Exp{2.0f}),
+          "exp10 != exp and != exp2 (distinct base)");
+    // carries to Trig; tags in the Field variant
+    check(exp10(Trig{1.0f} + Trig{2.0f}) == exp10(Trig{1.0f}) * exp10(Trig{2.0f}),
+          "trig: exp10 homomorphism holds");
+    check(exp10(Alg{1.25f} + Alg{2.5f}) != exp10(Alg{1.25f}) * exp10(Alg{2.5f}),
+          "field: exp10 is NOT a homomorphism (tag)");
+
+    // ---- sqrt / cbrt / rsqrt: multiplicative algebraic roots ----
+    check(Alg::alg_cfg().has_cbrt, "field: cbrt is a perfect cube root (has_cbrt)");
+    {
+        long  ms = 0, mc = 0, c3 = 0, inset = 0, half = 0, n = 0;
+        float xs[] = {1.f, 2.f, 3.f, 5.f, 7.f, 0.5f, 1.5f, 6.f, 9.f, 0.25f, 11.f, 13.f};
+        for(float u : xs)
+            for(float v : xs)
+            {
+                Alg a{u}, b{v};
+                ms += (sqrt(a * b) == sqrt(a) * sqrt(b)); // sqrt multiplicative
+                mc += (cbrt(a * b) == cbrt(a) * cbrt(b)); // cbrt multiplicative
+                c3 += (cbrt(a) * cbrt(a) * cbrt(a) == a); // cbrt perfect: cbrt(x)^3==x
+                Alg s2 = sqrt(a) * sqrt(a);
+                inset += ((s2 == a) || (s2 == -a)); // sqrt(x)^2 == +/- x always
+                half += (s2 == a); // == x on the squares (~half)
+                ++n;
+            }
+        check(ms == n, "field sqrt: sqrt(x*y) == sqrt(x)*sqrt(y) (multiplicative)");
+        check(mc == n, "field cbrt: cbrt(x*y) == cbrt(x)*cbrt(y) (multiplicative)");
+        check(c3 == n, "field cbrt: cbrt(x)^3 == x (perfect)");
+        check(inset == n, "field sqrt: sqrt(x)^2 in {x, -x} always");
+        check(half > 0 && half < n, "field sqrt: round-trip sqrt(x)^2==x on ~half (QRs)");
+    }
+    // rsqrt is exactly 1/sqrt
+    {
+        long  ok = 0, cons = 0, n = 0;
+        float xs[] = {1.f, 2.f, 3.f, 5.f, 0.5f, 4.f, 9.f, 7.f};
+        for(float u : xs)
+        {
+            Alg a{u};
+            ok += (rsqrt(a) * sqrt(a) == Alg{1.0f});
+            cons += (rsqrt(a) == Alg{1.0f} / sqrt(a));
+            ++n;
+        }
+        check(ok == n, "field rsqrt: rsqrt(x)*sqrt(x) == 1");
+        check(cons == n, "field rsqrt == 1/sqrt");
+    }
+    // Exp variant: sqrt multiplicative, cbrt a perfect cube root (3 coprime to lambda)
+    check(Exp::alg_cfg().has_cbrt, "exp: cbrt is a perfect cube root (has_cbrt)");
+    {
+        long  ms = 0, c3 = 0, n = 0;
+        float xs[] = {1.f, 2.f, 3.f, 5.f, 7.f, 0.5f, 1.5f, 6.f};
+        for(float u : xs)
+            for(float v : xs)
+            {
+                Exp a{u}, b{v};
+                ms += (sqrt(a * b) == sqrt(a) * sqrt(b));
+                c3 += (cbrt(a) * cbrt(a) * cbrt(a) == a);
+                ++n;
+            }
+        check(ms == n, "exp sqrt: multiplicative");
+        check(c3 == n, "exp cbrt: cbrt(x)^3 == x (perfect)");
+    }
+    // Trig variant: sqrt multiplicative; cbrt has no cube root here (3 | group order)
+    check(!Trig::alg_cfg().has_cbrt, "trig: cbrt is a tag (3 divides the group order)");
+    {
+        long  ms = 0, n = 0;
+        float xs[] = {1.f, 2.f, 3.f, 5.f, 0.5f, 1.5f};
+        for(float u : xs)
+            for(float v : xs)
+            {
+                Trig a{u}, b{v};
+                ms += (sqrt(a * b) == sqrt(a) * sqrt(b));
+                ++n;
+            }
+        check(ms == n, "trig sqrt: multiplicative");
+    }
+    // contrast: the Triton's sqrt is a tag (not multiplicative)
+    check(sqrt(Scr{2.0f} * Scr{3.0f}) != sqrt(Scr{2.0f}) * sqrt(Scr{3.0f}),
+          "fpsan Triton: sqrt is a tag (not multiplicative)");
+
+    // ---- FieldWithMulCasts casts form a commutative diagram of homomorphisms ----
+    // The fp4|fp8|fp16|fp32|fp64 primes are a coprime tower, so every widening and
+    // narrowing cast is multiplicative, they compose, and narrow(widen(x)) == x.
+    // The fp32<->fp64 edge dlogs over p_32-1 ~ 2^32 via Pohlig-Hellman.
+    {
+        using F8  = Value<fp8_e4m3, Semantics::FieldWithMulCasts, Conversions::Explicit>;
+        using F16 = Value<_Float16, Semantics::FieldWithMulCasts, Conversions::Explicit>;
+        using F32 = Value<float, Semantics::FieldWithMulCasts, Conversions::Explicit>;
+        using F64 = Value<double, Semantics::FieldWithMulCasts, Conversions::Explicit>;
+        long  w16 = 0, w32 = 0, nA = 0, rt = 0, w64 = 0, n64 = 0, rt64 = 0, n = 0;
+        float xs[] = {1.f, 2.f, 3.f, 0.5f, 4.f, 6.f, 1.5f, 0.25f};
+        for(float u : xs)
+            for(float v : xs)
+            {
+                F8  a{static_cast<fp8_e4m3>(u)}, b{static_cast<fp8_e4m3>(v)};
+                F32 c{u}, d{v};
+                F64 e{(double)u}, f{(double)v};
+                // widening is multiplicative (fp8 -> fp16, fp8 -> fp32)
+                w16 += (cast<_Float16>(a * b) == cast<_Float16>(a) * cast<_Float16>(b));
+                w32 += (cast<float>(a * b) == cast<float>(a) * cast<float>(b));
+                // narrowing is multiplicative (fp32 -> fp8)
+                nA += (cast<fp8_e4m3>(c * d) == cast<fp8_e4m3>(c) * cast<fp8_e4m3>(d));
+                // up-then-down round trip recovers the original (narrow . widen == id)
+                rt += (cast<fp8_e4m3>(cast<float>(a)) == a);
+                // fp64 joins the tower: fp32<->fp64 multiplicative (Pohlig-Hellman),
+                // and the fp32->fp64->fp32 round trip is the identity.
+                w64 += (cast<double>(c * d) == cast<double>(c) * cast<double>(d));
+                n64 += (cast<float>(e * f) == cast<float>(e) * cast<float>(f));
+                rt64 += (cast<float>(cast<double>(c)) == c);
+                ++n;
+            }
+        check(w16 == n,
+              "field-with-mul-casts fp8->fp16: multiplicative "
+              "(cast(x*y)==cast(x)*cast(y))");
+        check(w32 == n, "field-with-mul-casts fp8->fp32: multiplicative");
+        check(nA == n, "field-with-mul-casts fp32->fp8: narrowing is multiplicative");
+        check(rt == n,
+              "field-with-mul-casts: narrow(widen(x)) == x "
+              "(round-trip identity)");
+        check(w64 == n,
+              "field-with-mul-casts fp32->fp64: multiplicative "
+              "(Pohlig-Hellman dlog)");
+        check(n64 == n,
+              "field-with-mul-casts fp64->fp32: narrowing is "
+              "multiplicative (Pohlig-Hellman)");
+        check(rt64 == n, "field-with-mul-casts: narrow(widen(x)) == x across fp32<->fp64");
+        // commutative diagram: widen direct == widen via an intermediate width
+        {
+            long ok = 0, ok64 = 0, m = 0;
+            for(float u : xs)
+            {
+                F8 a{static_cast<fp8_e4m3>(u)};
+                ok += (cast<float>(a)
+                       == cast<float>(cast<_Float16>(a))); // fp8->fp32 == fp8->fp16->fp32
+                // fp8->fp64 direct == fp8->fp32->fp64 (fp64 composes into the diagram)
+                ok64 += (cast<double>(a) == cast<double>(cast<float>(a)));
+                ++m;
+            }
+            check(ok == m,
+                  "field-with-mul-casts: fp8->fp32 == fp8->fp16->fp32 "
+                  "(widening composes)");
+            check(ok64 == m,
+                  "field-with-mul-casts: fp8->fp64 == fp8->fp32->fp64 "
+                  "(fp64 composes)");
+        }
+        check(cast<_Float16>(F8{static_cast<fp8_e4m3>(1.0f)}) == F16{static_cast<_Float16>(1.0f)},
+              "field-with-mul-casts fp8->fp16: cast(1) == 1");
+        check(cast<double>(F8{static_cast<fp8_e4m3>(1.0f)}) == F64{1.0},
+              "field-with-mul-casts fp8->fp64: cast(1) == 1");
+        check(cast<float>(F32{1.25f}) == F32{1.25f},
+              "field-with-mul-casts: same-format same-width is identity");
+        {
+            using E5 = Value<fp8_e5m2, Semantics::FieldWithMulCasts, Conversions::Explicit>;
+            F8       a{static_cast<fp8_e4m3>(1.5f)};
+            const E5 direct = cast<fp8_e5m2>(a);
+            const E5 via32  = cast<fp8_e5m2>(cast<float>(a));
+            check(direct == via32,
+                  "field-with-mul-casts: same-width fp8 format cast composes through fp32");
+            check(cast<fp8_e4m3>(direct) == a,
+                  "field-with-mul-casts: same-width fp8 format cast round-trips");
+            check(direct.fpsan_payload() != static_cast<typename E5::bits_type>(a.fpsan_payload()),
+                  "field-with-mul-casts: same-width fp8 format cast is not identity");
+        }
+#if FPSAN_HAS_FLOAT16 && FPSAN_HAS_BF16
+        {
+            using BF16 = Value<__bf16, Semantics::FieldWithMulCasts, Conversions::Explicit>;
+            F16        h{static_cast<_Float16>(1.1f)};
+            const BF16 direct = cast<__bf16>(h);
+            const BF16 via32  = cast<__bf16>(cast<float>(h));
+            check(direct == via32,
+                  "field-with-mul-casts: f16->bf16 same-width cast composes through fp32");
+            check(cast<_Float16>(direct) == h,
+                  "field-with-mul-casts: f16<->bf16 same-width cast round-trips");
+            check(direct.fpsan_payload()
+                      != static_cast<typename BF16::bits_type>(h.fpsan_payload()),
+                  "field-with-mul-casts: f16->bf16 same-width cast is not identity");
+        }
+#endif
+    }
+
+    // ---- Inf / NaN reach the payload, via 1/0 ----
+    check(((Alg{1.0f} / Alg{0.0f}) / (Alg{1.0f} / Alg{0.0f}))
+              == (Alg{1.0f} / Alg{0.0f}) / (Alg{1.0f} / Alg{0.0f}),
+          "alg: Inf compares equal to itself (deterministic)");
+
+    // ---- orthogonality: the SAME generic dataflow runs for every Semantics, and
+    //      is reassociation-invariant in a payload mode (the sanitizer property) --
+    {
+        float A[4]  = {0.5f, 1.25f, -0.75f, 2.0f};
+        float B[4]  = {2.0f, 0.5f, 4.0f, 1.5f};
+        int   o1[4] = {0, 1, 2, 3};
+        int   o2[4] = {3, 1, 0, 2}; // a different accumulation order
+        // compiles & runs identically for Float, FPSan, and the algebraic variants:
+        (void)mac<F<Semantics::Native>>(A, B, 4, o1);
+        (void)mac<F<Semantics::Triton>>(A, B, 4, o1);
+        check(mac<Alg>(A, B, 4, o1) == mac<Alg>(A, B, 4, o2),
+              "alg: matmul is reassociation-invariant (sanitizer property)");
+        check(mac<Exp>(A, B, 4, o1) == mac<Exp>(A, B, 4, o2),
+              "exp-variant: matmul is reassociation-invariant");
+    }
+
+    // ---- faithful fma: a*b+c exactly (algebraic model) ----
+    check(fma(Alg{2.0f}, Alg{3.0f}, Alg{1.0f}) == Alg{7.0f}, "alg: fma(2,3,1) == 7");
+    check(fma(Alg{1.5f}, Alg{2.0f}, Alg{0.5f}) == Alg{3.5f}, "alg: fma value-faithful");
+
+    // ---- min/max: deterministic, commutative, reassociation-invariant ----
+    check(min(Alg{1.0f}, Alg{2.0f}) == min(Alg{2.0f}, Alg{1.0f}), "alg: min commutes");
+    check(max(min(Alg{3.0f}, Alg{1.0f}), Alg{2.0f}) == max(Alg{2.0f}, min(Alg{1.0f}, Alg{3.0f})),
+          "alg: min/max reassoc-invariant");
+
+    // ---- cast: same-width is identity; cross-width is deterministic ----
+    check(cast<float>(Alg{1.25f}) == Alg{1.25f}, "alg: same-width cast is identity");
+    {
+        using H = Value<_Float16, Semantics::Field, Conversions::Explicit>;
+        H h1    = cast<_Float16>(Alg{1.5f});
+        H h2    = cast<_Float16>(Alg{1.5f});
+        check(h1 == h2, "alg: cross-width cast is deterministic");
+    }
+
+    // ---- 64-bit element types (double): the same scorecard, every section -----
+    // Runs the full battery set at n ~ 2^64, exercising the 128-bit modular
+    // multiply, the overflow-safe modular add, the overflow-free cbrt exponent,
+    // and -- for log/log2/log10 on the d ~ 2^31 channel -- the Pollard-rho dlog.
+    run_scorecard<D<Semantics::Field>,
+                  D<Semantics::SophieGermainRing>,
+                  D<Semantics::PythagoreanRing>>(
+        "dbl field", "dbl SophieGermain", "dbl Pythagorean");
+    run_scorecard<D<Semantics::Field2>,
+                  D<Semantics::SophieGermainRing2>,
+                  D<Semantics::PythagoreanRing2>>(
+        "dbl field2", "dbl SophieGermain2", "dbl Pythagorean2");
+    battery_fast_field<D<Semantics::FieldFast>>("dbl fieldFast");
+    battery_fast_field<D<Semantics::FieldFast2>>("dbl fieldFast2");
+    check(D<Semantics::Field>{0.5}.fpsan_payload() != D<Semantics::Field2>{0.5}.fpsan_payload(),
+          "dbl field/field2 use distinct moduli");
+
+    std::printf("passed %ld, failed %ld\n", pass, fail);
+    return fail == 0 ? 0 : 1;
+}

@@ -60,7 +60,7 @@ namespace fpsan
                           "double, _Float16, __bf16 (the latter two where available).");
         };
 
-#define FPSAN_DEFINE_FP_TRAITS(T, MANT, EXP, BIAS)                                               \
+#define FPSAN_DEFINE_FP_TRAITS_WITH_CAST_TAG(T, MANT, EXP, BIAS, CAST_TAG)                       \
     template <>                                                                                  \
     struct fp_traits<T>                                                                          \
     {                                                                                            \
@@ -70,8 +70,12 @@ namespace fpsan
         static constexpr unsigned mantissa_bits = (MANT);                                        \
         static constexpr unsigned exponent_bits = (EXP);                                         \
         static constexpr int      bias          = (BIAS);                                        \
+        static constexpr unsigned cast_tag      = (CAST_TAG);                                    \
         static_assert(1 + (EXP) + (MANT) == bit_width, "fpsan: inconsistent fp_traits for " #T); \
     }
+
+#define FPSAN_DEFINE_FP_TRAITS(T, MANT, EXP, BIAS) \
+    FPSAN_DEFINE_FP_TRAITS_WITH_CAST_TAG(T, MANT, EXP, BIAS, 0)
 
         FPSAN_DEFINE_FP_TRAITS(float, 23, 8, 127);
         FPSAN_DEFINE_FP_TRAITS(double, 52, 11, 1023);
@@ -118,7 +122,7 @@ namespace fpsan
         FPSAN_DEFINE_FP_TRAITS(_Float16, 10, 5, 15);
 #endif
 #if FPSAN_HAS_BF16
-        FPSAN_DEFINE_FP_TRAITS(__bf16, 7, 8, 127);
+        FPSAN_DEFINE_FP_TRAITS_WITH_CAST_TAG(__bf16, 7, 8, 127, 1);
 #endif
 
         // True when fp_traits<T> is a usable (defined) specialization.

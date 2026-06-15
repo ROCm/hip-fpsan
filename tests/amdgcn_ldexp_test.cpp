@@ -14,6 +14,8 @@
 #include "fpsan/amdgcn_math.hpp"
 #include "fpsan/fpsan.hpp"
 
+#include "fpsan_semantics.hpp"
+
 #include "hip_test_utils.hpp"
 #include "test_random.hpp"
 
@@ -75,22 +77,23 @@ TEST(AmdgcnLdexp, F32)
                 EXPECT_EQ(got[i], std::ldexp(in[i], n)) << "n=" << n << " i=" << i;
             (void)hipFree(dO);
         }
-        // FPSan: payload == (v * 2^n) in the ring.
-        {
-            using VF = Value<float, Semantics::Triton, kCC>;
+        // FPSan: payload == (v * 2^n) in the ring, for every algebraic model.
+        fpsan_test::for_each_fpsan_semantics([&](auto sem) {
+            constexpr Semantics S = decltype(sem)::value;
+            using VF              = Value<float, S, kCC>;
             std::vector<std::uint32_t> ref(N);
             for(int i = 0; i < N; ++i)
                 ref[i] = (VF(in[i]) * VF(std::ldexp(1.0f, n))).fpsan_payload();
             std::uint32_t* dO;
             HIP_CHECK(hipMalloc(&dO, N * sizeof(std::uint32_t)));
-            k_ldexpf<Semantics::Triton, std::uint32_t><<<1, N>>>(dIn, dO, n);
+            k_ldexpf<S, std::uint32_t><<<1, N>>>(dIn, dO, n);
             HIP_CHECK(hipDeviceSynchronize());
             std::vector<std::uint32_t> got(N);
             HIP_CHECK(hipMemcpy(got.data(), dO, N * sizeof(std::uint32_t), hipMemcpyDeviceToHost));
             for(int i = 0; i < N; ++i)
                 EXPECT_EQ(got[i], ref[i]) << "FPSan n=" << n << " i=" << i;
             (void)hipFree(dO);
-        }
+        });
     }
     (void)hipFree(dIn);
 }
@@ -131,21 +134,22 @@ TEST(AmdgcnLdexp, F64)
                 EXPECT_EQ(got[i], std::ldexp(in[i], n)) << "n=" << n << " i=" << i;
             (void)hipFree(dO);
         }
-        {
-            using VD = Value<double, Semantics::Triton, kCC>;
+        fpsan_test::for_each_fpsan_semantics([&](auto sem) {
+            constexpr Semantics S = decltype(sem)::value;
+            using VD              = Value<double, S, kCC>;
             std::vector<std::uint64_t> ref(N);
             for(int i = 0; i < N; ++i)
                 ref[i] = (VD(in[i]) * VD(std::ldexp(1.0, n))).fpsan_payload();
             std::uint64_t* dO;
             HIP_CHECK(hipMalloc(&dO, N * sizeof(std::uint64_t)));
-            k_ldexp<Semantics::Triton, std::uint64_t><<<1, N>>>(dIn, dO, n);
+            k_ldexp<S, std::uint64_t><<<1, N>>>(dIn, dO, n);
             HIP_CHECK(hipDeviceSynchronize());
             std::vector<std::uint64_t> got(N);
             HIP_CHECK(hipMemcpy(got.data(), dO, N * sizeof(std::uint64_t), hipMemcpyDeviceToHost));
             for(int i = 0; i < N; ++i)
                 EXPECT_EQ(got[i], ref[i]) << "FPSan n=" << n << " i=" << i;
             (void)hipFree(dO);
-        }
+        });
     }
     (void)hipFree(dIn);
 }
@@ -190,8 +194,9 @@ TEST(AmdgcnLdexp, F16)
             }
             (void)hipFree(dO);
         }
-        {
-            using VH = Value<_Float16, Semantics::Triton, kCC>;
+        fpsan_test::for_each_fpsan_semantics([&](auto sem) {
+            constexpr Semantics S = decltype(sem)::value;
+            using VH              = Value<_Float16, S, kCC>;
             std::vector<std::uint32_t> ref(N);
             for(int i = 0; i < N; ++i)
                 ref[i] = (VH(static_cast<_Float16>(in[i]))
@@ -199,14 +204,14 @@ TEST(AmdgcnLdexp, F16)
                              .fpsan_payload();
             std::uint32_t* dO;
             HIP_CHECK(hipMalloc(&dO, N * sizeof(std::uint32_t)));
-            k_ldexph<Semantics::Triton, std::uint32_t><<<1, N>>>(dIn, dO, n);
+            k_ldexph<S, std::uint32_t><<<1, N>>>(dIn, dO, n);
             HIP_CHECK(hipDeviceSynchronize());
             std::vector<std::uint32_t> got(N);
             HIP_CHECK(hipMemcpy(got.data(), dO, N * sizeof(std::uint32_t), hipMemcpyDeviceToHost));
             for(int i = 0; i < N; ++i)
                 EXPECT_EQ(got[i], ref[i]) << "FPSan n=" << n << " i=" << i;
             (void)hipFree(dO);
-        }
+        });
     }
     (void)hipFree(dIn);
 }

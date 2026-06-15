@@ -26,6 +26,7 @@
 #include "fpsan/amdgcn_matrix.hpp"
 #include "fpsan/fpsan.hpp"
 
+#include "fpsan_semantics.hpp"
 #include "hip_test_utils.hpp"
 #include "test_random.hpp"
 
@@ -179,18 +180,18 @@ __global__ void k_float_dataflow(const typename Harness<Traits>::AElem* A,
 
 // FPSan-mode kernel: writes the per-element FPSan payload to a row-major buffer
 // of the matching unsigned integer type.
-template <class Traits>
+template <class Traits, Semantics S>
 __global__ void k_fpsan(const typename Harness<Traits>::AElem* A,
                         const typename Harness<Traits>::BElem* B,
                         const typename Harness<Traits>::CElem* C,
                         typename Harness<Traits>::CBits*       Dpay)
 {
-    int                                                           lane = threadIdx.x;
-    Value<typename Harness<Traits>::AVec, Semantics::Triton, kCC> a;
-    Value<typename Harness<Traits>::BVec, Semantics::Triton, kCC> b;
-    Value<typename Harness<Traits>::CVec, Semantics::Triton, kCC> c;
-    load_frags<Traits, Semantics::Triton>(A, B, C, lane, a, b, c);
-    auto d = Traits::template call<Semantics::Triton, kCC>(a, b, c);
+    int                                           lane = threadIdx.x;
+    Value<typename Harness<Traits>::AVec, S, kCC> a;
+    Value<typename Harness<Traits>::BVec, S, kCC> b;
+    Value<typename Harness<Traits>::CVec, S, kCC> c;
+    load_frags<Traits, S>(A, B, C, lane, a, b, c);
+    auto d = Traits::template call<S, kCC>(a, b, c);
     for(int e = 0; e < Harness<Traits>::c_lanes; ++e)
         Dpay[cd_m_from_lane(lane, e) * N + (lane & 15)] = d.get(e).fpsan_payload();
 }
@@ -279,24 +280,23 @@ void run_layout_matches_hardware()
     (void)hipFree(dOurs);
 }
 
-// (2) Payload test: shipped FPSan path vs host scalar FPSan reference.
-template <class Traits>
+// (2) Payload test: the shipped FPSan path vs a host scalar FPSan reference, in
+// one semantics S. Self-consistency (device payload == host recompute in S), so
+// it holds for every algebraic model; driven over all of them by the caller below.
+template <class Traits, Semantics S>
 void run_fpsan_matches_scalar_reference()
 {
-    using AE    = typename Harness<Traits>::AElem;
-    using BE    = typename Harness<Traits>::BElem;
-    using CE    = typename Harness<Traits>::CElem;
-    using CBits = typename Harness<Traits>::CBits;
-    int ndev    = 0;
-    if(hipGetDeviceCount(&ndev) != hipSuccess || ndev == 0)
-        GTEST_SKIP() << "no HIP device";
+    using AE       = typename Harness<Traits>::AElem;
+    using BE       = typename Harness<Traits>::BElem;
+    using CE       = typename Harness<Traits>::CElem;
+    using CBits    = typename Harness<Traits>::CBits;
     Mats<Traits> m = make_inputs<Traits>();
 
     // Host scalar FPSan reference using the same dataflow:
     //   D[m][n] = C[m][n] + sum_k cast<CE>(A[m][k]) * cast<CE>(B[k][n]).
-    using VA = Value<AE, Semantics::Triton, kCC>;
-    using VB = Value<BE, Semantics::Triton, kCC>;
-    using VC = Value<CE, Semantics::Triton, kCC>;
+    using VA = Value<AE, S, kCC>;
+    using VB = Value<BE, S, kCC>;
+    using VC = Value<CE, S, kCC>;
     std::vector<CBits> ref(M * N);
     for(int mm = 0; mm < M; ++mm)
         for(int nn = 0; nn < N; ++nn)
@@ -313,7 +313,7 @@ void run_fpsan_matches_scalar_reference()
     CE*    dC = to_dev(m.C);
     CBits* dD;
     HIP_CHECK(hipMalloc(&dD, M * N * sizeof(CBits)));
-    k_fpsan<Traits><<<1, kWaveSize>>>(dA, dB, dC, dD);
+    k_fpsan<Traits, S><<<1, kWaveSize>>>(dA, dB, dC, dD);
     HIP_CHECK(hipDeviceSynchronize());
     std::vector<CBits> got(M * N);
     HIP_CHECK(hipMemcpy(got.data(), dD, M * N * sizeof(CBits), hipMemcpyDeviceToHost));
@@ -323,6 +323,17 @@ void run_fpsan_matches_scalar_reference()
     (void)hipFree(dB);
     (void)hipFree(dC);
     (void)hipFree(dD);
+}
+
+// Run the payload test for EVERY FPSan-family semantics (Triton + all algebraic
+// algebraic models). One device check up front; then the central list drives it.
+template <class Traits>
+void run_fpsan_matches_scalar_reference_all()
+{
+    if(!have_device())
+        GTEST_SKIP() << "no HIP device";
+    fpsan_test::for_each_fpsan_semantics(
+        [](auto sem) { run_fpsan_matches_scalar_reference<Traits, decltype(sem)::value>(); });
 }
 
 // ---------------------------------------------------------------------------
@@ -516,7 +527,7 @@ struct WmmaF32Bf8Bf8
     }                                                               \
     TEST(FPSAN_WMMA_GFX12_SUITE(NAME), FpsanMatchesScalarReference) \
     {                                                               \
-        run_fpsan_matches_scalar_reference<NAME>();                 \
+        run_fpsan_matches_scalar_reference_all<NAME>();             \
     }
 
 FPSAN_WMMA_GFX12_TESTS(WmmaF32F16)

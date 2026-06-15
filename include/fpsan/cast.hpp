@@ -36,6 +36,33 @@ namespace fpsan
         {
             return To(static_cast<ToFT>(v.to_float()));
         }
+        else if constexpr(detail::is_algebraic_semantics(S))
+        {
+            // Algebraic variants: a per-width modulus makes casts un-faithful by
+            // construction (widening is information-theoretically uncomputable from
+            // the narrow residue; see algebraic-fpsan.md). The
+            // FieldWithMulCasts variants opt into the expensive
+            // multiplicative cast tower, including format-distinguishing maps for
+            // same-width families such as f16/bf16 and e4m3/e5m2. All other
+            // algebraic variants use a deterministic, in-range convention -- Inf/NaN
+            // map across, and a finite residue reduces mod the destination modulus.
+            using ToBits    = typename To::bits_type;
+            const auto from = Value<FromFT, S, C>::alg_cfg();
+            const auto to   = To::alg_cfg();
+            const auto p    = v.fpsan_payload();
+            if constexpr(detail::has_multiplicative_field_casts(S))
+            {
+                return To::from_fpsan_payload(static_cast<ToBits>(detail::alg_cast1(from, to, p)));
+            }
+            else
+            {
+                if(from.has_inf_nan && p == from.inf_code)
+                    return To::from_fpsan_payload(static_cast<ToBits>(to.inf_code));
+                if(from.has_inf_nan && p == from.nan_code)
+                    return To::from_fpsan_payload(static_cast<ToBits>(to.nan_code));
+                return To::from_fpsan_payload(static_cast<ToBits>(p % to.n));
+            }
+        }
         else
         {
             using FromBits = typename Value<FromFT, S, C>::bits_type;

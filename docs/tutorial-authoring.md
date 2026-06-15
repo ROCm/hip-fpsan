@@ -3,11 +3,9 @@
 This walks through writing new numeric code directly against the library. The
 companion program is [`examples/authoring_example.cpp`](../examples/authoring_example.cpp).
 
-> Reminder: FPSan is a *checking* tool, not a faster float. In FPSan mode the
-> numeric values are scrambled on purpose; what is preserved is the **algebra**
-> (associativity, distributivity, the exp/trig identities). Two computations
-> that are equal as real-number expressions produce the **same payload**, even
-> when IEEE rounding would make them differ.
+> Reminder: FPSan is a *checking* tool, not a faster float. In FPSan-family modes the
+> numeric values are replaced by fingerprints on purpose; what is preserved is
+> the algebra promised by the selected `Semantics`.
 
 ## 1. Pick a scalar type
 
@@ -22,7 +20,7 @@ The three template parameters are:
 | parameter | meaning |
 |-----------|---------|
 | `float_type` | the underlying real type: `float`, `double`, `_Float16`, `__bf16`, `fpsan::fp8_e4m3`/`fp8_e5m2`, or a Clang/GCC ext-vector of any of these |
-| `semantics` | `Semantics::Native` = ordinary IEEE arithmetic; `Semantics::Triton` = FPSan payload algebra |
+| `semantics` | `Semantics::Native` = ordinary IEEE-754 arithmetic; [`Semantics::Triton`](triton-fpsan.md) = Triton FPSan fingerprint arithmetic; [algebraic variants](algebraic-fpsan.md) such as `Semantics::Field` = value-residue fingerprint arithmetic |
 | `conversions` | `Conversions::Implicit` = implicit casts like a POD; `Conversions::Explicit` = every conversion/1-arg ctor is `explicit` |
 
 ## 2. Write ordinary-looking code
@@ -48,7 +46,7 @@ float  y = static_cast<float>(f(a));
 
 ## 3. Check an equivalence
 
-The idiom is to compute the same quantity two ways and compare payloads. In the
+The idiom is to compute the same quantity two ways and compare fingerprints. In the
 example we sum a vector forward and backward:
 
 ```cpp
@@ -58,22 +56,23 @@ template <class S> S sum_reverse(const std::vector<float>& v) { /* ... */ }
 
 With `float`, `sum_forward != sum_reverse` for a catastrophic input
 (`{1e8, 1, 2, 3, -1e8, ...}`). With `Value<float, fpsan::Semantics::Triton, fpsan::Conversions::Implicit>`, the two
-payloads are **equal** — addition is exactly associative in the payload ring.
+fingerprints are **equal** — addition is exactly associative in the fingerprint ring.
 
 ## 4. Inspecting values
 
-Include `<fpsan/io.hpp>` for `operator<<` (host only). In FPSan mode it prints
-both the integer payload and the (scrambled) unembedded float:
+Include `<fpsan/io.hpp>` for `operator<<` (host only). In FPSan-family modes it
+prints the stored fingerprint in the terms meaningful for that semantics:
 
 ```cpp
 #include <fpsan/io.hpp>
-std::cout << f(a) << "\n";   // fpsan(payload=..., unembed=...)
+std::cout << f(a) << "\n";   // Triton(payload=0x...) or Field(payload=... mod ...)
 ```
 
-`x.fpsan_payload()` returns the raw payload (only defined in FPSan mode);
-`x.to_float()` returns the represented float. A round trip with no arithmetic —
-`static_cast<float>(Scalar(x))` — recovers `x` exactly, because the embedding is
-a bijection.
+`x.fpsan_payload()` returns the raw stored integer (only defined in FPSan-family modes);
+`x.to_float()` returns the represented float in `Native` mode and in
+[`Triton`](triton-fpsan.md) mode. [Algebraic fingerprints](algebraic-fpsan.md)
+are residues, not recoverable floats, so `to_float()` is intentionally
+unavailable for algebraic semantics.
 
 ## 5. Build
 
@@ -84,4 +83,6 @@ link the CMake target:
 target_link_libraries(your_target PRIVATE fpsan::fpsan)
 ```
 
-Next: [porting an existing codebase](tutorial-porting.md).
+Next: [porting an existing codebase](tutorial-porting.md). For semantics
+selection, see [Algebraic FPSan semantics](algebraic-fpsan.md) and
+[Triton FPSan from first principles](triton-fpsan.md).

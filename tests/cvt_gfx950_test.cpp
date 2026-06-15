@@ -17,6 +17,8 @@
 #include "fpsan/amdgcn_cvt.hpp"
 #include "fpsan/fpsan.hpp"
 
+#include "fpsan_semantics.hpp"
+
 #include "hip_test_utils.hpp"
 #include "test_random.hpp"
 
@@ -112,15 +114,16 @@ void run_cvt_pk()
         (void)hipFree(dO);
     }
     // FPSan: must equal the direct payload-ring composition
-    // cast<float>(cast<fp8>).
-    {
-        using VF = Value<float, Semantics::Triton, kCC>;
+    // cast<float>(cast<fp8>), for every FPSan-family semantics.
+    fpsan_test::for_each_fpsan_semantics([&](auto sem) {
+        constexpr Semantics S = decltype(sem)::value;
+        using VF              = Value<float, S, kCC>;
         std::vector<std::uint32_t> ref(2 * LANES);
         for(int i = 0; i < 2 * LANES; ++i)
             ref[i] = fpsan::cast<float>(fpsan::cast<FP8>(VF(in[i]))).fpsan_payload();
         std::uint32_t* dO;
         HIP_CHECK(hipMalloc(&dO, 2 * LANES * sizeof(std::uint32_t)));
-        k_run<Semantics::Triton, FP8, WordSel, std::uint32_t><<<1, LANES>>>(dIn, dO);
+        k_run<S, FP8, WordSel, std::uint32_t><<<1, LANES>>>(dIn, dO);
         HIP_CHECK(hipDeviceSynchronize());
         std::vector<std::uint32_t> got(2 * LANES);
         HIP_CHECK(
@@ -128,7 +131,7 @@ void run_cvt_pk()
         for(int i = 0; i < 2 * LANES; ++i)
             EXPECT_EQ(got[i], ref[i]) << "FPSan payload at " << i;
         (void)hipFree(dO);
-    }
+    });
     (void)hipFree(dIn);
 }
 
@@ -170,35 +173,47 @@ TEST(CvtPkF32, PackWritesSameWordInBothModes)
     for(auto& x : in)
         x = fpsan_test::pick_int_valued<float>(rng, 1, 4); // nonzero fp8 bytes
     float* dIn = to_dev(in);
-    int *  dLoF, *dHiF, *dLoP, *dHiP;
-    HIP_CHECK(hipMalloc(&dLoF, LANES * 4));
-    HIP_CHECK(hipMalloc(&dHiF, LANES * 4));
-    HIP_CHECK(hipMalloc(&dLoP, LANES * 4));
-    HIP_CHECK(hipMalloc(&dHiP, LANES * 4));
-    k_pack_words<Semantics::Native><<<1, LANES>>>(dIn, dLoF, dHiF);
-    k_pack_words<Semantics::Triton><<<1, LANES>>>(dIn, dLoP, dHiP);
-    HIP_CHECK(hipDeviceSynchronize());
-    std::vector<int> loF(LANES), hiF(LANES), loP(LANES), hiP(LANES);
-    HIP_CHECK(hipMemcpy(loF.data(), dLoF, LANES * 4, hipMemcpyDeviceToHost));
-    HIP_CHECK(hipMemcpy(hiF.data(), dHiF, LANES * 4, hipMemcpyDeviceToHost));
-    HIP_CHECK(hipMemcpy(loP.data(), dLoP, LANES * 4, hipMemcpyDeviceToHost));
-    HIP_CHECK(hipMemcpy(hiP.data(), dHiP, LANES * 4, hipMemcpyDeviceToHost));
-    for(int l = 0; l < LANES; ++l)
+
+    // Float oracle: DstLo touches only the low word, DstHi only the high word.
     {
-        // DstLo=true touches only the low 16 bits; DstLo=false only the high 16.
-        EXPECT_EQ(static_cast<unsigned>(loF[l]) & 0xFFFF0000u, 0u) << "Float lo " << l;
-        EXPECT_EQ(static_cast<unsigned>(loP[l]) & 0xFFFF0000u, 0u) << "FPSan lo " << l;
-        EXPECT_EQ(static_cast<unsigned>(hiF[l]) & 0x0000FFFFu, 0u) << "Float hi " << l;
-        EXPECT_EQ(static_cast<unsigned>(hiP[l]) & 0x0000FFFFu, 0u) << "FPSan hi " << l;
-        // ...and both modes must leave the low word nonzero for DstLo=true.
-        EXPECT_NE(static_cast<unsigned>(loF[l]) & 0x0000FFFFu, 0u);
-        EXPECT_NE(static_cast<unsigned>(loP[l]) & 0x0000FFFFu, 0u);
+        int *dLoF, *dHiF;
+        HIP_CHECK(hipMalloc(&dLoF, LANES * 4));
+        HIP_CHECK(hipMalloc(&dHiF, LANES * 4));
+        k_pack_words<Semantics::Native><<<1, LANES>>>(dIn, dLoF, dHiF);
+        HIP_CHECK(hipDeviceSynchronize());
+        std::vector<int> loF(LANES), hiF(LANES);
+        HIP_CHECK(hipMemcpy(loF.data(), dLoF, LANES * 4, hipMemcpyDeviceToHost));
+        HIP_CHECK(hipMemcpy(hiF.data(), dHiF, LANES * 4, hipMemcpyDeviceToHost));
+        for(int l = 0; l < LANES; ++l)
+        {
+            EXPECT_EQ(static_cast<unsigned>(loF[l]) & 0xFFFF0000u, 0u) << "Float lo " << l;
+            EXPECT_EQ(static_cast<unsigned>(hiF[l]) & 0x0000FFFFu, 0u) << "Float hi " << l;
+            EXPECT_NE(static_cast<unsigned>(loF[l]) & 0x0000FFFFu, 0u);
+        }
+        (void)hipFree(dLoF);
+        (void)hipFree(dHiF);
     }
+    // The same word-placement invariant must hold in every FPSan-family semantics.
+    fpsan_test::for_each_fpsan_semantics([&](auto sem) {
+        constexpr Semantics S = decltype(sem)::value;
+        int *               dLoP, *dHiP;
+        HIP_CHECK(hipMalloc(&dLoP, LANES * 4));
+        HIP_CHECK(hipMalloc(&dHiP, LANES * 4));
+        k_pack_words<S><<<1, LANES>>>(dIn, dLoP, dHiP);
+        HIP_CHECK(hipDeviceSynchronize());
+        std::vector<int> loP(LANES), hiP(LANES);
+        HIP_CHECK(hipMemcpy(loP.data(), dLoP, LANES * 4, hipMemcpyDeviceToHost));
+        HIP_CHECK(hipMemcpy(hiP.data(), dHiP, LANES * 4, hipMemcpyDeviceToHost));
+        for(int l = 0; l < LANES; ++l)
+        {
+            EXPECT_EQ(static_cast<unsigned>(loP[l]) & 0xFFFF0000u, 0u) << "FPSan lo " << l;
+            EXPECT_EQ(static_cast<unsigned>(hiP[l]) & 0x0000FFFFu, 0u) << "FPSan hi " << l;
+            EXPECT_NE(static_cast<unsigned>(loP[l]) & 0x0000FFFFu, 0u);
+        }
+        (void)hipFree(dLoP);
+        (void)hipFree(dHiP);
+    });
     (void)hipFree(dIn);
-    (void)hipFree(dLoF);
-    (void)hipFree(dHiF);
-    (void)hipFree(dLoP);
-    (void)hipFree(dHiP);
 }
 
 // Exercise the device cvt_pk_f32_fp8 / cvt_pk_f32_bf8 unpack over *every* fp8
@@ -335,21 +350,22 @@ void run_cvt_sr()
             EXPECT_EQ(got[i], in[i]) << "sr round-trip " << i;
         (void)hipFree(dO);
     }
-    {
-        using VF = Value<float, Semantics::Triton, kCC>;
+    fpsan_test::for_each_fpsan_semantics([&](auto sem) {
+        constexpr Semantics S = decltype(sem)::value;
+        using VF              = Value<float, S, kCC>;
         std::vector<std::uint32_t> ref(LANES);
         for(int i = 0; i < LANES; ++i)
             ref[i] = fpsan::cast<float>(fpsan::cast<FP8>(VF(in[i]))).fpsan_payload();
         std::uint32_t* dO;
         HIP_CHECK(hipMalloc(&dO, LANES * sizeof(std::uint32_t)));
-        k_sr_roundtrip<Semantics::Triton, FP8, std::uint32_t><<<1, LANES>>>(dIn, dO);
+        k_sr_roundtrip<S, FP8, std::uint32_t><<<1, LANES>>>(dIn, dO);
         HIP_CHECK(hipDeviceSynchronize());
         std::vector<std::uint32_t> got(LANES);
         HIP_CHECK(hipMemcpy(got.data(), dO, LANES * sizeof(std::uint32_t), hipMemcpyDeviceToHost));
         for(int i = 0; i < LANES; ++i)
             EXPECT_EQ(got[i], ref[i]) << "sr FPSan " << i;
         (void)hipFree(dO);
-    }
+    });
     (void)hipFree(dIn);
 }
 
@@ -400,21 +416,22 @@ void run_cvt_scalef32_unpack()
             EXPECT_EQ(got[i], in[i] * scale) << "scalef32 unpack " << i;
         (void)hipFree(dO);
     }
-    {
-        using VF = Value<float, Semantics::Triton, kCC>;
+    fpsan_test::for_each_fpsan_semantics([&](auto sem) {
+        constexpr Semantics S = decltype(sem)::value;
+        using VF              = Value<float, S, kCC>;
         std::vector<std::uint32_t> ref(LANES);
         for(int i = 0; i < LANES; ++i)
             ref[i] = (fpsan::cast<float>(fpsan::cast<FP8>(VF(in[i]))) * VF(scale)).fpsan_payload();
         std::uint32_t* dO;
         HIP_CHECK(hipMalloc(&dO, LANES * sizeof(std::uint32_t)));
-        k_scalef32_unpack<Semantics::Triton, FP8, std::uint32_t><<<1, LANES>>>(dIn, dO, scale);
+        k_scalef32_unpack<S, FP8, std::uint32_t><<<1, LANES>>>(dIn, dO, scale);
         HIP_CHECK(hipDeviceSynchronize());
         std::vector<std::uint32_t> got(LANES);
         HIP_CHECK(hipMemcpy(got.data(), dO, LANES * sizeof(std::uint32_t), hipMemcpyDeviceToHost));
         for(int i = 0; i < LANES; ++i)
             EXPECT_EQ(got[i], ref[i]) << "scalef32 FPSan " << i;
         (void)hipFree(dO);
-    }
+    });
     (void)hipFree(dIn);
 }
 
@@ -506,8 +523,9 @@ void run_cvt_scalef32_pack()
             EXPECT_EQ(got[i], in[i]) << "scaled pack/unpack round-trip " << i;
         (void)hipFree(dO);
     }
-    {
-        using VF = Value<float, Semantics::Triton, kCC>;
+    fpsan_test::for_each_fpsan_semantics([&](auto sem) {
+        constexpr Semantics S = decltype(sem)::value;
+        using VF              = Value<float, S, kCC>;
         std::vector<std::uint32_t> ref(LANES);
         for(int i = 0; i < LANES; ++i)
             ref[i] = static_cast<std::uint32_t>(
@@ -515,14 +533,14 @@ void run_cvt_scalef32_pack()
                      & 0xFFu;
         std::uint32_t* dO;
         HIP_CHECK(hipMalloc(&dO, LANES * sizeof(std::uint32_t)));
-        k_scaled_pack<Semantics::Triton, FP8, std::uint32_t><<<1, LANES>>>(dIn, dO, scale);
+        k_scaled_pack<S, FP8, std::uint32_t><<<1, LANES>>>(dIn, dO, scale);
         HIP_CHECK(hipDeviceSynchronize());
         std::vector<std::uint32_t> got(LANES);
         HIP_CHECK(hipMemcpy(got.data(), dO, LANES * sizeof(std::uint32_t), hipMemcpyDeviceToHost));
         for(int i = 0; i < LANES; ++i)
             EXPECT_EQ(got[i], ref[i]) << "scaled pack FPSan (divide-by-scale) " << i;
         (void)hipFree(dO);
-    }
+    });
     (void)hipFree(dIn);
 }
 

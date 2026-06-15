@@ -388,9 +388,9 @@ namespace fpsan
     namespace detail
     {
         FPSAN_DEFINE_FP_TRAITS(::fpsan::fp8_e4m3, 3, 4, 7);
-        FPSAN_DEFINE_FP_TRAITS(::fpsan::fp8_e5m2, 2, 5, 15);
+        FPSAN_DEFINE_FP_TRAITS_WITH_CAST_TAG(::fpsan::fp8_e5m2, 2, 5, 15, 1);
         FPSAN_DEFINE_FP_TRAITS(::fpsan::amd_fp8_e4m3, 3, 4, 8);
-        FPSAN_DEFINE_FP_TRAITS(::fpsan::amd_fp8_e5m2, 2, 5, 16);
+        FPSAN_DEFINE_FP_TRAITS_WITH_CAST_TAG(::fpsan::amd_fp8_e5m2, 2, 5, 16, 1);
         // Note: there is intentionally NO fp_traits for the gfx1250 "E5M3" scale
         // format. E5M3 is an 8-bit UNSIGNED magnitude format (5 exp bits bias 15,
         // 3 mantissa bits, no sign bit), so
@@ -401,6 +401,7 @@ namespace fpsan
 // Defined in detail/traits.hpp; fp8 holds the last expansions, so retire the
 // generator here rather than leak it into translation units that pull fpsan.hpp.
 #undef FPSAN_DEFINE_FP_TRAITS
+#undef FPSAN_DEFINE_FP_TRAITS_WITH_CAST_TAG
     } // namespace detail
 
 } // namespace fpsan

@@ -13,6 +13,7 @@
 #include "fpsan/amdgcn_wave.hpp"
 #include "fpsan/fpsan.hpp"
 
+#include "fpsan_semantics.hpp"
 #include "hip_test_utils.hpp"
 
 #include <hip/hip_runtime.h>
@@ -112,11 +113,11 @@ TEST(Xlane, ReadlaneFloat17)
 }
 TEST(Xlane, ReadlaneFpsan0)
 {
-    test_readlane<Semantics::Triton>(0);
+    FPSAN_RUN_ALL_VARIANTS(test_readlane, 0);
 }
 TEST(Xlane, ReadlaneFpsan17)
 {
-    test_readlane<Semantics::Triton>(17);
+    FPSAN_RUN_ALL_VARIANTS(test_readlane, 17);
 }
 #if FPSAN_TEST_FORCE_WAVE_SIZE == 64
 TEST(Xlane, ReadlaneFloat48)
@@ -174,7 +175,7 @@ TEST(Xlane, ReadfirstlaneFloat)
 }
 TEST(Xlane, ReadfirstlaneFpsan)
 {
-    test_readfirstlane<Semantics::Triton>();
+    FPSAN_RUN_ALL_VARIANTS(test_readfirstlane, );
 }
 
 // ---- ds_bpermute (gather: result[lane] = src[addr[lane]/4]) -----------------
@@ -240,11 +241,11 @@ TEST(Xlane, DsBpermuteXorFloat16)
 }
 TEST(Xlane, DsBpermuteXorFpsan1)
 {
-    test_ds_bpermute_xor<Semantics::Triton>(1);
+    FPSAN_RUN_ALL_VARIANTS(test_ds_bpermute_xor, 1);
 }
 TEST(Xlane, DsBpermuteXorFpsan16)
 {
-    test_ds_bpermute_xor<Semantics::Triton>(16);
+    FPSAN_RUN_ALL_VARIANTS(test_ds_bpermute_xor, 16);
 }
 #if FPSAN_TEST_FORCE_WAVE_SIZE == 64
 // off=31 covers the largest same-half XOR in W64 mode.
@@ -332,11 +333,11 @@ TEST(Xlane, DsPermuteXorFloat16)
 }
 TEST(Xlane, DsPermuteXorFpsan1)
 {
-    test_ds_permute_xor<Semantics::Triton>(1);
+    FPSAN_RUN_ALL_VARIANTS(test_ds_permute_xor, 1);
 }
 TEST(Xlane, DsPermuteXorFpsan16)
 {
-    test_ds_permute_xor<Semantics::Triton>(16);
+    FPSAN_RUN_ALL_VARIANTS(test_ds_permute_xor, 16);
 }
 #if FPSAN_TEST_FORCE_WAVE_SIZE == 64
 // off=31 covers the largest same-half XOR in W64 mode.
@@ -385,10 +386,10 @@ __global__ void k_ds_swizzle(Out* out, int pattern_select)
         out[lane] = r.fpsan_payload();
 }
 
-TEST(Xlane, DsSwizzleFloatVsFpsanLaneMapping)
+template <Semantics S>
+void test_ds_swizzle_lane_mapping()
 {
-    int ndev = 0;
-    if(hipGetDeviceCount(&ndev) != hipSuccess || ndev == 0)
+    if(!have_device())
         GTEST_SKIP() << "no HIP device";
     for(int sel = 0; sel < 2; ++sel)
     {
@@ -397,7 +398,7 @@ TEST(Xlane, DsSwizzleFloatVsFpsanLaneMapping)
         HIP_CHECK(hipMalloc(&d_f, LANES * sizeof(float)));
         HIP_CHECK(hipMalloc(&d_p, LANES * sizeof(std::uint32_t)));
         k_ds_swizzle<Semantics::Native><<<1, LANES>>>(d_f, sel);
-        k_ds_swizzle<Semantics::Triton><<<1, LANES>>>(d_p, sel);
+        k_ds_swizzle<S><<<1, LANES>>>(d_p, sel);
         HIP_CHECK(hipDeviceSynchronize());
         std::vector<float>         got_f(LANES);
         std::vector<std::uint32_t> got_p(LANES);
@@ -405,7 +406,7 @@ TEST(Xlane, DsSwizzleFloatVsFpsanLaneMapping)
         HIP_CHECK(
             hipMemcpy(got_p.data(), d_p, LANES * sizeof(std::uint32_t), hipMemcpyDeviceToHost));
         using VF = Value<float, Semantics::Native, kCC>;
-        using VP = Value<float, Semantics::Triton, kCC>;
+        using VP = Value<float, S, kCC>;
         // For each output lane, reverse-engineer which source lane the Float
         // wrapper picked, then verify the FPSan wrapper picked the SAME lane.
         for(int i = 0; i < LANES; ++i)
@@ -508,6 +509,10 @@ TEST(Xlane, DsSwizzleHostOracle)
     check_ds_swizzle_oracle<0x80B1>("quad_swap"); // quad perm (1,0,3,2)
 }
 
+TEST(Xlane, DsSwizzleFloatVsFpsanLaneMapping)
+{
+    FPSAN_RUN_ALL_VARIANTS(test_ds_swizzle_lane_mapping, );
+}
 // ---- mov_dpp (QUAD_PERM identity = 0xE4: lane k <- lane k) ------------------
 // QUAD_PERM is universal across gfx generations; the encoding 0xE4 selects
 // (0,1,2,3) which is the identity within each quad. Together with row_mask =
@@ -560,7 +565,7 @@ TEST(Xlane, MovDppIdentityFloat)
 }
 TEST(Xlane, MovDppIdentityFpsan)
 {
-    test_mov_dpp_identity<Semantics::Triton>();
+    FPSAN_RUN_ALL_VARIANTS(test_mov_dpp_identity, );
 }
 
 // ---- update_dpp (quad swap plus row-mask blend with old value) ---------------
@@ -679,7 +684,7 @@ TEST(Xlane, MovDpp8IdentityFpsan)
 {
     if(device_is_gfx950())
         GTEST_SKIP() << "mov_dpp8 is not a gfx950 op";
-    test_mov_dpp8_identity<Semantics::Triton>();
+    FPSAN_RUN_ALL_VARIANTS(test_mov_dpp8_identity, );
 }
 
 #endif // __has_builtin(__builtin_amdgcn_mov_dpp8)
