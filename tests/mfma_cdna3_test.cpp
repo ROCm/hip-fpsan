@@ -574,39 +574,8 @@ DENSE_VEC_TRAITS(MfmaXF32_32x32x4,
                  v16f_native,
                  amdgcn_mfma_f32_32x32x4_xf32)
 
-struct MfmaXF32_16x16x8_CBSZ1_ABID1_BLGP3
-{
-    using AVec             = v2f_native;
-    using BVec             = v2f_native;
-    using CVec             = v4f_native;
-    static constexpr int M = 16, N = 16, K = 8, Bk = 1, InBits = 32;
-    static constexpr int CBSZ = 1, ABID = 1, BLGP = 3;
-    static constexpr int a_lo = -3, a_hi = 3, b_lo = -2, b_hi = 2, c_lo = -4, c_hi = 4;
-    template <Semantics S, Conversions C>
-    __device__ static Value<CVec, S, C>
-        call(Value<AVec, S, C> a, Value<BVec, S, C> b, Value<CVec, S, C> c)
-    {
-        return fpsan::amdgcn_mfma_f32_16x16x8_xf32<CBSZ, ABID, BLGP, S, C>(a, b, c);
-    }
-};
-DENSE_VEC_TESTS(MfmaXF32_16x16x8_CBSZ1_ABID1_BLGP3)
-
-struct MfmaXF32_32x32x4_CBSZ1_ABID1_BLGP1
-{
-    using AVec             = v2f_native;
-    using BVec             = v2f_native;
-    using CVec             = v16f_native;
-    static constexpr int M = 32, N = 32, K = 4, Bk = 1, InBits = 32;
-    static constexpr int CBSZ = 1, ABID = 1, BLGP = 1;
-    static constexpr int a_lo = -3, a_hi = 3, b_lo = -2, b_hi = 2, c_lo = -4, c_hi = 4;
-    template <Semantics S, Conversions C>
-    __device__ static Value<CVec, S, C>
-        call(Value<AVec, S, C> a, Value<BVec, S, C> b, Value<CVec, S, C> c)
-    {
-        return fpsan::amdgcn_mfma_f32_32x32x4_xf32<CBSZ, ABID, BLGP, S, C>(a, b, c);
-    }
-};
-DENSE_VEC_TESTS(MfmaXF32_32x32x4_CBSZ1_ABID1_BLGP1)
+// xF32 shapes have one MFMA block here, so non-zero CBSZ would exceed the
+// ISA's log2(blocks) limit. Keep coverage to the legal default modifiers.
 
 #undef DENSE_VEC_TRAITS
 #undef DENSE_VEC_TESTS
