@@ -153,19 +153,19 @@ namespace fpsan
 // kept distinct because the gfx950 ds_read_tr8 builtin is not available under
 // --offload-arch=gfx1250.
 #if !defined(__HIP_DEVICE_COMPILE__) || __has_builtin(__builtin_amdgcn_ds_load_tr8_b64_v2i32)
-#define FPSAN_DEFINE_DS_LOAD_TR8(NAME, FRAG)                                                     \
-    template <Semantics S, Conversions C>                                                        \
-    FPSAN_DEVICE Value<FRAG, S, C> NAME(const Value<detail::vector_element_t<FRAG>, S, C>* lds)  \
-    {                                                                                            \
-        using Bits = typename Value<FRAG, S, C>::bits_type;                                      \
-        Bits bits{};                                                                             \
-        (void)lds;                                                                               \
-        FPSAN_DS_DEVICE_ONLY({                                                                   \
-            using v2i32 = int __attribute__((ext_vector_type(2)));                               \
-            auto raw    = __builtin_amdgcn_ds_load_tr8_b64_v2i32((v2i32 FPSAN_DS_LDS*)(lds));    \
-            bits        = __builtin_bit_cast(Bits, raw);                                         \
-        })                                                                                       \
-        return Value<FRAG, S, C>::from_storage_bits(bits);                                       \
+#define FPSAN_DEFINE_DS_LOAD_TR8(NAME, FRAG)                                                    \
+    template <Semantics S, Conversions C>                                                       \
+    FPSAN_DEVICE Value<FRAG, S, C> NAME(const Value<detail::vector_element_t<FRAG>, S, C>* lds) \
+    {                                                                                           \
+        using Bits = typename Value<FRAG, S, C>::bits_type;                                     \
+        Bits bits{};                                                                            \
+        (void)lds;                                                                              \
+        FPSAN_DS_DEVICE_ONLY({                                                                  \
+            using v2i32 = int __attribute__((ext_vector_type(2)));                              \
+            auto raw    = __builtin_amdgcn_ds_load_tr8_b64_v2i32((v2i32 FPSAN_DS_LDS*)(lds));   \
+            bits        = __builtin_bit_cast(Bits, raw);                                        \
+        })                                                                                      \
+        return Value<FRAG, S, C>::from_storage_bits(bits);                                      \
     }
     FPSAN_DEFINE_DS_LOAD_TR8(amdgcn_ds_load_tr8_b64_fp8, v8e4m3_native)
     FPSAN_DEFINE_DS_LOAD_TR8(amdgcn_ds_load_tr8_b64_bf8, v8e5m2_native)

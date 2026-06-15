@@ -330,9 +330,6 @@ SWMMAC16_TRAITS(
     SwmmacF32Bf16_64, v16bf_native, v32bf_native, v8f_native, amdgcn_swmmac_f32_16x16x64_bf16)
 SWMMAC16_TRAITS(
     SwmmacBf16Bf16_64, v16bf_native, v32bf_native, v8bf_native, amdgcn_swmmac_bf16_16x16x64_bf16)
-SWMMAC16_TRAITS(SwmmacBf16f32_64,
-                v16bf_native,
-                v32bf_native,
-                v8f_native,
-                amdgcn_swmmac_bf16f32_16x16x64_bf16)
+SWMMAC16_TRAITS(
+    SwmmacBf16f32_64, v16bf_native, v32bf_native, v8f_native, amdgcn_swmmac_bf16f32_16x16x64_bf16)
 #endif

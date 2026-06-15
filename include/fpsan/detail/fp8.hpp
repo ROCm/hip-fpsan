@@ -141,7 +141,7 @@ namespace fpsan
             }
             else
             {
-                int arith_exp = static_cast<int>(f32_exp >> f32_mantissa_bits) - f32_exp_bias;
+                int       arith_exp = static_cast<int>(f32_exp >> f32_mantissa_bits) - f32_exp_bias;
                 const int max_arith_exp
                     = ((1 << f.exp_bits) - 1 - static_cast<int>(f.have_infinity)) - dst_exp_bias;
                 if(arith_exp > max_arith_exp)

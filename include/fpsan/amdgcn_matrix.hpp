@@ -229,8 +229,8 @@ namespace fpsan
             }
         };
     } // namespace detail
-    using v4e4m3_native = detail::v4_fragment<fp8_e4m3>;
-    using v4e5m2_native = detail::v4_fragment<fp8_e5m2>;
+    using v4e4m3_native     = detail::v4_fragment<fp8_e4m3>;
+    using v4e5m2_native     = detail::v4_fragment<fp8_e5m2>;
     using v4amd_e4m3_native = detail::v4_fragment<amd_fp8_e4m3>;
     using v4amd_e5m2_native = detail::v4_fragment<amd_fp8_e5m2>;
 
@@ -263,22 +263,22 @@ namespace fpsan
 
         FPSAN_DEVICE inline std::uint32_t wave_shfl_word(std::uint32_t word, int src_lane)
         {
-            // RDNA3 wave64 DS permute lane selection is modulo 32. When a gfx11
-            // lane requests the opposite half, swap halves first, then do the
-            // same-half DS gather by the low 5 bits of the absolute source lane.
-            #if defined(__HIP_DEVICE_COMPILE__) && defined(__GFX11__) \
-                && __has_builtin(__builtin_amdgcn_permlane64)
-                if(__builtin_amdgcn_wavefrontsize() == 64)
+// RDNA3 wave64 DS permute lane selection is modulo 32. When a gfx11
+// lane requests the opposite half, swap halves first, then do the
+// same-half DS gather by the low 5 bits of the absolute source lane.
+#if defined(__HIP_DEVICE_COMPILE__) && defined(__GFX11__) \
+    && __has_builtin(__builtin_amdgcn_permlane64)
+            if(__builtin_amdgcn_wavefrontsize() == 64)
+            {
+                const int lane = wave_lane_full();
+                if(((lane ^ src_lane) & 32) != 0)
                 {
-                    const int lane = wave_lane_full();
-                    if(((lane ^ src_lane) & 32) != 0)
-                    {
-                        word = static_cast<std::uint32_t>(
-                            __builtin_amdgcn_permlane64(static_cast<int>(word)));
-                    }
-                    src_lane &= 31;
+                    word = static_cast<std::uint32_t>(
+                        __builtin_amdgcn_permlane64(static_cast<int>(word)));
                 }
-            #endif
+                src_lane &= 31;
+            }
+#endif
             return static_cast<std::uint32_t>(
                 __builtin_amdgcn_ds_bpermute(src_lane * 4, static_cast<int>(word)));
         }
@@ -303,8 +303,7 @@ namespace fpsan
                 static_assert(sizeof(B) == 8, "wave_shfl supports 1..8 byte scalars");
                 const std::uint64_t b64 = static_cast<std::uint64_t>(bits);
                 const auto          glo = wave_shfl_word(static_cast<std::uint32_t>(b64), src_lane);
-                const auto          ghi
-                    = wave_shfl_word(static_cast<std::uint32_t>(b64 >> 32), src_lane);
+                const auto ghi = wave_shfl_word(static_cast<std::uint32_t>(b64 >> 32), src_lane);
                 const std::uint64_t g64
                     = (static_cast<std::uint64_t>(ghi) << 32) | static_cast<std::uint64_t>(glo);
                 return Value<FT, S, C>::from_storage_bits(static_cast<B>(g64));
@@ -427,13 +426,12 @@ namespace fpsan
         // gfx11 f32-output WMMA: A/B are v16 replicated operands, C/D are v8f
         // in wave32 and v4f in wave64.
         template <class AVec, class BVec, class CVec, Semantics S, Conversions C>
-        FPSAN_DEVICE Value<CVec, S, C>
-            wmma_gfx11_f32_16x16x16_dataflow(Value<AVec, S, C>       a,
-                                             Value<BVec, S, C>       b,
-                                             Value<CVec, S, C>       c)
+        FPSAN_DEVICE Value<CVec, S, C> wmma_gfx11_f32_16x16x16_dataflow(Value<AVec, S, C> a,
+                                                                        Value<BVec, S, C> b,
+                                                                        Value<CVec, S, C> c)
         {
-            using DFrag           = Value<CVec, S, C>;
-            using Acc             = Value<float, S, C>;
+            using DFrag            = Value<CVec, S, C>;
+            using Acc              = Value<float, S, C>;
             static constexpr int E = static_cast<int>(DFrag::lanes);
             static_assert(E == 4 || E == 8, "gfx11 f32 WMMA C/D must be v4f or v8f");
             const int lane      = wave_lane_full();
@@ -464,16 +462,15 @@ namespace fpsan
                   class AVec,
                   class BVec,
                   class CVec,
-                  Semantics S,
+                  Semantics   S,
                   Conversions C>
-        FPSAN_DEVICE Value<CVec, S, C>
-            wmma_gfx11_half_16x16x16_dataflow(Value<AVec, S, C> a,
-                                              Value<BVec, S, C> b,
-                                              Value<CVec, S, C> c)
+        FPSAN_DEVICE Value<CVec, S, C> wmma_gfx11_half_16x16x16_dataflow(Value<AVec, S, C> a,
+                                                                         Value<BVec, S, C> b,
+                                                                         Value<CVec, S, C> c)
         {
-            using DFrag           = Value<CVec, S, C>;
-            using AccScalar       = typename DFrag::element_type;
-            using Acc             = Value<AccScalar, S, C>;
+            using DFrag            = Value<CVec, S, C>;
+            using AccScalar        = typename DFrag::element_type;
+            using Acc              = Value<AccScalar, S, C>;
             static constexpr int E = static_cast<int>(DFrag::lanes);
             static_assert(E == 8 || E == 16, "gfx11 f16/bf16 WMMA C/D must be v8 or v16");
             const int lane      = wave_lane_full();
@@ -1330,10 +1327,8 @@ namespace fpsan
 
 #if !defined(__HIP_DEVICE_COMPILE__) || __has_builtin(__builtin_amdgcn_wmma_f32_16x16x16_f16_w32)
     template <Semantics S = Semantics::Float, Conversions C = Conversions::Explicit>
-    FPSAN_DEVICE Value<v8f_native, S, C>
-                 amdgcn_wmma_f32_16x16x16_f16_w32(Value<v16h_wmma_native, S, C> a,
-                                                  Value<v16h_wmma_native, S, C> b,
-                                                  Value<v8f_native, S, C>       c)
+    FPSAN_DEVICE Value<v8f_native, S, C> amdgcn_wmma_f32_16x16x16_f16_w32(
+        Value<v16h_wmma_native, S, C> a, Value<v16h_wmma_native, S, C> b, Value<v8f_native, S, C> c)
     {
         if constexpr(S == Semantics::Float)
         {
@@ -1359,8 +1354,7 @@ namespace fpsan
         {
             const v16i16_wmma_native ai = __builtin_bit_cast(v16i16_wmma_native, a.to_float());
             const v16i16_wmma_native bi = __builtin_bit_cast(v16i16_wmma_native, b.to_float());
-            v8f_native               d
-                = __builtin_amdgcn_wmma_f32_16x16x16_bf16_w32(ai, bi, c.to_float());
+            v8f_native d = __builtin_amdgcn_wmma_f32_16x16x16_bf16_w32(ai, bi, c.to_float());
             return Value<v8f_native, S, C>(d);
         }
         else
@@ -1392,7 +1386,8 @@ namespace fpsan
     }
 #endif
 
-#if !defined(__HIP_DEVICE_COMPILE__) || __has_builtin(__builtin_amdgcn_wmma_f16_16x16x16_f16_tied_w32)
+#if !defined(__HIP_DEVICE_COMPILE__) \
+    || __has_builtin(__builtin_amdgcn_wmma_f16_16x16x16_f16_tied_w32)
     template <bool        Opsel = false,
               Semantics   S     = Semantics::Float,
               Conversions C     = Conversions::Explicit>
@@ -1430,8 +1425,7 @@ namespace fpsan
             const v16i16_wmma_native ci = __builtin_bit_cast(v16i16_wmma_native, c.to_float());
             const v16i16_wmma_native di
                 = __builtin_amdgcn_wmma_bf16_16x16x16_bf16_w32(ai, bi, ci, Opsel);
-            return Value<v16bf_wmma_native, S, C>(
-                __builtin_bit_cast(v16bf_wmma_native, di));
+            return Value<v16bf_wmma_native, S, C>(__builtin_bit_cast(v16bf_wmma_native, di));
         }
         else
         {
@@ -1440,7 +1434,8 @@ namespace fpsan
     }
 #endif
 
-#if !defined(__HIP_DEVICE_COMPILE__) || __has_builtin(__builtin_amdgcn_wmma_bf16_16x16x16_bf16_tied_w32)
+#if !defined(__HIP_DEVICE_COMPILE__) \
+    || __has_builtin(__builtin_amdgcn_wmma_bf16_16x16x16_bf16_tied_w32)
     template <bool        Opsel = false,
               Semantics   S     = Semantics::Float,
               Conversions C     = Conversions::Explicit>
@@ -1456,8 +1451,7 @@ namespace fpsan
             const v16i16_wmma_native ci = __builtin_bit_cast(v16i16_wmma_native, c.to_float());
             const v16i16_wmma_native di
                 = __builtin_amdgcn_wmma_bf16_16x16x16_bf16_tied_w32(ai, bi, ci, Opsel);
-            return Value<v16bf_wmma_native, S, C>(
-                __builtin_bit_cast(v16bf_wmma_native, di));
+            return Value<v16bf_wmma_native, S, C>(__builtin_bit_cast(v16bf_wmma_native, di));
         }
         else
         {
@@ -1470,10 +1464,8 @@ namespace fpsan
 // C/D ABI implied by four rows per accumulator register.
 #if !defined(__HIP_DEVICE_COMPILE__) || __has_builtin(__builtin_amdgcn_wmma_f32_16x16x16_f16_w64)
     template <Semantics S = Semantics::Float, Conversions C = Conversions::Explicit>
-    FPSAN_DEVICE Value<v4f_native, S, C>
-                 amdgcn_wmma_f32_16x16x16_f16_w64(Value<v16h_wmma_native, S, C> a,
-                                                  Value<v16h_wmma_native, S, C> b,
-                                                  Value<v4f_native, S, C>       c)
+    FPSAN_DEVICE Value<v4f_native, S, C> amdgcn_wmma_f32_16x16x16_f16_w64(
+        Value<v16h_wmma_native, S, C> a, Value<v16h_wmma_native, S, C> b, Value<v4f_native, S, C> c)
     {
         if constexpr(S == Semantics::Float)
         {
@@ -1499,8 +1491,7 @@ namespace fpsan
         {
             const v16i16_wmma_native ai = __builtin_bit_cast(v16i16_wmma_native, a.to_float());
             const v16i16_wmma_native bi = __builtin_bit_cast(v16i16_wmma_native, b.to_float());
-            v4f_native               d
-                = __builtin_amdgcn_wmma_f32_16x16x16_bf16_w64(ai, bi, c.to_float());
+            v4f_native d = __builtin_amdgcn_wmma_f32_16x16x16_bf16_w64(ai, bi, c.to_float());
             return Value<v4f_native, S, C>(d);
         }
         else
@@ -1514,10 +1505,8 @@ namespace fpsan
     template <bool        Opsel = false,
               Semantics   S     = Semantics::Float,
               Conversions C     = Conversions::Explicit>
-    FPSAN_DEVICE Value<v8h_native, S, C>
-                 amdgcn_wmma_f16_16x16x16_f16_w64(Value<v16h_wmma_native, S, C> a,
-                                                  Value<v16h_wmma_native, S, C> b,
-                                                  Value<v8h_native, S, C>       c)
+    FPSAN_DEVICE Value<v8h_native, S, C> amdgcn_wmma_f16_16x16x16_f16_w64(
+        Value<v16h_wmma_native, S, C> a, Value<v16h_wmma_native, S, C> b, Value<v8h_native, S, C> c)
     {
         if constexpr(S == Semantics::Float)
         {
@@ -1532,14 +1521,13 @@ namespace fpsan
     }
 #endif
 
-#if !defined(__HIP_DEVICE_COMPILE__) || __has_builtin(__builtin_amdgcn_wmma_f16_16x16x16_f16_tied_w64)
+#if !defined(__HIP_DEVICE_COMPILE__) \
+    || __has_builtin(__builtin_amdgcn_wmma_f16_16x16x16_f16_tied_w64)
     template <bool        Opsel = false,
               Semantics   S     = Semantics::Float,
               Conversions C     = Conversions::Explicit>
-    FPSAN_DEVICE Value<v8h_native, S, C>
-                 amdgcn_wmma_f16_16x16x16_f16_tied_w64(Value<v16h_wmma_native, S, C> a,
-                                                       Value<v16h_wmma_native, S, C> b,
-                                                       Value<v8h_native, S, C>       c)
+    FPSAN_DEVICE Value<v8h_native, S, C> amdgcn_wmma_f16_16x16x16_f16_tied_w64(
+        Value<v16h_wmma_native, S, C> a, Value<v16h_wmma_native, S, C> b, Value<v8h_native, S, C> c)
     {
         if constexpr(S == Semantics::Float)
         {
@@ -1579,7 +1567,8 @@ namespace fpsan
     }
 #endif
 
-#if !defined(__HIP_DEVICE_COMPILE__) || __has_builtin(__builtin_amdgcn_wmma_bf16_16x16x16_bf16_tied_w64)
+#if !defined(__HIP_DEVICE_COMPILE__) \
+    || __has_builtin(__builtin_amdgcn_wmma_bf16_16x16x16_bf16_tied_w64)
     template <bool        Opsel = false,
               Semantics   S     = Semantics::Float,
               Conversions C     = Conversions::Explicit>
@@ -1605,7 +1594,6 @@ namespace fpsan
 #endif
 
 #endif // defined(__GFX11__)
-
 
 // =============================================================================
 // RDNA4 (gfx1200/gfx1201) wave32 WMMA wrappers. Each wrapper is one

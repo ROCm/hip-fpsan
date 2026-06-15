@@ -73,8 +73,22 @@ namespace
     }
     std::vector<float> exact16()
     {
-        return {0.5f, -1.f, 1.5f, -2.f, 3.f, -4.f, 6.f, -0.5f,
-                1.f,  2.f,  4.f,  -1.5f, -3.f, -6.f, 0.f, -2.f};
+        return {0.5f,
+                -1.f,
+                1.5f,
+                -2.f,
+                3.f,
+                -4.f,
+                6.f,
+                -0.5f,
+                1.f,
+                2.f,
+                4.f,
+                -1.5f,
+                -3.f,
+                -6.f,
+                0.f,
+                -2.f};
     }
 
     // Host pack of 8 narrow bytes -> v2u32 (byte i = code i, little-endian).
@@ -120,33 +134,33 @@ namespace
 // One real kernel + TEST per wrapper, scale operand pinned to E8M0 x1, decoding
 // the packed stream and comparing each element to the host OCP decode.
 
-#define PK8_BYTES_GOLDEN(CASE, WRAP, FMT, DST)                                                  \
-    __global__ void CASE##_k(const unsigned* in, unsigned scale, float* out)                    \
-    {                                                                                           \
-        fpsan::v2u32_native p;                                                                  \
-        p[0] = in[0];                                                                           \
-        p[1] = in[1];                                                                           \
-        auto r = fpsan::WRAP<0, Semantics::Float, kCC>(p, scale);                               \
-        for(int i = 0; i < 8; ++i)                                                              \
-            out[i] = r.get(i).to_float();                                  \
-    }                                                                                           \
-    TEST(CvtScalePk8Unpack, CASE)                                                               \
-    {                                                                                           \
-        if(!have_device())                                                                      \
-            GTEST_SKIP() << "no HIP device";                                                    \
-        auto      in  = exact8();                                                               \
-        auto      w   = host_pack_bytes8(in, FMT);                                              \
-        unsigned* dIn = to_dev(std::vector<unsigned>(w.begin(), w.end()));                      \
-        float*    dO;                                                                           \
-        HIP_CHECK(hipMalloc(&dO, 8 * sizeof(float)));                                           \
-        CASE##_k<<<1, 1>>>(dIn, kE8M0_x1, dO);                                                  \
-        HIP_CHECK(hipDeviceSynchronize());                                                      \
-        auto got = from_dev(dO, 8);                                                             \
-        for(int i = 0; i < 8; ++i)                                                              \
-            EXPECT_EQ(got[i], narrow_to_f32(f32_to_narrow(in[i], FMT) & 0xFFu, FMT))            \
-                << "elem " << i;                                                                \
-        (void)hipFree(dIn);                                                                     \
-        (void)hipFree(dO);                                                                      \
+#define PK8_BYTES_GOLDEN(CASE, WRAP, FMT, DST)                                       \
+    __global__ void CASE##_k(const unsigned* in, unsigned scale, float* out)         \
+    {                                                                                \
+        fpsan::v2u32_native p;                                                       \
+        p[0]   = in[0];                                                              \
+        p[1]   = in[1];                                                              \
+        auto r = fpsan::WRAP<0, Semantics::Float, kCC>(p, scale);                    \
+        for(int i = 0; i < 8; ++i)                                                   \
+            out[i] = r.get(i).to_float();                                            \
+    }                                                                                \
+    TEST(CvtScalePk8Unpack, CASE)                                                    \
+    {                                                                                \
+        if(!have_device())                                                           \
+            GTEST_SKIP() << "no HIP device";                                         \
+        auto      in  = exact8();                                                    \
+        auto      w   = host_pack_bytes8(in, FMT);                                   \
+        unsigned* dIn = to_dev(std::vector<unsigned>(w.begin(), w.end()));           \
+        float*    dO;                                                                \
+        HIP_CHECK(hipMalloc(&dO, 8 * sizeof(float)));                                \
+        CASE##_k<<<1, 1>>>(dIn, kE8M0_x1, dO);                                       \
+        HIP_CHECK(hipDeviceSynchronize());                                           \
+        auto got = from_dev(dO, 8);                                                  \
+        for(int i = 0; i < 8; ++i)                                                   \
+            EXPECT_EQ(got[i], narrow_to_f32(f32_to_narrow(in[i], FMT) & 0xFFu, FMT)) \
+                << "elem " << i;                                                     \
+        (void)hipFree(dIn);                                                          \
+        (void)hipFree(dO);                                                           \
     }
 
 PK8_BYTES_GOLDEN(Fp8ToF32, amdgcn_cvt_scale_pk8_f32_fp8, kFp8E4M3, float)
@@ -157,28 +171,28 @@ PK8_BYTES_GOLDEN(Fp8ToBf16, amdgcn_cvt_scale_pk8_bf16_fp8, kFp8E4M3, __bf16)
 PK8_BYTES_GOLDEN(Bf8ToBf16, amdgcn_cvt_scale_pk8_bf16_bf8, kFp8E5M2, __bf16)
 #undef PK8_BYTES_GOLDEN
 
-#define PK8_NIB_GOLDEN(CASE, WRAP, DST)                                                         \
-    __global__ void CASE##_k(unsigned packed, unsigned scale, float* out)                       \
-    {                                                                                           \
-        auto r = fpsan::WRAP<0, Semantics::Float, kCC>(packed, scale);                          \
-        for(int i = 0; i < 8; ++i)                                                              \
-            out[i] = r.get(i).to_float();                                  \
-    }                                                                                           \
-    TEST(CvtScalePk8Unpack, CASE)                                                               \
-    {                                                                                           \
-        if(!have_device())                                                                      \
-            GTEST_SKIP() << "no HIP device";                                                    \
-        auto     in     = exact8();                                                             \
-        unsigned packed = host_pack_nibbles8(in);                                               \
-        float*   dO;                                                                            \
-        HIP_CHECK(hipMalloc(&dO, 8 * sizeof(float)));                                           \
-        CASE##_k<<<1, 1>>>(packed, kE8M0_x1, dO);                                               \
-        HIP_CHECK(hipDeviceSynchronize());                                                      \
-        auto got = from_dev(dO, 8);                                                             \
-        for(int i = 0; i < 8; ++i)                                                              \
-            EXPECT_EQ(got[i], narrow_to_f32(f32_to_narrow(in[i], kFp4E2M1) & 0xFu, kFp4E2M1))   \
-                << "elem " << i;                                                                \
-        (void)hipFree(dO);                                                                      \
+#define PK8_NIB_GOLDEN(CASE, WRAP, DST)                                                       \
+    __global__ void CASE##_k(unsigned packed, unsigned scale, float* out)                     \
+    {                                                                                         \
+        auto r = fpsan::WRAP<0, Semantics::Float, kCC>(packed, scale);                        \
+        for(int i = 0; i < 8; ++i)                                                            \
+            out[i] = r.get(i).to_float();                                                     \
+    }                                                                                         \
+    TEST(CvtScalePk8Unpack, CASE)                                                             \
+    {                                                                                         \
+        if(!have_device())                                                                    \
+            GTEST_SKIP() << "no HIP device";                                                  \
+        auto     in     = exact8();                                                           \
+        unsigned packed = host_pack_nibbles8(in);                                             \
+        float*   dO;                                                                          \
+        HIP_CHECK(hipMalloc(&dO, 8 * sizeof(float)));                                         \
+        CASE##_k<<<1, 1>>>(packed, kE8M0_x1, dO);                                             \
+        HIP_CHECK(hipDeviceSynchronize());                                                    \
+        auto got = from_dev(dO, 8);                                                           \
+        for(int i = 0; i < 8; ++i)                                                            \
+            EXPECT_EQ(got[i], narrow_to_f32(f32_to_narrow(in[i], kFp4E2M1) & 0xFu, kFp4E2M1)) \
+                << "elem " << i;                                                              \
+        (void)hipFree(dO);                                                                    \
     }
 
 PK8_NIB_GOLDEN(Fp4ToF32, amdgcn_cvt_scale_pk8_f32_fp4, float)
@@ -186,34 +200,34 @@ PK8_NIB_GOLDEN(Fp4ToF16, amdgcn_cvt_scale_pk8_f16_fp4, _Float16)
 PK8_NIB_GOLDEN(Fp4ToBf16, amdgcn_cvt_scale_pk8_bf16_fp4, __bf16)
 #undef PK8_NIB_GOLDEN
 
-#define PK16_CODES_GOLDEN(CASE, WRAP, FMT, DST)                                                 \
-    __global__ void CASE##_k(const unsigned* in, unsigned scale, float* out)                    \
-    {                                                                                           \
-        fpsan::v3u32_native p;                                                                  \
-        p[0] = in[0];                                                                           \
-        p[1] = in[1];                                                                           \
-        p[2] = in[2];                                                                           \
-        auto r = fpsan::WRAP<0, Semantics::Float, kCC>(p, scale);                               \
-        for(int i = 0; i < 16; ++i)                                                             \
-            out[i] = r.get(i).to_float();                                  \
-    }                                                                                           \
-    TEST(CvtScalePk16Unpack, CASE)                                                              \
-    {                                                                                           \
-        if(!have_device())                                                                      \
-            GTEST_SKIP() << "no HIP device";                                                    \
-        auto      in  = exact16();                                                              \
-        auto      w   = host_pack_codes16(in, FMT);                                             \
-        unsigned* dIn = to_dev(std::vector<unsigned>(w.begin(), w.end()));                      \
-        float*    dO;                                                                           \
-        HIP_CHECK(hipMalloc(&dO, 16 * sizeof(float)));                                          \
-        CASE##_k<<<1, 1>>>(dIn, kE8M0_x1, dO);                                                  \
-        HIP_CHECK(hipDeviceSynchronize());                                                      \
-        auto got = from_dev(dO, 16);                                                            \
-        for(int i = 0; i < 16; ++i)                                                             \
-            EXPECT_EQ(got[i], narrow_to_f32(f32_to_narrow(in[i], FMT) & 0x3Fu, FMT))            \
-                << "elem " << i;                                                                \
-        (void)hipFree(dIn);                                                                     \
-        (void)hipFree(dO);                                                                      \
+#define PK16_CODES_GOLDEN(CASE, WRAP, FMT, DST)                                      \
+    __global__ void CASE##_k(const unsigned* in, unsigned scale, float* out)         \
+    {                                                                                \
+        fpsan::v3u32_native p;                                                       \
+        p[0]   = in[0];                                                              \
+        p[1]   = in[1];                                                              \
+        p[2]   = in[2];                                                              \
+        auto r = fpsan::WRAP<0, Semantics::Float, kCC>(p, scale);                    \
+        for(int i = 0; i < 16; ++i)                                                  \
+            out[i] = r.get(i).to_float();                                            \
+    }                                                                                \
+    TEST(CvtScalePk16Unpack, CASE)                                                   \
+    {                                                                                \
+        if(!have_device())                                                           \
+            GTEST_SKIP() << "no HIP device";                                         \
+        auto      in  = exact16();                                                   \
+        auto      w   = host_pack_codes16(in, FMT);                                  \
+        unsigned* dIn = to_dev(std::vector<unsigned>(w.begin(), w.end()));           \
+        float*    dO;                                                                \
+        HIP_CHECK(hipMalloc(&dO, 16 * sizeof(float)));                               \
+        CASE##_k<<<1, 1>>>(dIn, kE8M0_x1, dO);                                       \
+        HIP_CHECK(hipDeviceSynchronize());                                           \
+        auto got = from_dev(dO, 16);                                                 \
+        for(int i = 0; i < 16; ++i)                                                  \
+            EXPECT_EQ(got[i], narrow_to_f32(f32_to_narrow(in[i], FMT) & 0x3Fu, FMT)) \
+                << "elem " << i;                                                     \
+        (void)hipFree(dIn);                                                          \
+        (void)hipFree(dO);                                                           \
     }
 
 PK16_CODES_GOLDEN(Fp6ToF32, amdgcn_cvt_scale_pk16_f32_fp6, kFp6E2M3, float)
@@ -231,8 +245,8 @@ PK16_CODES_GOLDEN(Bf6ToBf16, amdgcn_cvt_scale_pk16_bf16_bf6, kBf6E3M2, __bf16)
 __global__ void k_pk8_scale_x2(const unsigned* in, unsigned scale, float* out)
 {
     fpsan::v2u32_native p;
-    p[0] = in[0];
-    p[1] = in[1];
+    p[0]   = in[0];
+    p[1]   = in[1];
     auto r = fpsan::amdgcn_cvt_scale_pk8_f32_fp8<0, Semantics::Float, kCC>(p, scale);
     for(int i = 0; i < 8; ++i)
         out[i] = r.get(i).to_float();
@@ -266,8 +280,8 @@ TEST(CvtScalePk8Unpack, Fp8ScaleMultiplies)
 __global__ void k_fpsan_pk8_fp8(const unsigned* in, unsigned scale, int* out)
 {
     fpsan::v2u32_native p;
-    p[0] = in[0];
-    p[1] = in[1];
+    p[0]   = in[0];
+    p[1]   = in[1];
     auto r = fpsan::amdgcn_cvt_scale_pk8_f32_fp8<0, Semantics::FPSan, kCC>(p, scale);
     for(int i = 0; i < 8; ++i)
         out[i] = r.get(i).fpsan_payload();
@@ -299,9 +313,9 @@ TEST(CvtScalePk8Unpack, FpsanFp8Payload)
 __global__ void k_fpsan_pk16_fp6(const unsigned* in, unsigned scale, int* out)
 {
     fpsan::v3u32_native p;
-    p[0] = in[0];
-    p[1] = in[1];
-    p[2] = in[2];
+    p[0]   = in[0];
+    p[1]   = in[1];
+    p[2]   = in[2];
     auto r = fpsan::amdgcn_cvt_scale_pk16_f32_fp6<0, Semantics::FPSan, kCC>(p, scale);
     for(int i = 0; i < 16; ++i)
         out[i] = r.get(i).fpsan_payload();

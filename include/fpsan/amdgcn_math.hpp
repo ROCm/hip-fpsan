@@ -99,7 +99,7 @@ namespace fpsan
     FPSAN_DEFINE_AMDGCN_UNARY(amdgcn_logf, float, log, __builtin_amdgcn_logf)
 // `__has_builtin` reports log_clampf on gfx1100 and gfx942, but direct lowering
 // probes reject it as unsupported on those subtargets.
-#if !defined(__HIP_DEVICE_COMPILE__) \
+#if !defined(__HIP_DEVICE_COMPILE__)                                              \
     || (!FPSAN_AMDGCN_MATH_DEVICE_IS_GFX11 && !FPSAN_AMDGCN_MATH_DEVICE_IS_GFX94X \
         && __has_builtin(__builtin_amdgcn_log_clampf))
     FPSAN_DEFINE_AMDGCN_UNARY(amdgcn_log_clampf, float, log, __builtin_amdgcn_log_clampf)

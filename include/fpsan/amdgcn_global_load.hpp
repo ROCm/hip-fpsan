@@ -154,19 +154,19 @@ namespace fpsan
     // FPSan move bits identically. `gptr` points at this lane's slot in a
     // Value<elem> array (length >= 8) in global memory.
 #if !defined(__HIP_DEVICE_COMPILE__) || __has_builtin(__builtin_amdgcn_global_load_tr8_b64_v2i32)
-#define FPSAN_DEFINE_GLOBAL_LOAD_TR8(NAME, FRAG)                                                \
-    template <Semantics S, Conversions C>                                                       \
-    FPSAN_DEVICE Value<FRAG, S, C> NAME(const Value<detail::vector_element_t<FRAG>, S, C>* gptr) \
-    {                                                                                           \
-        using Bits = typename Value<FRAG, S, C>::bits_type;                                     \
-        Bits bits{};                                                                            \
-        (void)gptr;                                                                             \
-        FPSAN_GL_DEVICE_ONLY({                                                                  \
-            using v2i32 = int __attribute__((ext_vector_type(2)));                              \
-            auto raw    = __builtin_amdgcn_global_load_tr8_b64_v2i32((v2i32 FPSAN_GL_GLOBAL*)(gptr)); \
-            bits        = __builtin_bit_cast(Bits, raw);                                        \
-        })                                                                                      \
-        return Value<FRAG, S, C>::from_storage_bits(bits);                                      \
+#define FPSAN_DEFINE_GLOBAL_LOAD_TR8(NAME, FRAG)                                                   \
+    template <Semantics S, Conversions C>                                                          \
+    FPSAN_DEVICE Value<FRAG, S, C> NAME(const Value<detail::vector_element_t<FRAG>, S, C>* gptr)   \
+    {                                                                                              \
+        using Bits = typename Value<FRAG, S, C>::bits_type;                                        \
+        Bits bits{};                                                                               \
+        (void)gptr;                                                                                \
+        FPSAN_GL_DEVICE_ONLY({                                                                     \
+            using v2i32 = int __attribute__((ext_vector_type(2)));                                 \
+            auto raw = __builtin_amdgcn_global_load_tr8_b64_v2i32((v2i32 FPSAN_GL_GLOBAL*)(gptr)); \
+            bits     = __builtin_bit_cast(Bits, raw);                                              \
+        })                                                                                         \
+        return Value<FRAG, S, C>::from_storage_bits(bits);                                         \
     }
     FPSAN_DEFINE_GLOBAL_LOAD_TR8(amdgcn_global_load_tr8_b64_fp8, v8e4m3_native)
     FPSAN_DEFINE_GLOBAL_LOAD_TR8(amdgcn_global_load_tr8_b64_bf8, v8e5m2_native)

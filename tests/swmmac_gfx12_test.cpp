@@ -65,14 +65,14 @@ __global__ void k_swmmac_f16_pair(const std::uint16_t* a_in,
     v8f  c;
     for(int s = 0; s < 8; ++s)
     {
-        std::uint16_t u  = a_in[lane * 8 + s];
+        std::uint16_t u = a_in[lane * 8 + s];
         _Float16      v;
         __builtin_memcpy(&v, &u, sizeof v);
         a[s] = v;
     }
     for(int s = 0; s < 16; ++s)
     {
-        std::uint16_t u  = b_in[lane * 16 + s];
+        std::uint16_t u = b_in[lane * 16 + s];
         _Float16      v;
         __builtin_memcpy(&v, &u, sizeof v);
         b[s] = v;
@@ -89,11 +89,10 @@ __global__ void k_swmmac_f16_pair(const std::uint16_t* a_in,
         raw_out[lane * 8 + s] = raw[s];
 
     // --- via fpsan wrapper (Float mode) ---
-    Value<fpsan::v8h_native, Semantics::Float, kCC>          av{a};
-    Value<fpsan::v16h_swmmac_native, Semantics::Float, kCC>  bv{b};
-    Value<fpsan::v8f_native, Semantics::Float, kCC>          cv{c};
-    auto                                                     dv
-        = fpsan::amdgcn_swmmac_f32_16x16x32_f16_w32<Semantics::Float, kCC>(av, bv, cv, idx);
+    Value<fpsan::v8h_native, Semantics::Float, kCC>         av{a};
+    Value<fpsan::v16h_swmmac_native, Semantics::Float, kCC> bv{b};
+    Value<fpsan::v8f_native, Semantics::Float, kCC>         cv{c};
+    auto dv = fpsan::amdgcn_swmmac_f32_16x16x32_f16_w32<Semantics::Float, kCC>(av, bv, cv, idx);
     fpsan::v8f_native d = static_cast<fpsan::v8f_native>(dv);
     for(int s = 0; s < 8; ++s)
         wrap_out[lane * 8 + s] = d[s];
@@ -110,20 +109,20 @@ __global__ void k_swmmac_bf16_pair(const std::uint16_t* a_in,
     using v8bf  = __bf16 __attribute__((ext_vector_type(8)));
     using v16bf = __bf16 __attribute__((ext_vector_type(16)));
     using v8f   = float __attribute__((ext_vector_type(8)));
-    int lane    = threadIdx.x;
+    int   lane  = threadIdx.x;
     v8bf  a;
     v16bf b;
     v8f   c;
     for(int s = 0; s < 8; ++s)
     {
-        std::uint16_t u  = a_in[lane * 8 + s];
+        std::uint16_t u = a_in[lane * 8 + s];
         __bf16        v;
         __builtin_memcpy(&v, &u, sizeof v);
         a[s] = v;
     }
     for(int s = 0; s < 16; ++s)
     {
-        std::uint16_t u  = b_in[lane * 16 + s];
+        std::uint16_t u = b_in[lane * 16 + s];
         __bf16        v;
         __builtin_memcpy(&v, &u, sizeof v);
         b[s] = v;
@@ -136,11 +135,10 @@ __global__ void k_swmmac_bf16_pair(const std::uint16_t* a_in,
 #endif
     for(int s = 0; s < 8; ++s)
         raw_out[lane * 8 + s] = raw[s];
-    Value<fpsan::v8bf_native, Semantics::Float, kCC>          av{a};
-    Value<fpsan::v16bf_swmmac_native, Semantics::Float, kCC>  bv{b};
-    Value<fpsan::v8f_native, Semantics::Float, kCC>           cv{c};
-    auto                                                      dv
-        = fpsan::amdgcn_swmmac_f32_16x16x32_bf16_w32<Semantics::Float, kCC>(av, bv, cv, idx);
+    Value<fpsan::v8bf_native, Semantics::Float, kCC>         av{a};
+    Value<fpsan::v16bf_swmmac_native, Semantics::Float, kCC> bv{b};
+    Value<fpsan::v8f_native, Semantics::Float, kCC>          cv{c};
+    auto dv = fpsan::amdgcn_swmmac_f32_16x16x32_bf16_w32<Semantics::Float, kCC>(av, bv, cv, idx);
     fpsan::v8f_native d = static_cast<fpsan::v8f_native>(dv);
     for(int s = 0; s < 8; ++s)
         wrap_out[lane * 8 + s] = d[s];
@@ -156,7 +154,7 @@ __global__ void k_swmmac_f16h_pair(const std::uint16_t* a_in,
 {
     using v8h  = _Float16 __attribute__((ext_vector_type(8)));
     using v16h = _Float16 __attribute__((ext_vector_type(16)));
-    int lane   = threadIdx.x;
+    int  lane  = threadIdx.x;
     v8h  a, c;
     v16h b;
     auto load_h = [](std::uint16_t u) {
@@ -214,62 +212,54 @@ __global__ void k_swmmac_fp8_pair(const std::uint8_t* a_in,
     v8f raw{};
 #ifdef __HIP_DEVICE_COMPILE__
     if constexpr(VARIANT == 0)
-        raw = __builtin_amdgcn_swmmac_f32_16x16x32_fp8_fp8_w32(
-            a, b, c, static_cast<short>(idx));
+        raw = __builtin_amdgcn_swmmac_f32_16x16x32_fp8_fp8_w32(a, b, c, static_cast<short>(idx));
     else if constexpr(VARIANT == 1)
-        raw = __builtin_amdgcn_swmmac_f32_16x16x32_fp8_bf8_w32(
-            a, b, c, static_cast<short>(idx));
+        raw = __builtin_amdgcn_swmmac_f32_16x16x32_fp8_bf8_w32(a, b, c, static_cast<short>(idx));
     else if constexpr(VARIANT == 2)
-        raw = __builtin_amdgcn_swmmac_f32_16x16x32_bf8_fp8_w32(
-            a, b, c, static_cast<short>(idx));
+        raw = __builtin_amdgcn_swmmac_f32_16x16x32_bf8_fp8_w32(a, b, c, static_cast<short>(idx));
     else
-        raw = __builtin_amdgcn_swmmac_f32_16x16x32_bf8_bf8_w32(
-            a, b, c, static_cast<short>(idx));
+        raw = __builtin_amdgcn_swmmac_f32_16x16x32_bf8_bf8_w32(a, b, c, static_cast<short>(idx));
 #endif
     for(int s = 0; s < 8; ++s)
         raw_out[lane * 8 + s] = raw[s];
 
     Value<fpsan::v8f_native, Semantics::Float, kCC> cv{c};
-    fpsan::v8f_native d{};
+    fpsan::v8f_native                               d{};
     if constexpr(VARIANT == 0)
     {
-        Value<fpsan::v8e4m3_native, Semantics::Float, kCC>         av{
+        Value<fpsan::v8e4m3_native, Semantics::Float, kCC> av{
             __builtin_bit_cast(fpsan::v8e4m3_native, a)};
         Value<fpsan::v16e4m3_swmmac_native, Semantics::Float, kCC> bv{
             __builtin_bit_cast(fpsan::v16e4m3_swmmac_native, b)};
         d = static_cast<fpsan::v8f_native>(
-            fpsan::amdgcn_swmmac_f32_16x16x32_fp8_fp8_w32<Semantics::Float, kCC>(
-                av, bv, cv, idx));
+            fpsan::amdgcn_swmmac_f32_16x16x32_fp8_fp8_w32<Semantics::Float, kCC>(av, bv, cv, idx));
     }
     else if constexpr(VARIANT == 1)
     {
-        Value<fpsan::v8e4m3_native, Semantics::Float, kCC>         av{
+        Value<fpsan::v8e4m3_native, Semantics::Float, kCC> av{
             __builtin_bit_cast(fpsan::v8e4m3_native, a)};
         Value<fpsan::v16e5m2_swmmac_native, Semantics::Float, kCC> bv{
             __builtin_bit_cast(fpsan::v16e5m2_swmmac_native, b)};
         d = static_cast<fpsan::v8f_native>(
-            fpsan::amdgcn_swmmac_f32_16x16x32_fp8_bf8_w32<Semantics::Float, kCC>(
-                av, bv, cv, idx));
+            fpsan::amdgcn_swmmac_f32_16x16x32_fp8_bf8_w32<Semantics::Float, kCC>(av, bv, cv, idx));
     }
     else if constexpr(VARIANT == 2)
     {
-        Value<fpsan::v8e5m2_native, Semantics::Float, kCC>         av{
+        Value<fpsan::v8e5m2_native, Semantics::Float, kCC> av{
             __builtin_bit_cast(fpsan::v8e5m2_native, a)};
         Value<fpsan::v16e4m3_swmmac_native, Semantics::Float, kCC> bv{
             __builtin_bit_cast(fpsan::v16e4m3_swmmac_native, b)};
         d = static_cast<fpsan::v8f_native>(
-            fpsan::amdgcn_swmmac_f32_16x16x32_bf8_fp8_w32<Semantics::Float, kCC>(
-                av, bv, cv, idx));
+            fpsan::amdgcn_swmmac_f32_16x16x32_bf8_fp8_w32<Semantics::Float, kCC>(av, bv, cv, idx));
     }
     else
     {
-        Value<fpsan::v8e5m2_native, Semantics::Float, kCC>         av{
+        Value<fpsan::v8e5m2_native, Semantics::Float, kCC> av{
             __builtin_bit_cast(fpsan::v8e5m2_native, a)};
         Value<fpsan::v16e5m2_swmmac_native, Semantics::Float, kCC> bv{
             __builtin_bit_cast(fpsan::v16e5m2_swmmac_native, b)};
         d = static_cast<fpsan::v8f_native>(
-            fpsan::amdgcn_swmmac_f32_16x16x32_bf8_bf8_w32<Semantics::Float, kCC>(
-                av, bv, cv, idx));
+            fpsan::amdgcn_swmmac_f32_16x16x32_bf8_bf8_w32<Semantics::Float, kCC>(av, bv, cv, idx));
     }
     for(int s = 0; s < 8; ++s)
         wrap_out[lane * 8 + s] = d[s];
@@ -294,7 +284,7 @@ TEST(SwmmacGfx12, F32_F16_FloatMatchesBuiltin)
     // products stay well within f32 precision -- but bit-exact equality is
     // what we're after either way.
     std::mt19937                          rng(0xa5'12'5c'7a);
-    std::uniform_int_distribution<int>    di_h(0x3000, 0x4000);   // ~ [0.5, 2.0)
+    std::uniform_int_distribution<int>    di_h(0x3000, 0x4000); // ~ [0.5, 2.0)
     std::uniform_real_distribution<float> df(-1.f, 1.f);
     std::vector<std::uint16_t>            ha(WAVE * 8), hb(WAVE * 16);
     std::vector<float>                    hc(WAVE * 8);
@@ -305,20 +295,18 @@ TEST(SwmmacGfx12, F32_F16_FloatMatchesBuiltin)
     for(auto& x : hc)
         x = df(rng);
 
-    std::uint16_t* dA = nullptr;
-    std::uint16_t* dB = nullptr;
-    float*         dC = nullptr;
-    float*         dRaw = nullptr;
+    std::uint16_t* dA    = nullptr;
+    std::uint16_t* dB    = nullptr;
+    float*         dC    = nullptr;
+    float*         dRaw  = nullptr;
     float*         dWrap = nullptr;
     HIP_CHECK(hipMalloc(&dA, ha.size() * sizeof(std::uint16_t)));
     HIP_CHECK(hipMalloc(&dB, hb.size() * sizeof(std::uint16_t)));
     HIP_CHECK(hipMalloc(&dC, hc.size() * sizeof(float)));
     HIP_CHECK(hipMalloc(&dRaw, WAVE * 8 * sizeof(float)));
     HIP_CHECK(hipMalloc(&dWrap, WAVE * 8 * sizeof(float)));
-    HIP_CHECK(hipMemcpy(dA, ha.data(), ha.size() * sizeof(std::uint16_t),
-                        hipMemcpyHostToDevice));
-    HIP_CHECK(hipMemcpy(dB, hb.data(), hb.size() * sizeof(std::uint16_t),
-                        hipMemcpyHostToDevice));
+    HIP_CHECK(hipMemcpy(dA, ha.data(), ha.size() * sizeof(std::uint16_t), hipMemcpyHostToDevice));
+    HIP_CHECK(hipMemcpy(dB, hb.data(), hb.size() * sizeof(std::uint16_t), hipMemcpyHostToDevice));
     HIP_CHECK(hipMemcpy(dC, hc.data(), hc.size() * sizeof(float), hipMemcpyHostToDevice));
 
     // Random 16-bit index per launch.
@@ -330,8 +318,7 @@ TEST(SwmmacGfx12, F32_F16_FloatMatchesBuiltin)
 
     std::vector<float> raw(WAVE * 8), wrap(WAVE * 8);
     HIP_CHECK(hipMemcpy(raw.data(), dRaw, raw.size() * sizeof(float), hipMemcpyDeviceToHost));
-    HIP_CHECK(hipMemcpy(wrap.data(), dWrap, wrap.size() * sizeof(float),
-                        hipMemcpyDeviceToHost));
+    HIP_CHECK(hipMemcpy(wrap.data(), dWrap, wrap.size() * sizeof(float), hipMemcpyDeviceToHost));
     for(size_t i = 0; i < raw.size(); ++i)
     {
         std::uint32_t br, bw;
@@ -361,20 +348,18 @@ TEST(SwmmacGfx12, F32_BF16_FloatMatchesBuiltin)
         x = static_cast<std::uint16_t>(di(rng));
     for(auto& x : hc)
         x = df(rng);
-    std::uint16_t* dA = nullptr;
-    std::uint16_t* dB = nullptr;
-    float*         dC = nullptr;
-    float*         dRaw = nullptr;
+    std::uint16_t* dA    = nullptr;
+    std::uint16_t* dB    = nullptr;
+    float*         dC    = nullptr;
+    float*         dRaw  = nullptr;
     float*         dWrap = nullptr;
     HIP_CHECK(hipMalloc(&dA, ha.size() * sizeof(std::uint16_t)));
     HIP_CHECK(hipMalloc(&dB, hb.size() * sizeof(std::uint16_t)));
     HIP_CHECK(hipMalloc(&dC, hc.size() * sizeof(float)));
     HIP_CHECK(hipMalloc(&dRaw, WAVE * 8 * sizeof(float)));
     HIP_CHECK(hipMalloc(&dWrap, WAVE * 8 * sizeof(float)));
-    HIP_CHECK(hipMemcpy(dA, ha.data(), ha.size() * sizeof(std::uint16_t),
-                        hipMemcpyHostToDevice));
-    HIP_CHECK(hipMemcpy(dB, hb.data(), hb.size() * sizeof(std::uint16_t),
-                        hipMemcpyHostToDevice));
+    HIP_CHECK(hipMemcpy(dA, ha.data(), ha.size() * sizeof(std::uint16_t), hipMemcpyHostToDevice));
+    HIP_CHECK(hipMemcpy(dB, hb.data(), hb.size() * sizeof(std::uint16_t), hipMemcpyHostToDevice));
     HIP_CHECK(hipMemcpy(dC, hc.data(), hc.size() * sizeof(float), hipMemcpyHostToDevice));
     std::uniform_int_distribution<int> di16(0, 0xFFFF);
     std::uint16_t                      idx = static_cast<std::uint16_t>(di16(rng));
@@ -382,8 +367,7 @@ TEST(SwmmacGfx12, F32_BF16_FloatMatchesBuiltin)
     HIP_CHECK(hipDeviceSynchronize());
     std::vector<float> raw(WAVE * 8), wrap(WAVE * 8);
     HIP_CHECK(hipMemcpy(raw.data(), dRaw, raw.size() * sizeof(float), hipMemcpyDeviceToHost));
-    HIP_CHECK(hipMemcpy(wrap.data(), dWrap, wrap.size() * sizeof(float),
-                        hipMemcpyDeviceToHost));
+    HIP_CHECK(hipMemcpy(wrap.data(), dWrap, wrap.size() * sizeof(float), hipMemcpyDeviceToHost));
     for(size_t i = 0; i < raw.size(); ++i)
     {
         std::uint32_t br, bw;
@@ -411,31 +395,28 @@ TEST(SwmmacGfx12, F16_F16_FloatMatchesBuiltin)
         x = static_cast<std::uint16_t>(di(rng));
     for(auto& x : hc)
         x = static_cast<std::uint16_t>(di(rng));
-    std::uint16_t* dA = nullptr;
-    std::uint16_t* dB = nullptr;
-    std::uint16_t* dC = nullptr;
-    std::uint16_t* dRaw = nullptr;
+    std::uint16_t* dA    = nullptr;
+    std::uint16_t* dB    = nullptr;
+    std::uint16_t* dC    = nullptr;
+    std::uint16_t* dRaw  = nullptr;
     std::uint16_t* dWrap = nullptr;
     HIP_CHECK(hipMalloc(&dA, ha.size() * sizeof(std::uint16_t)));
     HIP_CHECK(hipMalloc(&dB, hb.size() * sizeof(std::uint16_t)));
     HIP_CHECK(hipMalloc(&dC, hc.size() * sizeof(std::uint16_t)));
     HIP_CHECK(hipMalloc(&dRaw, WAVE * 8 * sizeof(std::uint16_t)));
     HIP_CHECK(hipMalloc(&dWrap, WAVE * 8 * sizeof(std::uint16_t)));
-    HIP_CHECK(hipMemcpy(dA, ha.data(), ha.size() * sizeof(std::uint16_t),
-                        hipMemcpyHostToDevice));
-    HIP_CHECK(hipMemcpy(dB, hb.data(), hb.size() * sizeof(std::uint16_t),
-                        hipMemcpyHostToDevice));
-    HIP_CHECK(hipMemcpy(dC, hc.data(), hc.size() * sizeof(std::uint16_t),
-                        hipMemcpyHostToDevice));
+    HIP_CHECK(hipMemcpy(dA, ha.data(), ha.size() * sizeof(std::uint16_t), hipMemcpyHostToDevice));
+    HIP_CHECK(hipMemcpy(dB, hb.data(), hb.size() * sizeof(std::uint16_t), hipMemcpyHostToDevice));
+    HIP_CHECK(hipMemcpy(dC, hc.data(), hc.size() * sizeof(std::uint16_t), hipMemcpyHostToDevice));
     std::uniform_int_distribution<int> di16(0, 0xFFFF);
     std::uint16_t                      idx = static_cast<std::uint16_t>(di16(rng));
     k_swmmac_f16h_pair<<<1, WAVE>>>(dA, dB, dC, idx, dRaw, dWrap);
     HIP_CHECK(hipDeviceSynchronize());
     std::vector<std::uint16_t> raw(WAVE * 8), wrap(WAVE * 8);
-    HIP_CHECK(hipMemcpy(raw.data(), dRaw, raw.size() * sizeof(std::uint16_t),
-                        hipMemcpyDeviceToHost));
-    HIP_CHECK(hipMemcpy(wrap.data(), dWrap, wrap.size() * sizeof(std::uint16_t),
-                        hipMemcpyDeviceToHost));
+    HIP_CHECK(
+        hipMemcpy(raw.data(), dRaw, raw.size() * sizeof(std::uint16_t), hipMemcpyDeviceToHost));
+    HIP_CHECK(
+        hipMemcpy(wrap.data(), dWrap, wrap.size() * sizeof(std::uint16_t), hipMemcpyDeviceToHost));
     for(size_t i = 0; i < raw.size(); ++i)
         EXPECT_EQ(wrap[i], raw[i]) << "lane " << (i / 8) << " slot " << (i % 8);
     (void)hipFree(dA);
@@ -451,7 +432,7 @@ static void run_fp8_swmmac_test(std::uint32_t seed)
     if(!have_device())
         GTEST_SKIP() << "no HIP device";
     std::mt19937                          rng(seed);
-    std::uniform_int_distribution<int>    di_byte(0, 0x7F);     // positive fp8 bytes
+    std::uniform_int_distribution<int>    di_byte(0, 0x7F); // positive fp8 bytes
     std::uniform_real_distribution<float> df(-1.f, 1.f);
     std::vector<std::uint8_t>             ha(WAVE * 8), hb(WAVE * 16);
     std::vector<float>                    hc(WAVE * 8);
@@ -461,10 +442,10 @@ static void run_fp8_swmmac_test(std::uint32_t seed)
         x = static_cast<std::uint8_t>(di_byte(rng));
     for(auto& x : hc)
         x = df(rng);
-    std::uint8_t* dA = nullptr;
-    std::uint8_t* dB = nullptr;
-    float*        dC = nullptr;
-    float*        dRaw = nullptr;
+    std::uint8_t* dA    = nullptr;
+    std::uint8_t* dB    = nullptr;
+    float*        dC    = nullptr;
+    float*        dRaw  = nullptr;
     float*        dWrap = nullptr;
     HIP_CHECK(hipMalloc(&dA, ha.size()));
     HIP_CHECK(hipMalloc(&dB, hb.size()));
@@ -480,8 +461,7 @@ static void run_fp8_swmmac_test(std::uint32_t seed)
     HIP_CHECK(hipDeviceSynchronize());
     std::vector<float> raw(WAVE * 8), wrap(WAVE * 8);
     HIP_CHECK(hipMemcpy(raw.data(), dRaw, raw.size() * sizeof(float), hipMemcpyDeviceToHost));
-    HIP_CHECK(hipMemcpy(wrap.data(), dWrap, wrap.size() * sizeof(float),
-                        hipMemcpyDeviceToHost));
+    HIP_CHECK(hipMemcpy(wrap.data(), dWrap, wrap.size() * sizeof(float), hipMemcpyDeviceToHost));
     for(size_t i = 0; i < raw.size(); ++i)
     {
         std::uint32_t br, bw;
@@ -496,10 +476,22 @@ static void run_fp8_swmmac_test(std::uint32_t seed)
     (void)hipFree(dWrap);
 }
 
-TEST(SwmmacGfx12, F32_FP8_FP8_FloatMatchesBuiltin) { run_fp8_swmmac_test<0>(0xfe'00); }
-TEST(SwmmacGfx12, F32_FP8_BF8_FloatMatchesBuiltin) { run_fp8_swmmac_test<1>(0xfe'01); }
-TEST(SwmmacGfx12, F32_BF8_FP8_FloatMatchesBuiltin) { run_fp8_swmmac_test<2>(0xfe'02); }
-TEST(SwmmacGfx12, F32_BF8_BF8_FloatMatchesBuiltin) { run_fp8_swmmac_test<3>(0xfe'03); }
+TEST(SwmmacGfx12, F32_FP8_FP8_FloatMatchesBuiltin)
+{
+    run_fp8_swmmac_test<0>(0xfe'00);
+}
+TEST(SwmmacGfx12, F32_FP8_BF8_FloatMatchesBuiltin)
+{
+    run_fp8_swmmac_test<1>(0xfe'01);
+}
+TEST(SwmmacGfx12, F32_BF8_FP8_FloatMatchesBuiltin)
+{
+    run_fp8_swmmac_test<2>(0xfe'02);
+}
+TEST(SwmmacGfx12, F32_BF8_BF8_FloatMatchesBuiltin)
+{
+    run_fp8_swmmac_test<3>(0xfe'03);
+}
 
 // ============================================================================
 // Layout / FPSan dataflow tests for f16, bf16, f16-out (shared layout).

@@ -85,7 +85,7 @@ namespace fpsan
 // every TU built with the same compiler+target agree. They are therefore not
 // overridable; a hand-defined value is rejected here.
 #if defined(FPSAN_HAS_FLOAT16) || defined(FPSAN_HAS_BF16)
-#error                                                                                              \
+#error \
     "fpsan: FPSAN_HAS_FLOAT16 / FPSAN_HAS_BF16 are auto-detected from the compiler and must not be defined manually (an inconsistent value across translation units would be an ODR violation)."
 #endif
 

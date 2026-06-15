@@ -1565,25 +1565,23 @@ namespace fpsan
     // =============================================================================
 #if !defined(__HIP_DEVICE_COMPILE__) || __has_builtin(__builtin_amdgcn_cvt_scale_pk8_f32_fp8)
     // ---- pk8 unpack from fp8/bf8: v2u32 (8 bytes) -> v8, each * scale (width-8).
-#define FPSAN_DEFINE_CVT_SCALE_UNPACK_PK8_FP8(NAME, DstFT, VEC, BUILTIN)                          \
-    template <int ScaleSel,                                                                       \
-              Semantics   S = Semantics::Float,                                                   \
-              Conversions C = Conversions::Explicit>                                              \
-    FPSAN_DEVICE Value<VEC, S, C> NAME(v2u32_native packed, std::uint32_t scale)                  \
-    {                                                                                             \
-        if constexpr(S == Semantics::Float)                                                       \
-            return Value<VEC, S, C>(BUILTIN(packed, scale, ScaleSel));                            \
-        else                                                                                      \
-        {                                                                                         \
-            (void)scale;                                                                          \
-            Value<VEC, S, C> r{};                                                                 \
-            for(int i = 0; i < 8; ++i)                                                            \
-            {                                                                                     \
-                const std::uint32_t byte = (packed[i / 4] >> (8 * (i % 4))) & 0xFFu;              \
-                r.set(i, fpsan::cast<DstFT>(detail::subbyte_widen<8, S, C>(byte)));               \
-            }                                                                                     \
-            return r;                                                                             \
-        }                                                                                         \
+#define FPSAN_DEFINE_CVT_SCALE_UNPACK_PK8_FP8(NAME, DstFT, VEC, BUILTIN)                           \
+    template <int ScaleSel, Semantics S = Semantics::Float, Conversions C = Conversions::Explicit> \
+    FPSAN_DEVICE Value<VEC, S, C> NAME(v2u32_native packed, std::uint32_t scale)                   \
+    {                                                                                              \
+        if constexpr(S == Semantics::Float)                                                        \
+            return Value<VEC, S, C>(BUILTIN(packed, scale, ScaleSel));                             \
+        else                                                                                       \
+        {                                                                                          \
+            (void)scale;                                                                           \
+            Value<VEC, S, C> r{};                                                                  \
+            for(int i = 0; i < 8; ++i)                                                             \
+            {                                                                                      \
+                const std::uint32_t byte = (packed[i / 4] >> (8 * (i % 4))) & 0xFFu;               \
+                r.set(i, fpsan::cast<DstFT>(detail::subbyte_widen<8, S, C>(byte)));                \
+            }                                                                                      \
+            return r;                                                                              \
+        }                                                                                          \
     }
     FPSAN_DEFINE_CVT_SCALE_UNPACK_PK8_FP8(amdgcn_cvt_scale_pk8_f32_fp8,
                                           float,
@@ -1612,25 +1610,23 @@ namespace fpsan
 #undef FPSAN_DEFINE_CVT_SCALE_UNPACK_PK8_FP8
 
     // ---- pk8 unpack from fp4: u32 (8 nibbles) -> v8, each * scale (width-4).
-#define FPSAN_DEFINE_CVT_SCALE_UNPACK_PK8_FP4(NAME, DstFT, VEC, BUILTIN)                          \
-    template <int ScaleSel,                                                                       \
-              Semantics   S = Semantics::Float,                                                   \
-              Conversions C = Conversions::Explicit>                                              \
-    FPSAN_DEVICE Value<VEC, S, C> NAME(std::uint32_t packed, std::uint32_t scale)                 \
-    {                                                                                             \
-        if constexpr(S == Semantics::Float)                                                       \
-            return Value<VEC, S, C>(BUILTIN(packed, scale, ScaleSel));                            \
-        else                                                                                      \
-        {                                                                                         \
-            (void)scale;                                                                          \
-            Value<VEC, S, C> r{};                                                                 \
-            for(int i = 0; i < 8; ++i)                                                            \
-            {                                                                                     \
-                const std::uint32_t nib = (packed >> (4 * i)) & 0xFu;                             \
-                r.set(i, fpsan::cast<DstFT>(detail::subbyte_widen<4, S, C>(nib)));                \
-            }                                                                                     \
-            return r;                                                                             \
-        }                                                                                         \
+#define FPSAN_DEFINE_CVT_SCALE_UNPACK_PK8_FP4(NAME, DstFT, VEC, BUILTIN)                           \
+    template <int ScaleSel, Semantics S = Semantics::Float, Conversions C = Conversions::Explicit> \
+    FPSAN_DEVICE Value<VEC, S, C> NAME(std::uint32_t packed, std::uint32_t scale)                  \
+    {                                                                                              \
+        if constexpr(S == Semantics::Float)                                                        \
+            return Value<VEC, S, C>(BUILTIN(packed, scale, ScaleSel));                             \
+        else                                                                                       \
+        {                                                                                          \
+            (void)scale;                                                                           \
+            Value<VEC, S, C> r{};                                                                  \
+            for(int i = 0; i < 8; ++i)                                                             \
+            {                                                                                      \
+                const std::uint32_t nib = (packed >> (4 * i)) & 0xFu;                              \
+                r.set(i, fpsan::cast<DstFT>(detail::subbyte_widen<4, S, C>(nib)));                 \
+            }                                                                                      \
+            return r;                                                                              \
+        }                                                                                          \
     }
     FPSAN_DEFINE_CVT_SCALE_UNPACK_PK8_FP4(amdgcn_cvt_scale_pk8_f32_fp4,
                                           float,
@@ -1649,28 +1645,26 @@ namespace fpsan
     // ---- pk16 unpack from fp6/bf6: v3u32 (16 contiguous 6-bit codes) -> v16, each
     // * scale (width-6). fp6 vs bf6 differ only in the Float-mode builtin; the
     // FPSan payload widen is a width-6 sign-resize either way.
-#define FPSAN_DEFINE_CVT_SCALE_UNPACK_PK16_FP6(NAME, DstFT, VEC, BUILTIN)                         \
-    template <int ScaleSel,                                                                       \
-              Semantics   S = Semantics::Float,                                                   \
-              Conversions C = Conversions::Explicit>                                              \
-    FPSAN_DEVICE Value<VEC, S, C> NAME(v3u32_native packed, std::uint32_t scale)                  \
-    {                                                                                             \
-        if constexpr(S == Semantics::Float)                                                       \
-            return Value<VEC, S, C>(BUILTIN(packed, scale, ScaleSel));                            \
-        else                                                                                      \
-        {                                                                                         \
-            (void)scale;                                                                          \
-            Value<VEC, S, C> r{};                                                                 \
-            for(int i = 0; i < 16; ++i)                                                           \
-            {                                                                                     \
-                const int     p = i * 6, wi = p >> 5, off = p & 31;                               \
-                std::uint32_t f = packed[wi] >> off;                                              \
-                if(off > 26)                                                                      \
-                    f |= packed[wi + 1] << (32 - off);                                            \
-                r.set(i, fpsan::cast<DstFT>(detail::subbyte_widen<6, S, C>(f & 0x3Fu)));          \
-            }                                                                                     \
-            return r;                                                                             \
-        }                                                                                         \
+#define FPSAN_DEFINE_CVT_SCALE_UNPACK_PK16_FP6(NAME, DstFT, VEC, BUILTIN)                          \
+    template <int ScaleSel, Semantics S = Semantics::Float, Conversions C = Conversions::Explicit> \
+    FPSAN_DEVICE Value<VEC, S, C> NAME(v3u32_native packed, std::uint32_t scale)                   \
+    {                                                                                              \
+        if constexpr(S == Semantics::Float)                                                        \
+            return Value<VEC, S, C>(BUILTIN(packed, scale, ScaleSel));                             \
+        else                                                                                       \
+        {                                                                                          \
+            (void)scale;                                                                           \
+            Value<VEC, S, C> r{};                                                                  \
+            for(int i = 0; i < 16; ++i)                                                            \
+            {                                                                                      \
+                const int     p = i * 6, wi = p >> 5, off = p & 31;                                \
+                std::uint32_t f = packed[wi] >> off;                                               \
+                if(off > 26)                                                                       \
+                    f |= packed[wi + 1] << (32 - off);                                             \
+                r.set(i, fpsan::cast<DstFT>(detail::subbyte_widen<6, S, C>(f & 0x3Fu)));           \
+            }                                                                                      \
+            return r;                                                                              \
+        }                                                                                          \
     }
     FPSAN_DEFINE_CVT_SCALE_UNPACK_PK16_FP6(amdgcn_cvt_scale_pk16_f32_fp6,
                                            float,

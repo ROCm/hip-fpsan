@@ -63,9 +63,10 @@ __global__ void k_loadtr_raw_f16(const std::uint16_t* gmem, std::uint16_t* out)
     r = __builtin_amdgcn_global_load_tr_b128_v8f16(
         (v8fp16 __attribute__((address_space(1)))*)(&gmem[lane * 8]));
 #endif
-    union {
-        v8fp16         v;
-        std::uint16_t  u[8];
+    union
+    {
+        v8fp16        v;
+        std::uint16_t u[8];
     } u;
     u.v = r;
     for(int s = 0; s < 8; ++s)
@@ -76,9 +77,9 @@ __global__ void k_loadtr_raw_f16(const std::uint16_t* gmem, std::uint16_t* out)
 template <Semantics S>
 __global__ void k_loadtr_wrap_f16(const std::uint16_t* gmem, std::uint16_t* out)
 {
-    using V = Value<_Float16, S, kCC>;
-    int lane = threadIdx.x;
-    auto r = fpsan::amdgcn_global_load_tr_b128_f16<S, kCC>(
+    using V   = Value<_Float16, S, kCC>;
+    int  lane = threadIdx.x;
+    auto r    = fpsan::amdgcn_global_load_tr_b128_f16<S, kCC>(
         reinterpret_cast<const V*>(&gmem[lane * 8]));
     for(int s = 0; s < 8; ++s)
         out[lane * 8 + s] = r.get(s).to_storage_bits();
@@ -95,9 +96,10 @@ __global__ void k_loadtr_raw_bf16(const std::uint16_t* gmem, std::uint16_t* out)
     r = __builtin_amdgcn_global_load_tr_b128_v8bf16(
         (v8bf __attribute__((address_space(1)))*)(&gmem[lane * 8]));
 #endif
-    union {
-        v8bf           v;
-        std::uint16_t  u[8];
+    union
+    {
+        v8bf          v;
+        std::uint16_t u[8];
     } u;
     u.v = r;
     for(int s = 0; s < 8; ++s)
@@ -108,9 +110,9 @@ __global__ void k_loadtr_raw_bf16(const std::uint16_t* gmem, std::uint16_t* out)
 template <Semantics S>
 __global__ void k_loadtr_wrap_bf16(const std::uint16_t* gmem, std::uint16_t* out)
 {
-    using V = Value<__bf16, S, kCC>;
-    int lane = threadIdx.x;
-    auto r = fpsan::amdgcn_global_load_tr_b128_bf16<S, kCC>(
+    using V   = Value<__bf16, S, kCC>;
+    int  lane = threadIdx.x;
+    auto r    = fpsan::amdgcn_global_load_tr_b128_bf16<S, kCC>(
         reinterpret_cast<const V*>(&gmem[lane * 8]));
     for(int s = 0; s < 8; ++s)
         out[lane * 8 + s] = r.get(s).to_storage_bits();
@@ -122,7 +124,7 @@ namespace
     // `k(gmem, out)`. Returns out[].
     std::vector<std::uint16_t> run(void (*k)(const std::uint16_t*, std::uint16_t*))
     {
-        const int N   = WAVE * 8;
+        const int      N     = WAVE * 8;
         std::uint16_t* d_in  = nullptr;
         std::uint16_t* d_out = nullptr;
         (void)hipMalloc(&d_in, N * sizeof(std::uint16_t));
@@ -131,13 +133,11 @@ namespace
         for(int lane = 0; lane < WAVE; ++lane)
             for(int s = 0; s < 8; ++s)
                 h_in[lane * 8 + s] = pat16(lane, s);
-        (void)hipMemcpy(d_in, h_in.data(), N * sizeof(std::uint16_t),
-                        hipMemcpyHostToDevice);
+        (void)hipMemcpy(d_in, h_in.data(), N * sizeof(std::uint16_t), hipMemcpyHostToDevice);
         k<<<1, WAVE>>>(d_in, d_out);
         (void)hipDeviceSynchronize();
         std::vector<std::uint16_t> h_out(N);
-        (void)hipMemcpy(h_out.data(), d_out, N * sizeof(std::uint16_t),
-                        hipMemcpyDeviceToHost);
+        (void)hipMemcpy(h_out.data(), d_out, N * sizeof(std::uint16_t), hipMemcpyDeviceToHost);
         (void)hipFree(d_in);
         (void)hipFree(d_out);
         return h_out;
