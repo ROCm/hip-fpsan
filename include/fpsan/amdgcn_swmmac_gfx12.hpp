@@ -115,6 +115,7 @@ namespace fpsan
     // The builtin ABI packs the fp8 fragments into i32 vectors.
     using v2i32_swmmac = int __attribute__((ext_vector_type(2)));
     using v4i32_swmmac = int __attribute__((ext_vector_type(4)));
+    using v8i16_swmmac = short __attribute__((ext_vector_type(8)));
 
     namespace detail
     {
@@ -135,44 +136,48 @@ namespace fpsan
         FPSAN_DEVICE Value<CVec, S, C> swmmac_software_16x16x32_h(Value<AVec, S, C> a,
                                                                   Value<BVec, S, C> b,
                                                                   Value<CVec, S, C> c,
-                                                                  std::uint16_t     idx)
+                                                                  int               idx)
         {
             using DFrag     = Value<CVec, S, C>;
             using AccScalar = typename DFrag::element_type;
             using Acc       = Value<AccScalar, S, C>;
-            const int lane  = wave_lane();
-            const int j     = lane & 15;
+            const int  lane = wave_lane_full();
+            const bool w64  = __builtin_amdgcn_wavefrontsize() == 64;
+            const int  j    = lane & 15;
 
             // Prefetch B column j. Lane j holds k in {0..7, 16..23}; lane j+16 holds
             // k in {8..15, 24..31}. Slot e in 0..15 maps to k = 16*(e/8) + 8*sl + (e%8),
             // for source lane = j + 16*sl. The e-loop is uniform across the wave -- only
             // src varies, which ds_bpermute supports.
-            Acc Bcol[32];
-            for(int sl = 0; sl < 2; ++sl)
+            Acc       Bcol[32];
+            const int b_blocks = w64 ? 4 : 2;
+            const int b_lanes  = static_cast<int>(Value<BVec, S, C>::lanes);
+            for(int sl = 0; sl < b_blocks; ++sl)
             {
                 const int src = j + 16 * sl;
-                for(int e = 0; e < 16; ++e)
+                for(int e = 0; e < b_lanes; ++e)
                 {
-                    const int k = 16 * (e / 8) + 8 * sl + (e % 8);
+                    const int k = w64 ? 8 * sl + e : 16 * (e / 8) + 8 * sl + (e % 8);
                     Bcol[k]     = cast<AccScalar>(wave_shfl(b.get(e), src));
                 }
             }
 
             DFrag     d{};
             const int idx_w = static_cast<int>(static_cast<std::uint32_t>(idx));
-            for(int reg = 0; reg < 8; ++reg)
+            for(int reg = 0; reg < static_cast<int>(DFrag::lanes); ++reg)
             {
-                const int output_i = reg + 8 * (lane >> 4);
-                Acc       acc      = c.get(reg);
+                const int output_i
+                    = w64 ? reg + 8 * ((lane >> 4) & 1) + 4 * (lane >> 5) : reg + 8 * (lane >> 4);
+                Acc acc = c.get(reg);
                 for(int g = 0; g < 8; ++g)
                 {
-                    const int side    = (g >> 1) & 1;
+                    const int side    = w64 ? (g >> 1) : ((g >> 1) & 1);
                     const int idxlane = output_i + 16 * side;
                     const int idxA    = __builtin_amdgcn_ds_bpermute(idxlane * 4, idx_w);
-                    const int bit_off = 4 * (g & 1) + 8 * (g >> 2);
+                    const int bit_off = w64 ? 4 * (g & 1) : 4 * (g & 1) + 8 * (g >> 2);
                     const int nibble  = (idxA >> bit_off) & 0xF;
                     const int p[2]    = {nibble & 3, (nibble >> 2) & 3};
-                    const int a_gpr   = 2 * (g >> 2) + (g & 1);
+                    const int a_gpr   = w64 ? (g & 1) : 2 * (g >> 2) + (g & 1);
                     const int a_lane  = output_i + 16 * side;
                     for(int s = 0; s < 2; ++s)
                     {
@@ -200,46 +205,50 @@ namespace fpsan
         // Note the lane split is at K=16 (g/4) for fp8 vs K=8 (g/2)%2 for f16/bf16
         // -- because A's per-lane v8 packs the 8 groups linearly (2 bytes per group),
         // not interleaved-by-K-stride as the f16 case is.
-        template <class AVec, class BVec, Semantics S, Conversions C>
-        FPSAN_DEVICE Value<v8f_native, S, C> swmmac_software_16x16x32_fp8(Value<AVec, S, C>       a,
-                                                                          Value<BVec, S, C>       b,
-                                                                          Value<v8f_native, S, C> c,
-                                                                          std::uint16_t idx)
+        template <class AVec, class BVec, class CVec, Semantics S, Conversions C>
+        FPSAN_DEVICE Value<CVec, S, C> swmmac_software_16x16x32_fp8(Value<AVec, S, C> a,
+                                                                    Value<BVec, S, C> b,
+                                                                    Value<CVec, S, C> c,
+                                                                    int               idx)
         {
-            using Acc      = Value<float, S, C>;
-            const int lane = wave_lane();
-            const int j    = lane & 15;
+            using DFrag     = Value<CVec, S, C>;
+            using AccScalar = typename DFrag::element_type;
+            using Acc       = Value<AccScalar, S, C>;
+            const int  lane = wave_lane_full();
+            const bool w64  = __builtin_amdgcn_wavefrontsize() == 64;
+            const int  j    = lane & 15;
 
             // Prefetch B column j (linear byte addressing).
             Acc Bcol[32];
-            for(int sl = 0; sl < 2; ++sl)
+            for(int k = 0; k < 32; ++k)
             {
-                const int src = j + 16 * sl;
-                for(int e = 0; e < 16; ++e)
-                    Bcol[16 * sl + e] = cast<float>(wave_shfl(b.get(e), src));
+                const int src  = w64 ? j + 32 * ((k >> 3) & 1) + 16 * (k >> 4) : j + 16 * (k >> 4);
+                const int slot = w64 ? 4 * ((k >> 2) & 1) + (k & 3) : (k & 15);
+                Bcol[k]        = cast<AccScalar>(wave_shfl(b.get(slot), src));
             }
 
-            Value<v8f_native, S, C> d{};
-            const int               idx_w = static_cast<int>(static_cast<std::uint32_t>(idx));
-            for(int reg = 0; reg < 8; ++reg)
+            DFrag     d{};
+            const int idx_w = static_cast<int>(static_cast<std::uint32_t>(idx));
+            for(int reg = 0; reg < static_cast<int>(DFrag::lanes); ++reg)
             {
-                const int output_i = reg + 8 * (lane >> 4);
-                Acc       acc      = c.get(reg);
+                const int output_i
+                    = w64 ? reg + 8 * ((lane >> 4) & 1) + 4 * (lane >> 5) : reg + 8 * (lane >> 4);
+                Acc acc = c.get(reg);
                 for(int g = 0; g < 8; ++g)
                 {
-                    const int side    = (g >> 2) & 1;
-                    const int idxlane = output_i + 16 * side;
+                    const int block   = w64 ? 2 * ((g >> 1) & 1) + (g >> 2) : ((g >> 2) & 1);
+                    const int idxlane = output_i + 16 * block;
                     const int idxA    = __builtin_amdgcn_ds_bpermute(idxlane * 4, idx_w);
-                    const int bit_off = 4 * (g & 3);
+                    const int bit_off = w64 ? 4 * (g & 1) : 4 * (g & 3);
                     const int nibble  = (idxA >> bit_off) & 0xF;
                     const int p[2]    = {nibble & 3, (nibble >> 2) & 3};
-                    const int a_lane  = output_i + 16 * side;
+                    const int a_lane  = output_i + 16 * block;
                     for(int s = 0; s < 2; ++s)
                     {
-                        const int byte = 2 * (g & 3) + s;
+                        const int byte = w64 ? 2 * (g & 1) + s : 2 * (g & 3) + s;
                         auto      av   = wave_shfl(a.get(byte), a_lane);
                         const int k    = 4 * g + p[s];
-                        acc            = acc + cast<float>(av) * Bcol[k];
+                        acc            = acc + cast<AccScalar>(av) * Bcol[k];
                     }
                 }
                 d.set(reg, acc);
@@ -297,6 +306,91 @@ namespace fpsan
 
 #undef FPSAN_DEFINE_SWMMAC_GFX12
 
+    // ---- f16 / bf16 / f16-out / bf16-out SWMMAC wave64 wrappers -----------------
+#define FPSAN_DEFINE_SWMMAC_GFX12_W64(NAME, AVec_, BVec_, CFragVec_, BUILTIN)            \
+    template <Semantics S, Conversions C>                                                \
+    FPSAN_DEVICE Value<CFragVec_, S, C> NAME(                                            \
+        Value<AVec_, S, C> a, Value<BVec_, S, C> b, Value<CFragVec_, S, C> c, int index) \
+    {                                                                                    \
+        if constexpr(S == Semantics::Native)                                             \
+        {                                                                                \
+            auto d = BUILTIN(a.to_float(), b.to_float(), c.to_float(), index);           \
+            return Value<CFragVec_, S, C>(d);                                            \
+        }                                                                                \
+        else                                                                             \
+        {                                                                                \
+            return detail::swmmac_software_16x16x32_h<AVec_, BVec_, CFragVec_, S, C>(    \
+                a, b, c, index);                                                         \
+        }                                                                                \
+    }
+
+#define FPSAN_DEFINE_SWMMAC_GFX12_BF16_W64(NAME, AVec_, BVec_, CFragVec_, BUILTIN)       \
+    template <Semantics S, Conversions C>                                                \
+    FPSAN_DEVICE Value<CFragVec_, S, C> NAME(                                            \
+        Value<AVec_, S, C> a, Value<BVec_, S, C> b, Value<CFragVec_, S, C> c, int index) \
+    {                                                                                    \
+        if constexpr(S == Semantics::Native)                                             \
+        {                                                                                \
+            const v4i16_native ai = __builtin_bit_cast(v4i16_native, a.to_float());      \
+            const v8i16_swmmac bi = __builtin_bit_cast(v8i16_swmmac, b.to_float());      \
+            const v4i16_native ci = __builtin_bit_cast(v4i16_native, c.to_float());      \
+            auto               d  = BUILTIN(ai, bi, ci, index);                          \
+            return Value<CFragVec_, S, C>(__builtin_bit_cast(CFragVec_, d));             \
+        }                                                                                \
+        else                                                                             \
+        {                                                                                \
+            return detail::swmmac_software_16x16x32_h<AVec_, BVec_, CFragVec_, S, C>(    \
+                a, b, c, index);                                                         \
+        }                                                                                \
+    }
+
+#define FPSAN_DEFINE_SWMMAC_GFX12_BF16_F32_W64(NAME, AVec_, BVec_, CFragVec_, BUILTIN)   \
+    template <Semantics S, Conversions C>                                                \
+    FPSAN_DEVICE Value<CFragVec_, S, C> NAME(                                            \
+        Value<AVec_, S, C> a, Value<BVec_, S, C> b, Value<CFragVec_, S, C> c, int index) \
+    {                                                                                    \
+        if constexpr(S == Semantics::Native)                                             \
+        {                                                                                \
+            const v4i16_native ai = __builtin_bit_cast(v4i16_native, a.to_float());      \
+            const v8i16_swmmac bi = __builtin_bit_cast(v8i16_swmmac, b.to_float());      \
+            auto               d  = BUILTIN(ai, bi, c.to_float(), index);                \
+            return Value<CFragVec_, S, C>(d);                                            \
+        }                                                                                \
+        else                                                                             \
+        {                                                                                \
+            return detail::swmmac_software_16x16x32_h<AVec_, BVec_, CFragVec_, S, C>(    \
+                a, b, c, index);                                                         \
+        }                                                                                \
+    }
+
+#if !defined(__HIP_DEVICE_COMPILE__) \
+    || (__has_builtin(__builtin_amdgcn_swmmac_f32_16x16x32_f16_w64) && !defined(__gfx1250__))
+    FPSAN_DEFINE_SWMMAC_GFX12_W64(amdgcn_swmmac_f32_16x16x32_f16_w64,
+                                  v4h_native,
+                                  v8h_native,
+                                  v4f_native,
+                                  __builtin_amdgcn_swmmac_f32_16x16x32_f16_w64)
+    FPSAN_DEFINE_SWMMAC_GFX12_BF16_F32_W64(amdgcn_swmmac_f32_16x16x32_bf16_w64,
+                                           v4bf_native,
+                                           v8bf_native,
+                                           v4f_native,
+                                           __builtin_amdgcn_swmmac_f32_16x16x32_bf16_w64)
+    FPSAN_DEFINE_SWMMAC_GFX12_W64(amdgcn_swmmac_f16_16x16x32_f16_w64,
+                                  v4h_native,
+                                  v8h_native,
+                                  v4h_native,
+                                  __builtin_amdgcn_swmmac_f16_16x16x32_f16_w64)
+    FPSAN_DEFINE_SWMMAC_GFX12_BF16_W64(amdgcn_swmmac_bf16_16x16x32_bf16_w64,
+                                       v4bf_native,
+                                       v8bf_native,
+                                       v4bf_native,
+                                       __builtin_amdgcn_swmmac_bf16_16x16x32_bf16_w64)
+#endif
+
+#undef FPSAN_DEFINE_SWMMAC_GFX12_BF16_F32_W64
+#undef FPSAN_DEFINE_SWMMAC_GFX12_BF16_W64
+#undef FPSAN_DEFINE_SWMMAC_GFX12_W64
+
     // ---- FP8 / BF8 SWMMAC wrappers ---------------------------------------------
     // Builtin signature: (v2i32 A, v4i32 B, v8f C, short index) -> v8f
     // A = 8 fp8/bf8 bytes/lane, B = 16 fp8/bf8 bytes/lane, C/D = v8f.
@@ -316,7 +410,8 @@ namespace fpsan
         }                                                                                     \
         else                                                                                  \
         {                                                                                     \
-            return detail::swmmac_software_16x16x32_fp8<AVec_, BVec_, S, C>(a, b, c, index);  \
+            return detail::swmmac_software_16x16x32_fp8<AVec_, BVec_, v8f_native, S, C>(      \
+                a, b, c, index);                                                              \
         }                                                                                     \
     }
 
@@ -341,6 +436,48 @@ namespace fpsan
 #endif
 
 #undef FPSAN_DEFINE_SWMMAC_GFX12_FP8
+
+    // ---- FP8 / BF8 SWMMAC wave64 wrappers ---------------------------------------
+#define FPSAN_DEFINE_SWMMAC_GFX12_FP8_W64(NAME, AVec_, BVec_, BUILTIN)                    \
+    template <Semantics S, Conversions C>                                                 \
+    FPSAN_DEVICE Value<v4f_native, S, C> NAME(                                            \
+        Value<AVec_, S, C> a, Value<BVec_, S, C> b, Value<v4f_native, S, C> c, int index) \
+    {                                                                                     \
+        if constexpr(S == Semantics::Native)                                              \
+        {                                                                                 \
+            const int          ai = __builtin_bit_cast(int, a.to_float());                \
+            const v2i32_swmmac bi = __builtin_bit_cast(v2i32_swmmac, b.to_float());       \
+            auto               d  = BUILTIN(ai, bi, c.to_float(), index);                 \
+            return Value<v4f_native, S, C>(d);                                            \
+        }                                                                                 \
+        else                                                                              \
+        {                                                                                 \
+            return detail::swmmac_software_16x16x32_fp8<AVec_, BVec_, v4f_native, S, C>(  \
+                a, b, c, index);                                                          \
+        }                                                                                 \
+    }
+
+#if !defined(__HIP_DEVICE_COMPILE__) \
+    || (__has_builtin(__builtin_amdgcn_swmmac_f32_16x16x32_fp8_fp8_w64) && !defined(__gfx1250__))
+    FPSAN_DEFINE_SWMMAC_GFX12_FP8_W64(amdgcn_swmmac_f32_16x16x32_fp8_fp8_w64,
+                                      v4e4m3_native,
+                                      v8e4m3_native,
+                                      __builtin_amdgcn_swmmac_f32_16x16x32_fp8_fp8_w64)
+    FPSAN_DEFINE_SWMMAC_GFX12_FP8_W64(amdgcn_swmmac_f32_16x16x32_fp8_bf8_w64,
+                                      v4e4m3_native,
+                                      v8e5m2_native,
+                                      __builtin_amdgcn_swmmac_f32_16x16x32_fp8_bf8_w64)
+    FPSAN_DEFINE_SWMMAC_GFX12_FP8_W64(amdgcn_swmmac_f32_16x16x32_bf8_fp8_w64,
+                                      v4e5m2_native,
+                                      v8e4m3_native,
+                                      __builtin_amdgcn_swmmac_f32_16x16x32_bf8_fp8_w64)
+    FPSAN_DEFINE_SWMMAC_GFX12_FP8_W64(amdgcn_swmmac_f32_16x16x32_bf8_bf8_w64,
+                                      v4e5m2_native,
+                                      v8e5m2_native,
+                                      __builtin_amdgcn_swmmac_f32_16x16x32_bf8_bf8_w64)
+#endif
+
+#undef FPSAN_DEFINE_SWMMAC_GFX12_FP8_W64
 
 } // namespace fpsan
 
