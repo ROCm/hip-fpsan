@@ -152,9 +152,9 @@ namespace
     // Runtime warp size of device 0 (32 or 64), or 0 if no device.
     int device_wave_size()
     {
-        #if FPSAN_TEST_FORCE_WAVE_SIZE != 0
-            return FPSAN_TEST_FORCE_WAVE_SIZE;
-        #else
+#if FPSAN_TEST_FORCE_WAVE_SIZE != 0
+        return FPSAN_TEST_FORCE_WAVE_SIZE;
+#else
         int ndev = 0;
         if(hipGetDeviceCount(&ndev) != hipSuccess || ndev == 0)
             return 0;
@@ -162,7 +162,7 @@ namespace
         if(hipGetDeviceProperties(&p, 0) != hipSuccess)
             return 0;
         return p.warpSize;
-        #endif
+#endif
     }
 
     template <class FT>

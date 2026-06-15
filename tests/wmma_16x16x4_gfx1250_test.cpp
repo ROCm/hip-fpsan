@@ -42,7 +42,7 @@ static constexpr Conversions kCC = Conversions::Explicit;
 // K-index this slot holds. Forward map: index = k&1; lane = row + 16*((k>>1)&1).
 __device__ inline int frag_k_inv4(int lane, int idx)
 {
-    int b0 = idx & 1;        // index == k&1
+    int b0 = idx & 1; // index == k&1
     int b1 = (lane >> 4) & 1; // lane half == (k>>1)&1
     return b0 | (b1 << 1);
 }
@@ -115,7 +115,7 @@ namespace
     };
     Mats make_inputs()
     {
-        Mats         m;
+        Mats m;
         m.A.resize(M * K);
         m.B.resize(K * N);
         m.C.resize(M * N);

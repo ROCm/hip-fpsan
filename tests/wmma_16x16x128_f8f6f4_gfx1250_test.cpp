@@ -327,7 +327,8 @@ __global__ void k_f8f6f4_fpsan(const std::uint32_t* Apack,
     Value<v8f_native, Semantics::FPSan, kCC> c(cn);
     Value<v8f_native, Semantics::FPSan, kCC> d;
     if constexpr(MIXED)
-        d = fpsan::amdgcn_wmma_f32_16x16x128_f8f6f4_mixed<AFMT, BFMT, Semantics::FPSan, kCC>(a, b, c);
+        d = fpsan::amdgcn_wmma_f32_16x16x128_f8f6f4_mixed<AFMT, BFMT, Semantics::FPSan, kCC>(
+            a, b, c);
     else
         d = fpsan::amdgcn_wmma_f32_16x16x128_f8f6f4_sub<AFMT, BFMT, Semantics::FPSan, kCC>(a, b, c);
     for(int e = 0; e < 8; ++e)

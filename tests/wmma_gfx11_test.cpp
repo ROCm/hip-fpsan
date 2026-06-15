@@ -34,9 +34,9 @@
 
 using fpsan::Conversions;
 using fpsan::Semantics;
-using fpsan::v4f_native;
 using fpsan::v16bf_wmma_native;
 using fpsan::v16h_wmma_native;
+using fpsan::v4f_native;
 using fpsan::v8bf_native;
 using fpsan::v8f_native;
 using fpsan::v8h_native;
@@ -74,13 +74,13 @@ namespace
 template <class Traits>
 struct Harness
 {
-    using AVec  = typename Traits::AVec;
-    using BVec  = typename Traits::BVec;
-    using CVec  = typename Traits::CVec;
-    using AElem = fpsan::detail::vector_element_t<AVec>;
-    using BElem = fpsan::detail::vector_element_t<BVec>;
-    using CElem = fpsan::detail::vector_element_t<CVec>;
-    using CBits = typename fpsan::detail::fp_traits<CElem>::bits_type;
+    using AVec                       = typename Traits::AVec;
+    using BVec                       = typename Traits::BVec;
+    using CVec                       = typename Traits::CVec;
+    using AElem                      = fpsan::detail::vector_element_t<AVec>;
+    using BElem                      = fpsan::detail::vector_element_t<BVec>;
+    using CElem                      = fpsan::detail::vector_element_t<CVec>;
+    using CBits                      = typename fpsan::detail::fp_traits<CElem>::bits_type;
     static constexpr int a_lanes     = sizeof(AVec) / sizeof(AElem);
     static constexpr int b_lanes     = sizeof(BVec) / sizeof(BElem);
     static constexpr int c_lanes     = sizeof(CVec) / sizeof(CElem);
@@ -223,8 +223,7 @@ __global__ void k_tied_preserve_float(typename Harness<Traits>::CElem* out)
     Value<typename H::AVec, Semantics::Float, kCC> a(an);
     Value<typename H::BVec, Semantics::Float, kCC> b(bn);
     Value<typename H::CVec, Semantics::Float, kCC> c(cn);
-    auto                                           d
-        = Traits::template call<Semantics::Float, kCC>(a, b, c);
+    auto d = Traits::template call<Semantics::Float, kCC>(a, b, c);
     for(int i = 0; i < H::c_lanes; ++i)
         out[lane * H::c_lanes + i] = d.get(i).to_float();
 }
@@ -250,8 +249,7 @@ __global__ void k_tied_preserve_fpsan(typename Harness<Traits>::CBits* out)
     Value<typename H::AVec, Semantics::FPSan, kCC> a(an);
     Value<typename H::BVec, Semantics::FPSan, kCC> b(bn);
     Value<typename H::CVec, Semantics::FPSan, kCC> c(cn);
-    auto                                           d
-        = Traits::template call<Semantics::FPSan, kCC>(a, b, c);
+    auto d = Traits::template call<Semantics::FPSan, kCC>(a, b, c);
     for(int i = 0; i < H::c_lanes; ++i)
         out[lane * H::c_lanes + i] = d.get(i).fpsan_payload();
 }
@@ -303,9 +301,9 @@ void run_layout_matches_hardware()
 {
     if(!current_device_is_gfx11())
         GTEST_SKIP() << "current HIP device is not gfx11";
-    using CE = typename Harness<Traits>::CElem;
-    using AE = typename Harness<Traits>::AElem;
-    using BE = typename Harness<Traits>::BElem;
+    using CE       = typename Harness<Traits>::CElem;
+    using AE       = typename Harness<Traits>::AElem;
+    using BE       = typename Harness<Traits>::BElem;
     Mats<Traits> m = make_inputs<Traits>();
 
     std::vector<CE> ref(M * N);
@@ -329,11 +327,9 @@ void run_layout_matches_hardware()
     std::vector<CE> got(M * N);
     HIP_CHECK(hipMemcpy(got.data(), dD, M * N * sizeof(CE), hipMemcpyDeviceToHost));
     for(int i = 0; i < M * N; ++i)
-        EXPECT_NEAR(static_cast<float>(got[i]),
-                    static_cast<float>(ref[i]),
-                    layout_tolerance<CE>())
-            << "layout mismatch at " << (i / N) << "," << (i % N)
-            << " got_bits=" << bits_of(got[i]) << " ref_bits=" << bits_of(ref[i]);
+        EXPECT_NEAR(static_cast<float>(got[i]), static_cast<float>(ref[i]), layout_tolerance<CE>())
+            << "layout mismatch at " << (i / N) << "," << (i % N) << " got_bits=" << bits_of(got[i])
+            << " ref_bits=" << bits_of(ref[i]);
     (void)hipFree(dA);
     (void)hipFree(dB);
     (void)hipFree(dC);
@@ -345,10 +341,10 @@ void run_fpsan_matches_scalar_reference()
 {
     if(!current_device_is_gfx11())
         GTEST_SKIP() << "current HIP device is not gfx11";
-    using AE    = typename Harness<Traits>::AElem;
-    using BE    = typename Harness<Traits>::BElem;
-    using CE    = typename Harness<Traits>::CElem;
-    using CBits = typename Harness<Traits>::CBits;
+    using AE       = typename Harness<Traits>::AElem;
+    using BE       = typename Harness<Traits>::BElem;
+    using CE       = typename Harness<Traits>::CElem;
+    using CBits    = typename Harness<Traits>::CBits;
     Mats<Traits> m = make_inputs<Traits>();
 
     using VA = Value<AE, Semantics::FPSan, kCC>;
@@ -361,8 +357,7 @@ void run_fpsan_matches_scalar_reference()
             VC acc(m.C[mm * N + nn]);
             for(int k = 0; k < K; ++k)
                 acc = acc
-                      + fpsan::cast<CE>(VA(m.A[mm * K + k]))
-                            * fpsan::cast<CE>(VB(m.B[k * N + nn]));
+                      + fpsan::cast<CE>(VA(m.A[mm * K + k])) * fpsan::cast<CE>(VB(m.B[k * N + nn]));
             ref[mm * N + nn] = acc.fpsan_payload();
         }
 
@@ -389,9 +384,9 @@ void run_tied_preserves_unselected()
     static_assert(Traits::has_opsel, "preservation is only meaningful for OPSEL WMMA forms");
     if(!current_device_is_gfx11())
         GTEST_SKIP() << "current HIP device is not gfx11";
-    using H     = Harness<Traits>;
-    using CE    = typename H::CElem;
-    using CBits = typename H::CBits;
+    using H                 = Harness<Traits>;
+    using CE                = typename H::CElem;
+    using CBits             = typename H::CBits;
     const std::size_t count = static_cast<std::size_t>(Traits::wave_size) * H::c_lanes;
 
     CE* dFloat;
@@ -413,8 +408,8 @@ void run_tied_preserves_unselected()
     for(int lane = 0; lane < Traits::wave_size; ++lane)
         for(int r = 0; r < H::output_regs; ++r)
         {
-            const int idx  = 2 * r + (Traits::opsel ? 0 : 1);
-            const CE  seed = preserve_seed<CE>(lane, idx);
+            const int  idx  = 2 * r + (Traits::opsel ? 0 : 1);
+            const CE   seed = preserve_seed<CE>(lane, idx);
             const auto flat = static_cast<std::size_t>(lane) * H::c_lanes + idx;
             EXPECT_EQ(bits_of(got_float[flat]), bits_of(seed))
                 << "Float preserve mismatch lane=" << lane << " idx=" << idx;
@@ -426,15 +421,15 @@ void run_tied_preserves_unselected()
 
 struct WmmaGfx11F32F16
 {
-    using AVec                         = v16h_wmma_native;
-    using BVec                         = v16h_wmma_native;
-    using CVec                         = std::conditional_t<kWaveSize == 64, v4f_native, v8f_native>;
-    static constexpr bool has_opsel    = false;
-    static constexpr bool opsel        = false;
-    static constexpr int  wave_size    = kWaveSize;
-    static constexpr int  a_lo         = -3, a_hi = 3;
-    static constexpr int  b_lo         = -2, b_hi = 2;
-    static constexpr int  c_lo         = -4, c_hi = 4;
+    using AVec                      = v16h_wmma_native;
+    using BVec                      = v16h_wmma_native;
+    using CVec                      = std::conditional_t<kWaveSize == 64, v4f_native, v8f_native>;
+    static constexpr bool has_opsel = false;
+    static constexpr bool opsel     = false;
+    static constexpr int  wave_size = kWaveSize;
+    static constexpr int  a_lo = -3, a_hi = 3;
+    static constexpr int  b_lo = -2, b_hi = 2;
+    static constexpr int  c_lo = -4, c_hi = 4;
     template <Semantics S, Conversions Conv>
     __device__ static Value<CVec, S, Conv>
         call(Value<AVec, S, Conv> a, Value<BVec, S, Conv> b, Value<CVec, S, Conv> c)
@@ -449,15 +444,15 @@ struct WmmaGfx11F32F16
 
 struct WmmaGfx11F32BF16
 {
-    using AVec                         = v16bf_wmma_native;
-    using BVec                         = v16bf_wmma_native;
-    using CVec                         = std::conditional_t<kWaveSize == 64, v4f_native, v8f_native>;
-    static constexpr bool has_opsel    = false;
-    static constexpr bool opsel        = false;
-    static constexpr int  wave_size    = kWaveSize;
-    static constexpr int  a_lo         = -3, a_hi = 3;
-    static constexpr int  b_lo         = -2, b_hi = 2;
-    static constexpr int  c_lo         = -4, c_hi = 4;
+    using AVec                      = v16bf_wmma_native;
+    using BVec                      = v16bf_wmma_native;
+    using CVec                      = std::conditional_t<kWaveSize == 64, v4f_native, v8f_native>;
+    static constexpr bool has_opsel = false;
+    static constexpr bool opsel     = false;
+    static constexpr int  wave_size = kWaveSize;
+    static constexpr int  a_lo = -3, a_hi = 3;
+    static constexpr int  b_lo = -2, b_hi = 2;
+    static constexpr int  c_lo = -4, c_hi = 4;
     template <Semantics S, Conversions Conv>
     __device__ static Value<CVec, S, Conv>
         call(Value<AVec, S, Conv> a, Value<BVec, S, Conv> b, Value<CVec, S, Conv> c)
@@ -473,15 +468,15 @@ struct WmmaGfx11F32BF16
 template <bool Opsel, bool Tied = false>
 struct WmmaGfx11F16F16
 {
-    using AVec                         = v16h_wmma_native;
-    using BVec                         = v16h_wmma_native;
-    using CVec                         = std::conditional_t<kWaveSize == 64, v8h_native, v16h_wmma_native>;
-    static constexpr bool has_opsel    = true;
-    static constexpr bool opsel        = Opsel;
-    static constexpr int  wave_size    = kWaveSize;
-    static constexpr int  a_lo         = -3, a_hi = 3;
-    static constexpr int  b_lo         = -2, b_hi = 2;
-    static constexpr int  c_lo         = -4, c_hi = 4;
+    using AVec = v16h_wmma_native;
+    using BVec = v16h_wmma_native;
+    using CVec = std::conditional_t<kWaveSize == 64, v8h_native, v16h_wmma_native>;
+    static constexpr bool has_opsel = true;
+    static constexpr bool opsel     = Opsel;
+    static constexpr int  wave_size = kWaveSize;
+    static constexpr int  a_lo = -3, a_hi = 3;
+    static constexpr int  b_lo = -2, b_hi = 2;
+    static constexpr int  c_lo = -4, c_hi = 4;
     template <Semantics S, Conversions Conv>
     __device__ static Value<CVec, S, Conv>
         call(Value<AVec, S, Conv> a, Value<BVec, S, Conv> b, Value<CVec, S, Conv> c)
@@ -503,15 +498,15 @@ struct WmmaGfx11F16F16
 template <bool Opsel, bool Tied = false>
 struct WmmaGfx11BF16BF16
 {
-    using AVec                         = v16bf_wmma_native;
-    using BVec                         = v16bf_wmma_native;
-    using CVec                         = std::conditional_t<kWaveSize == 64, v8bf_native, v16bf_wmma_native>;
-    static constexpr bool has_opsel    = true;
-    static constexpr bool opsel        = Opsel;
-    static constexpr int  wave_size    = kWaveSize;
-    static constexpr int  a_lo         = -3, a_hi = 3;
-    static constexpr int  b_lo         = -2, b_hi = 2;
-    static constexpr int  c_lo         = -4, c_hi = 4;
+    using AVec = v16bf_wmma_native;
+    using BVec = v16bf_wmma_native;
+    using CVec = std::conditional_t<kWaveSize == 64, v8bf_native, v16bf_wmma_native>;
+    static constexpr bool has_opsel = true;
+    static constexpr bool opsel     = Opsel;
+    static constexpr int  wave_size = kWaveSize;
+    static constexpr int  a_lo = -3, a_hi = 3;
+    static constexpr int  b_lo = -2, b_hi = 2;
+    static constexpr int  c_lo = -4, c_hi = 4;
     template <Semantics S, Conversions Conv>
     __device__ static Value<CVec, S, Conv>
         call(Value<AVec, S, Conv> a, Value<BVec, S, Conv> b, Value<CVec, S, Conv> c)
@@ -530,10 +525,10 @@ struct WmmaGfx11BF16BF16
     }
 };
 
-using WmmaGfx11F16F16Tied0     = WmmaGfx11F16F16<false, true>;
-using WmmaGfx11F16F16Tied1     = WmmaGfx11F16F16<true, true>;
-using WmmaGfx11BF16BF16Tied0   = WmmaGfx11BF16BF16<false, true>;
-using WmmaGfx11BF16BF16Tied1   = WmmaGfx11BF16BF16<true, true>;
+using WmmaGfx11F16F16Tied0   = WmmaGfx11F16F16<false, true>;
+using WmmaGfx11F16F16Tied1   = WmmaGfx11F16F16<true, true>;
+using WmmaGfx11BF16BF16Tied0 = WmmaGfx11BF16BF16<false, true>;
+using WmmaGfx11BF16BF16Tied1 = WmmaGfx11BF16BF16<true, true>;
 
 #define FPSAN_WMMA_GFX11_CONCAT2(A, B) A##B
 #define FPSAN_WMMA_GFX11_CONCAT(A, B) FPSAN_WMMA_GFX11_CONCAT2(A, B)
@@ -543,20 +538,20 @@ using WmmaGfx11BF16BF16Tied1   = WmmaGfx11BF16BF16<true, true>;
 #define FPSAN_WMMA_GFX11_SUITE(NAME) FPSAN_WMMA_GFX11_CONCAT(NAME, W32)
 #endif
 
-#define FPSAN_WMMA_GFX11_TESTS(NAME, TRAITS)          \
-    TEST(FPSAN_WMMA_GFX11_SUITE(NAME), LayoutMatchesHardware) \
-    {                                                 \
-        run_layout_matches_hardware<TRAITS>();        \
-    }                                                 \
+#define FPSAN_WMMA_GFX11_TESTS(NAME, TRAITS)                        \
+    TEST(FPSAN_WMMA_GFX11_SUITE(NAME), LayoutMatchesHardware)       \
+    {                                                               \
+        run_layout_matches_hardware<TRAITS>();                      \
+    }                                                               \
     TEST(FPSAN_WMMA_GFX11_SUITE(NAME), FpsanMatchesScalarReference) \
-    {                                                 \
-        run_fpsan_matches_scalar_reference<TRAITS>(); \
+    {                                                               \
+        run_fpsan_matches_scalar_reference<TRAITS>();               \
     }
 
-#define FPSAN_WMMA_GFX11_TIED_PRESERVE_TEST(NAME, TRAITS) \
+#define FPSAN_WMMA_GFX11_TIED_PRESERVE_TEST(NAME, TRAITS)       \
     TEST(FPSAN_WMMA_GFX11_SUITE(NAME), PreservesUnselectedHalf) \
-    {                                                    \
-        run_tied_preserves_unselected<TRAITS>();         \
+    {                                                           \
+        run_tied_preserves_unselected<TRAITS>();                \
     }
 
 FPSAN_WMMA_GFX11_TESTS(WmmaGfx11F32F16, WmmaGfx11F32F16)

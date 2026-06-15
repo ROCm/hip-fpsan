@@ -390,9 +390,9 @@ namespace
     }
     std::vector<std::uint8_t> run_g8(void (*k)(const std::uint8_t*, std::uint8_t*))
     {
-        const int      N     = WAVE * 8;
-        std::uint8_t*  d_in  = nullptr;
-        std::uint8_t*  d_out = nullptr;
+        const int     N     = WAVE * 8;
+        std::uint8_t* d_in  = nullptr;
+        std::uint8_t* d_out = nullptr;
         (void)hipMalloc(&d_in, N);
         (void)hipMalloc(&d_out, N);
         std::vector<std::uint8_t> h_in(N);

@@ -128,9 +128,8 @@ namespace fpsan_generic
     // `name` is descriptive only and make_mix_config ignores it).
     inline bool same_layout(const FPFormat& a, const FPFormat& b)
     {
-        return a.bitWidth == b.bitWidth && a.expBits == b.expBits
-               && a.mantBits == b.mantBits && a.bias == b.bias
-               && a.hasInfNan == b.hasInfNan;
+        return a.bitWidth == b.bitWidth && a.expBits == b.expBits && a.mantBits == b.mantBits
+               && a.bias == b.bias && a.hasInfNan == b.hasInfNan;
     }
 
     // Memoized lookup so repeated ops on a format don't rebuild the config.  Keyed

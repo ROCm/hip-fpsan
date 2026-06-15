@@ -36,7 +36,7 @@ using fpsan::Conversions;
 using fpsan::Semantics;
 using fpsan::Value;
 
-static constexpr Conversions kCC = Conversions::Explicit;
+static constexpr Conversions kCC      = Conversions::Explicit;
 static constexpr int         kScalarN = 32;
 
 #ifndef FPSAN_TEST_ENABLE_FDOT2
@@ -369,10 +369,10 @@ __global__ void k_fdot2_pair(const v2h*     a,
 #endif
 
 // ---- fdot2_f16_f16: v2h x v2h -> f16 ---------------------------------------
-#if FPSAN_TEST_ENABLE_FDOT2_EXTENDED                                                \
-    && (!defined(__HIP_DEVICE_COMPILE__)                                             \
-        || (__has_builtin(__builtin_amdgcn_fdot2_f16_f16)                           \
-            && __has_builtin(__builtin_amdgcn_fdot2_bf16_bf16)                      \
+#if FPSAN_TEST_ENABLE_FDOT2_EXTENDED                           \
+    && (!defined(__HIP_DEVICE_COMPILE__)                       \
+        || (__has_builtin(__builtin_amdgcn_fdot2_f16_f16)      \
+            && __has_builtin(__builtin_amdgcn_fdot2_bf16_bf16) \
             && __has_builtin(__builtin_amdgcn_fdot2_f32_bf16)))
 __global__ void k_fdot2_f16_f16_pair(const v2h*      a,
                                      const v2h*      b,
@@ -399,17 +399,17 @@ __global__ void k_fdot2_f16_f16_pair(const v2h*      a,
 }
 
 // ---- fdot2_bf16_bf16: v2bf x v2bf -> bf16 ----------------------------------
-__global__ void k_fdot2_bf16_bf16_pair(const v2bf*     a,
-                                       const v2bf*     b,
-                                       const __bf16*   c,
-                                       __bf16*         direct,
-                                       __bf16*         wrapper,
-                                       std::uint16_t*  pay_direct,
-                                       std::uint16_t*  pay_wrapper)
+__global__ void k_fdot2_bf16_bf16_pair(const v2bf*    a,
+                                       const v2bf*    b,
+                                       const __bf16*  c,
+                                       __bf16*        direct,
+                                       __bf16*        wrapper,
+                                       std::uint16_t* pay_direct,
+                                       std::uint16_t* pay_wrapper)
 {
     int    i  = threadIdx.x;
     v2bf   ai = a[i], bi = b[i];
-    __bf16 ci = c[i];
+    __bf16 ci  = c[i];
     v2i16  a_i = __builtin_bit_cast(v2i16, ai);
     v2i16  b_i = __builtin_bit_cast(v2i16, bi);
     short  c_i = __builtin_bit_cast(short, ci);
@@ -548,10 +548,10 @@ TEST(AmdgcnMath, fdot2_FloatAndFpsan)
 }
 #endif
 
-#if FPSAN_TEST_ENABLE_FDOT2_EXTENDED                                                \
-    && (!defined(__HIP_DEVICE_COMPILE__)                                             \
-        || (__has_builtin(__builtin_amdgcn_fdot2_f16_f16)                           \
-            && __has_builtin(__builtin_amdgcn_fdot2_bf16_bf16)                      \
+#if FPSAN_TEST_ENABLE_FDOT2_EXTENDED                           \
+    && (!defined(__HIP_DEVICE_COMPILE__)                       \
+        || (__has_builtin(__builtin_amdgcn_fdot2_f16_f16)      \
+            && __has_builtin(__builtin_amdgcn_fdot2_bf16_bf16) \
             && __has_builtin(__builtin_amdgcn_fdot2_f32_bf16)))
 TEST(AmdgcnMath, fdot2_f16_f16_FloatAndFpsan)
 {
@@ -602,8 +602,8 @@ TEST(AmdgcnMath, fdot2_bf16_bf16_FloatAndFpsan)
         GTEST_SKIP() << "no HIP device";
     if(!current_arch_supports_fdot2_extended())
         GTEST_SKIP() << "current device does not support extended fdot2";
-    auto           a = make_v2bf(), b = make_v2bf();
-    auto           cf = make_acc_f32();
+    auto                a = make_v2bf(), b = make_v2bf();
+    auto                cf = make_acc_f32();
     std::vector<__bf16> c(kFDot2N);
     for(int i = 0; i < kFDot2N; ++i)
         c[i] = static_cast<__bf16>(cf[i]);
@@ -695,33 +695,33 @@ TEST(AmdgcnMath, fdot2_f32_bf16_FloatAndFpsan)
 using v4e4 = fpsan::v4e4m3_native;
 using v4e5 = fpsan::v4e5m2_native;
 
-#define DOT4_PAIR_KERNEL(NAME, AV, BV, BUILTIN)                                                  \
-    __global__ void k_##NAME##_pair(const unsigned* a,                                           \
-                                    const unsigned* b,                                           \
-                                    const float*    c,                                           \
-                                    float*          direct,                                      \
-                                    float*          wrapper,                                     \
-                                    std::uint32_t*  pay_direct,                                  \
-                                    std::uint32_t*  pay_wrapper)                                 \
-    {                                                                                            \
-        int      i  = threadIdx.x;                                                               \
-        unsigned ai = a[i], bi = b[i];                                                           \
-        float    ci = c[i];                                                                      \
-        direct[i]   = BUILTIN(ai, bi, ci);                                                       \
-        AV av = __builtin_bit_cast(AV, ai);                                                      \
-        BV bv = __builtin_bit_cast(BV, bi);                                                      \
-        Value<AV, Semantics::Float, kCC>    avF{av};                                             \
-        Value<BV, Semantics::Float, kCC>    bvF{bv};                                             \
-        Value<float, Semantics::Float, kCC> cF{ci};                                              \
-        wrapper[i] = static_cast<float>(fpsan::NAME<Semantics::Float, kCC>(avF, bvF, cF));       \
-        Value<AV, Semantics::FPSan, kCC>    avP{av};                                             \
-        Value<BV, Semantics::FPSan, kCC>    bvP{bv};                                             \
-        Value<float, Semantics::FPSan, kCC> cP{ci};                                              \
-        auto expanded = cP;                                                                      \
-        for(int k = 0; k < 4; ++k)                                                               \
+#define DOT4_PAIR_KERNEL(NAME, AV, BV, BUILTIN)                                                    \
+    __global__ void k_##NAME##_pair(const unsigned* a,                                             \
+                                    const unsigned* b,                                             \
+                                    const float*    c,                                             \
+                                    float*          direct,                                        \
+                                    float*          wrapper,                                       \
+                                    std::uint32_t*  pay_direct,                                    \
+                                    std::uint32_t*  pay_wrapper)                                   \
+    {                                                                                              \
+        int      i  = threadIdx.x;                                                                 \
+        unsigned ai = a[i], bi = b[i];                                                             \
+        float    ci                            = c[i];                                             \
+        direct[i]                              = BUILTIN(ai, bi, ci);                              \
+        AV                                  av = __builtin_bit_cast(AV, ai);                       \
+        BV                                  bv = __builtin_bit_cast(BV, bi);                       \
+        Value<AV, Semantics::Float, kCC>    avF{av};                                               \
+        Value<BV, Semantics::Float, kCC>    bvF{bv};                                               \
+        Value<float, Semantics::Float, kCC> cF{ci};                                                \
+        wrapper[i] = static_cast<float>(fpsan::NAME<Semantics::Float, kCC>(avF, bvF, cF));         \
+        Value<AV, Semantics::FPSan, kCC>    avP{av};                                               \
+        Value<BV, Semantics::FPSan, kCC>    bvP{bv};                                               \
+        Value<float, Semantics::FPSan, kCC> cP{ci};                                                \
+        auto                                expanded = cP;                                         \
+        for(int k = 0; k < 4; ++k)                                                                 \
             expanded = expanded + fpsan::cast<float>(avP.get(k)) * fpsan::cast<float>(bvP.get(k)); \
-        pay_direct[i]  = expanded.fpsan_payload();                                               \
-        pay_wrapper[i] = fpsan::NAME<Semantics::FPSan, kCC>(avP, bvP, cP).fpsan_payload();       \
+        pay_direct[i]  = expanded.fpsan_payload();                                                 \
+        pay_wrapper[i] = fpsan::NAME<Semantics::FPSan, kCC>(avP, bvP, cP).fpsan_payload();         \
     }
 
 DOT4_PAIR_KERNEL(amdgcn_dot4_f32_fp8_fp8, v4e4, v4e4, __builtin_amdgcn_dot4_f32_fp8_fp8)
@@ -736,8 +736,8 @@ namespace
 
     std::vector<unsigned> make_packed_u32()
     {
-        std::vector<unsigned>                      v(kDot4N);
-        std::mt19937                               rng = fpsan_test::make_rng();
+        std::vector<unsigned>                        v(kDot4N);
+        std::mt19937                                 rng = fpsan_test::make_rng();
         std::uniform_int_distribution<std::uint32_t> dist;
         for(auto& x : v)
             x = dist(rng);
