@@ -33,11 +33,11 @@ static constexpr int LANES = FPSAN_TEST_FORCE_WAVE_SIZE;
 // Mask 0x3FF = all categories ON; classf returns true for any normal value.
 __global__ void k_classf_pair(const float* in, char* bf, char* bp)
 {
-    int                                 i = threadIdx.x;
-    Value<float, Semantics::Float, kCC> vf{in[i]};
-    Value<float, Semantics::FPSan, kCC> vp{in[i]};
-    bf[i] = fpsan::amdgcn_classf<Semantics::Float, kCC>(vf, 0x3FF) ? 1 : 0;
-    bp[i] = fpsan::amdgcn_classf<Semantics::FPSan, kCC>(vp, 0x3FF) ? 1 : 0;
+    int                                  i = threadIdx.x;
+    Value<float, Semantics::Native, kCC> vf{in[i]};
+    Value<float, Semantics::Triton, kCC> vp{in[i]};
+    bf[i] = fpsan::amdgcn_classf<Semantics::Native, kCC>(vf, 0x3FF) ? 1 : 0;
+    bp[i] = fpsan::amdgcn_classf<Semantics::Triton, kCC>(vp, 0x3FF) ? 1 : 0;
 }
 
 TEST(Classify, ClassfFloatAndFpsanAgree)
@@ -76,12 +76,12 @@ TEST(Classify, ClassfFloatAndFpsanAgree)
 
 __global__ void k_fcmpf_pair(const float* a, const float* b, std::uint64_t* mf, std::uint64_t* mp)
 {
-    int                                 i = threadIdx.x;
-    Value<float, Semantics::Float, kCC> af{a[i]}, bf{b[i]};
-    Value<float, Semantics::FPSan, kCC> ap{a[i]}, bp{b[i]};
+    int                                  i = threadIdx.x;
+    Value<float, Semantics::Native, kCC> af{a[i]}, bf{b[i]};
+    Value<float, Semantics::Triton, kCC> ap{a[i]}, bp{b[i]};
     // Predicate 1 = OEQ (ordered equal); see LLVM fcmp predicates.
-    std::uint64_t f = fpsan::amdgcn_fcmpf<1, Semantics::Float, kCC>(af, bf);
-    std::uint64_t p = fpsan::amdgcn_fcmpf<1, Semantics::FPSan, kCC>(ap, bp);
+    std::uint64_t f = fpsan::amdgcn_fcmpf<1, Semantics::Native, kCC>(af, bf);
+    std::uint64_t p = fpsan::amdgcn_fcmpf<1, Semantics::Triton, kCC>(ap, bp);
     if(i == 0)
     {
         *mf = f;

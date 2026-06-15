@@ -197,7 +197,7 @@ TEST(WmmaScaleF8f6f4_128, LayoutMatchesHardware)
 // sub-byte operands: Float mode == host block-scaled matmul (decoded values),
 // FPSan mode == payload-ring block-scaled reference (sub-byte sign-resize).
 static constexpr Conversions kCC = Conversions::Explicit;
-using VF                         = Value<float, Semantics::FPSan, kCC>;
+using VF                         = Value<float, Semantics::Triton, kCC>;
 
 static const FpFormat& fmt_of(int code)
 {
@@ -301,10 +301,10 @@ __global__ void k_sub_scale_float(const std::uint32_t* Apack,
     v8f_native cn;
     for(int e = 0; e < 8; ++e)
         cn[e] = C[(e + 8 * (lane >> 4)) * N + (lane & 15)];
-    Value<v8f_native, Semantics::Float, kCC> c(cn);
+    Value<v8f_native, Semantics::Native, kCC> c(cn);
     auto d = fpsan::amdgcn_wmma_scale_f32_16x16x128_f8f6f4_sub<AFMT,
                                                                BFMT,
-                                                               Semantics::Float,
+                                                               Semantics::Native,
                                                                kCC,
                                                                0,
                                                                ASFMT,
@@ -332,10 +332,10 @@ __global__ void k_sub_scale_fpsan(const std::uint32_t* Apack,
     v8f_native cn;
     for(int e = 0; e < 8; ++e)
         cn[e] = C[(e + 8 * (lane >> 4)) * N + (lane & 15)];
-    Value<v8f_native, Semantics::FPSan, kCC> c(cn);
+    Value<v8f_native, Semantics::Triton, kCC> c(cn);
     auto d = fpsan::amdgcn_wmma_scale_f32_16x16x128_f8f6f4_sub<AFMT,
                                                                BFMT,
-                                                               Semantics::FPSan,
+                                                               Semantics::Triton,
                                                                kCC,
                                                                0,
                                                                ASFMT,
@@ -719,9 +719,10 @@ __global__ void k_sub_scale16_float(const std::uint32_t*      Apack,
     v8f_native cn;
     for(int e = 0; e < 8; ++e)
         cn[e] = C[(e + 8 * (lane >> 4)) * N + (lane & 15)];
-    Value<v8f_native, Semantics::Float, kCC> c(cn);
-    auto d = fpsan::amdgcn_wmma_scale16_f32_16x16x128_f8f6f4_sub<AFMT, BFMT, Semantics::Float, kCC>(
-        a, b, c, static_cast<long>(SA[lane]), static_cast<long>(SB[lane]));
+    Value<v8f_native, Semantics::Native, kCC> c(cn);
+    auto                                      d
+        = fpsan::amdgcn_wmma_scale16_f32_16x16x128_f8f6f4_sub<AFMT, BFMT, Semantics::Native, kCC>(
+            a, b, c, static_cast<long>(SA[lane]), static_cast<long>(SB[lane]));
     for(int e = 0; e < 8; ++e)
         D[(e + 8 * (lane >> 4)) * N + (lane & 15)] = d.get(e).to_float();
 }
@@ -744,9 +745,10 @@ __global__ void k_sub_scale16_fpsan(const std::uint32_t*      Apack,
     v8f_native cn;
     for(int e = 0; e < 8; ++e)
         cn[e] = C[(e + 8 * (lane >> 4)) * N + (lane & 15)];
-    Value<v8f_native, Semantics::FPSan, kCC> c(cn);
-    auto d = fpsan::amdgcn_wmma_scale16_f32_16x16x128_f8f6f4_sub<AFMT, BFMT, Semantics::FPSan, kCC>(
-        a, b, c, static_cast<long>(SA[lane]), static_cast<long>(SB[lane]));
+    Value<v8f_native, Semantics::Triton, kCC> c(cn);
+    auto                                      d
+        = fpsan::amdgcn_wmma_scale16_f32_16x16x128_f8f6f4_sub<AFMT, BFMT, Semantics::Triton, kCC>(
+            a, b, c, static_cast<long>(SA[lane]), static_cast<long>(SB[lane]));
     for(int e = 0; e < 8; ++e)
         Dpay[(e + 8 * (lane >> 4)) * N + (lane & 15)] = d.get(e).fpsan_payload();
 }
@@ -945,10 +947,10 @@ __global__ void k_mix_scale_float(const std::uint32_t* Apack,
     v8f_native cn;
     for(int e = 0; e < 8; ++e)
         cn[e] = C[(e + 8 * (lane >> 4)) * N + (lane & 15)];
-    Value<v8f_native, Semantics::Float, kCC> c(cn);
+    Value<v8f_native, Semantics::Native, kCC> c(cn);
     auto d = fpsan::amdgcn_wmma_scale_f32_16x16x128_f8f6f4_mixed<AFMT,
                                                                  BFMT,
-                                                                 Semantics::Float,
+                                                                 Semantics::Native,
                                                                  kCC,
                                                                  0,
                                                                  ASFMT,
@@ -976,10 +978,10 @@ __global__ void k_mix_scale_fpsan(const std::uint32_t* Apack,
     v8f_native cn;
     for(int e = 0; e < 8; ++e)
         cn[e] = C[(e + 8 * (lane >> 4)) * N + (lane & 15)];
-    Value<v8f_native, Semantics::FPSan, kCC> c(cn);
+    Value<v8f_native, Semantics::Triton, kCC> c(cn);
     auto d = fpsan::amdgcn_wmma_scale_f32_16x16x128_f8f6f4_mixed<AFMT,
                                                                  BFMT,
-                                                                 Semantics::FPSan,
+                                                                 Semantics::Triton,
                                                                  kCC,
                                                                  0,
                                                                  ASFMT,
@@ -1131,9 +1133,9 @@ __global__ void k_mix_scale16_float(const std::uint32_t*      Apack,
     v8f_native cn;
     for(int e = 0; e < 8; ++e)
         cn[e] = C[(e + 8 * (lane >> 4)) * N + (lane & 15)];
-    Value<v8f_native, Semantics::Float, kCC> c(cn);
-    auto                                     d
-        = fpsan::amdgcn_wmma_scale16_f32_16x16x128_f8f6f4_mixed<AFMT, BFMT, Semantics::Float, kCC>(
+    Value<v8f_native, Semantics::Native, kCC> c(cn);
+    auto                                      d
+        = fpsan::amdgcn_wmma_scale16_f32_16x16x128_f8f6f4_mixed<AFMT, BFMT, Semantics::Native, kCC>(
             a, b, c, static_cast<long>(SA[lane]), static_cast<long>(SB[lane]));
     for(int e = 0; e < 8; ++e)
         D[(e + 8 * (lane >> 4)) * N + (lane & 15)] = d.get(e).to_float();
@@ -1157,9 +1159,9 @@ __global__ void k_mix_scale16_fpsan(const std::uint32_t*      Apack,
     v8f_native cn;
     for(int e = 0; e < 8; ++e)
         cn[e] = C[(e + 8 * (lane >> 4)) * N + (lane & 15)];
-    Value<v8f_native, Semantics::FPSan, kCC> c(cn);
-    auto                                     d
-        = fpsan::amdgcn_wmma_scale16_f32_16x16x128_f8f6f4_mixed<AFMT, BFMT, Semantics::FPSan, kCC>(
+    Value<v8f_native, Semantics::Triton, kCC> c(cn);
+    auto                                      d
+        = fpsan::amdgcn_wmma_scale16_f32_16x16x128_f8f6f4_mixed<AFMT, BFMT, Semantics::Triton, kCC>(
             a, b, c, static_cast<long>(SA[lane]), static_cast<long>(SB[lane]));
     for(int e = 0; e < 8; ++e)
         Dpay[(e + 8 * (lane >> 4)) * N + (lane & 15)] = d.get(e).fpsan_payload();

@@ -7,7 +7,7 @@
 // operands f16/bf16). Same two-property structure as wmma_test.cpp:
 //
 //  (1) Layout + dataflow vs real hardware. The software MMA run with real-float
-//      arithmetic (Semantics::Float dataflow) must match the real builtin
+//      arithmetic (Semantics::Native dataflow) must match the real builtin
 //      bit-for-bit on EXACT-integer inputs. This validates the K=32 fragment
 //      layout (Wmma16x16x32Layout) + cross-lane gather against the hardware ABI
 //      -- the builtin path passes only if the test staging matches hardware, and
@@ -105,12 +105,12 @@ __global__ void k_builtin(const typename Harness<Traits>::AElem* A,
                           const typename Harness<Traits>::CElem* C,
                           typename Harness<Traits>::CElem*       D)
 {
-    int                                                          lane = threadIdx.x;
-    Value<typename Harness<Traits>::AVec, Semantics::Float, kCC> a;
-    Value<typename Harness<Traits>::BVec, Semantics::Float, kCC> b;
-    Value<typename Harness<Traits>::CVec, Semantics::Float, kCC> c;
-    load_frags<Traits, Semantics::Float>(A, B, C, lane, a, b, c);
-    auto d = Traits::template call<Semantics::Float, kCC>(a, b, c);
+    int                                                           lane = threadIdx.x;
+    Value<typename Harness<Traits>::AVec, Semantics::Native, kCC> a;
+    Value<typename Harness<Traits>::BVec, Semantics::Native, kCC> b;
+    Value<typename Harness<Traits>::CVec, Semantics::Native, kCC> c;
+    load_frags<Traits, Semantics::Native>(A, B, C, lane, a, b, c);
+    auto d = Traits::template call<Semantics::Native, kCC>(a, b, c);
     for(int e = 0; e < 8; ++e)
         D[(e + 8 * (lane >> 4)) * N + (lane & 15)] = d.get(e).to_float();
 }
@@ -121,11 +121,11 @@ __global__ void k_float_dataflow(const typename Harness<Traits>::AElem* A,
                                  const typename Harness<Traits>::CElem* C,
                                  typename Harness<Traits>::CElem*       D)
 {
-    int                                                          lane = threadIdx.x;
-    Value<typename Harness<Traits>::AVec, Semantics::Float, kCC> a;
-    Value<typename Harness<Traits>::BVec, Semantics::Float, kCC> b;
-    Value<typename Harness<Traits>::CVec, Semantics::Float, kCC> c;
-    load_frags<Traits, Semantics::Float>(A, B, C, lane, a, b, c);
+    int                                                           lane = threadIdx.x;
+    Value<typename Harness<Traits>::AVec, Semantics::Native, kCC> a;
+    Value<typename Harness<Traits>::BVec, Semantics::Native, kCC> b;
+    Value<typename Harness<Traits>::CVec, Semantics::Native, kCC> c;
+    load_frags<Traits, Semantics::Native>(A, B, C, lane, a, b, c);
     auto d = fpsan::detail::wmma_16x16x32_dataflow(a, b, c);
     for(int e = 0; e < 8; ++e)
         D[(e + 8 * (lane >> 4)) * N + (lane & 15)] = d.get(e).to_float();
@@ -137,12 +137,12 @@ __global__ void k_fpsan(const typename Harness<Traits>::AElem* A,
                         const typename Harness<Traits>::CElem* C,
                         typename Harness<Traits>::CBits*       Dpay)
 {
-    int                                                          lane = threadIdx.x;
-    Value<typename Harness<Traits>::AVec, Semantics::FPSan, kCC> a;
-    Value<typename Harness<Traits>::BVec, Semantics::FPSan, kCC> b;
-    Value<typename Harness<Traits>::CVec, Semantics::FPSan, kCC> c;
-    load_frags<Traits, Semantics::FPSan>(A, B, C, lane, a, b, c);
-    auto d = Traits::template call<Semantics::FPSan, kCC>(a, b, c);
+    int                                                           lane = threadIdx.x;
+    Value<typename Harness<Traits>::AVec, Semantics::Triton, kCC> a;
+    Value<typename Harness<Traits>::BVec, Semantics::Triton, kCC> b;
+    Value<typename Harness<Traits>::CVec, Semantics::Triton, kCC> c;
+    load_frags<Traits, Semantics::Triton>(A, B, C, lane, a, b, c);
+    auto d = Traits::template call<Semantics::Triton, kCC>(a, b, c);
     for(int e = 0; e < 8; ++e)
         Dpay[(e + 8 * (lane >> 4)) * N + (lane & 15)] = d.get(e).fpsan_payload();
 }
@@ -222,9 +222,9 @@ void run_fpsan_matches_scalar_reference()
         GTEST_SKIP() << "no HIP device";
     Mats<Traits> m = make_inputs<Traits>();
 
-    using VA = Value<AE, Semantics::FPSan, kCC>;
-    using VB = Value<BE, Semantics::FPSan, kCC>;
-    using VC = Value<CE, Semantics::FPSan, kCC>;
+    using VA = Value<AE, Semantics::Triton, kCC>;
+    using VB = Value<BE, Semantics::Triton, kCC>;
+    using VC = Value<CE, Semantics::Triton, kCC>;
     std::vector<CBits> ref(M * N);
     for(int mm = 0; mm < M; ++mm)
         for(int nn = 0; nn < N; ++nn)
@@ -377,12 +377,12 @@ static float host_cmod(float c, int cmod)
 template <int Cmod>
 __global__ void k_f16_mod_builtin(const _Float16* A, const _Float16* B, const float* C, float* D)
 {
-    int                                       lane = threadIdx.x;
-    Value<v16h_native, Semantics::Float, kCC> a;
-    Value<v16h_native, Semantics::Float, kCC> b;
-    Value<v8f_native, Semantics::Float, kCC>  c;
-    load_frags<WmmaF32F16_32, Semantics::Float>(A, B, C, lane, a, b, c);
-    auto d = fpsan::amdgcn_wmma_f32_16x16x32_f16<Semantics::Float, kCC, Cmod>(a, b, c);
+    int                                        lane = threadIdx.x;
+    Value<v16h_native, Semantics::Native, kCC> a;
+    Value<v16h_native, Semantics::Native, kCC> b;
+    Value<v8f_native, Semantics::Native, kCC>  c;
+    load_frags<WmmaF32F16_32, Semantics::Native>(A, B, C, lane, a, b, c);
+    auto d = fpsan::amdgcn_wmma_f32_16x16x32_f16<Semantics::Native, kCC, Cmod>(a, b, c);
     for(int e = 0; e < 8; ++e)
         D[(e + 8 * (lane >> 4)) * N + (lane & 15)] = d.get(e).to_float();
 }
@@ -391,12 +391,12 @@ template <int Cmod>
 __global__ void
     k_f16_mod_fpsan(const _Float16* A, const _Float16* B, const float* C, std::uint32_t* D)
 {
-    int                                       lane = threadIdx.x;
-    Value<v16h_native, Semantics::FPSan, kCC> a;
-    Value<v16h_native, Semantics::FPSan, kCC> b;
-    Value<v8f_native, Semantics::FPSan, kCC>  c;
-    load_frags<WmmaF32F16_32, Semantics::FPSan>(A, B, C, lane, a, b, c);
-    auto d = fpsan::amdgcn_wmma_f32_16x16x32_f16<Semantics::FPSan, kCC, Cmod>(a, b, c);
+    int                                        lane = threadIdx.x;
+    Value<v16h_native, Semantics::Triton, kCC> a;
+    Value<v16h_native, Semantics::Triton, kCC> b;
+    Value<v8f_native, Semantics::Triton, kCC>  c;
+    load_frags<WmmaF32F16_32, Semantics::Triton>(A, B, C, lane, a, b, c);
+    auto d = fpsan::amdgcn_wmma_f32_16x16x32_f16<Semantics::Triton, kCC, Cmod>(a, b, c);
     for(int e = 0; e < 8; ++e)
         D[(e + 8 * (lane >> 4)) * N + (lane & 15)] = d.get(e).fpsan_payload();
 }
@@ -420,8 +420,8 @@ void run_modifier_f16()
             fref[mm * N + nn] = acc;
         }
     // FPSan oracle: payload matmul with mod(C) pre-applied in the ring.
-    using VA = Value<_Float16, Semantics::FPSan, kCC>;
-    using VF = Value<float, Semantics::FPSan, kCC>;
+    using VA = Value<_Float16, Semantics::Triton, kCC>;
+    using VF = Value<float, Semantics::Triton, kCC>;
     std::vector<std::uint32_t> pref(M * N);
     for(int mm = 0; mm < M; ++mm)
         for(int nn = 0; nn < N; ++nn)
@@ -510,23 +510,23 @@ __device__ void load_frags_bf16f32(const __bf16*                A,
 
 __global__ void k_bf16f32_builtin(const __bf16* A, const __bf16* B, const float* C, __bf16* D)
 {
-    int                                        lane = threadIdx.x;
-    Value<v16bf_native, Semantics::Float, kCC> a;
-    Value<v16bf_native, Semantics::Float, kCC> b;
-    Value<v8f_native, Semantics::Float, kCC>   c;
-    load_frags_bf16f32<Semantics::Float>(A, B, C, lane, a, b, c);
-    auto d = fpsan::amdgcn_wmma_bf16f32_16x16x32_bf16<Semantics::Float, kCC>(a, b, c);
+    int                                         lane = threadIdx.x;
+    Value<v16bf_native, Semantics::Native, kCC> a;
+    Value<v16bf_native, Semantics::Native, kCC> b;
+    Value<v8f_native, Semantics::Native, kCC>   c;
+    load_frags_bf16f32<Semantics::Native>(A, B, C, lane, a, b, c);
+    auto d = fpsan::amdgcn_wmma_bf16f32_16x16x32_bf16<Semantics::Native, kCC>(a, b, c);
     for(int e = 0; e < 8; ++e)
         D[(e + 8 * (lane >> 4)) * N + (lane & 15)] = static_cast<__bf16>(d.get(e));
 }
 
 __global__ void k_bf16f32_dataflow(const __bf16* A, const __bf16* B, const float* C, __bf16* D)
 {
-    int                                        lane = threadIdx.x;
-    Value<v16bf_native, Semantics::Float, kCC> a;
-    Value<v16bf_native, Semantics::Float, kCC> b;
-    Value<v8f_native, Semantics::Float, kCC>   c;
-    load_frags_bf16f32<Semantics::Float>(A, B, C, lane, a, b, c);
+    int                                         lane = threadIdx.x;
+    Value<v16bf_native, Semantics::Native, kCC> a;
+    Value<v16bf_native, Semantics::Native, kCC> b;
+    Value<v8f_native, Semantics::Native, kCC>   c;
+    load_frags_bf16f32<Semantics::Native>(A, B, C, lane, a, b, c);
     auto d = fpsan::detail::
         wmma_16x16x32_dataflow_cdiff<v8bf_native, v16bf_native, v16bf_native, v8f_native>(a, b, c);
     for(int e = 0; e < 8; ++e)
@@ -535,12 +535,12 @@ __global__ void k_bf16f32_dataflow(const __bf16* A, const __bf16* B, const float
 
 __global__ void k_bf16f32_fpsan(const __bf16* A, const __bf16* B, const float* C, std::uint16_t* D)
 {
-    int                                        lane = threadIdx.x;
-    Value<v16bf_native, Semantics::FPSan, kCC> a;
-    Value<v16bf_native, Semantics::FPSan, kCC> b;
-    Value<v8f_native, Semantics::FPSan, kCC>   c;
-    load_frags_bf16f32<Semantics::FPSan>(A, B, C, lane, a, b, c);
-    auto d = fpsan::amdgcn_wmma_bf16f32_16x16x32_bf16<Semantics::FPSan, kCC>(a, b, c);
+    int                                         lane = threadIdx.x;
+    Value<v16bf_native, Semantics::Triton, kCC> a;
+    Value<v16bf_native, Semantics::Triton, kCC> b;
+    Value<v8f_native, Semantics::Triton, kCC>   c;
+    load_frags_bf16f32<Semantics::Triton>(A, B, C, lane, a, b, c);
+    auto d = fpsan::amdgcn_wmma_bf16f32_16x16x32_bf16<Semantics::Triton, kCC>(a, b, c);
     for(int e = 0; e < 8; ++e)
         D[(e + 8 * (lane >> 4)) * N + (lane & 15)] = d.get(e).fpsan_payload();
 }
@@ -595,8 +595,8 @@ TEST(WmmaBF16F32_32, FpsanMatchesScalarReference)
     for(auto& x : C)
         x = fpsan_test::pick_int_valued<float>(rng, -4, 4);
 
-    using VBF = Value<__bf16, Semantics::FPSan, kCC>;
-    using VF  = Value<float, Semantics::FPSan, kCC>;
+    using VBF = Value<__bf16, Semantics::Triton, kCC>;
+    using VF  = Value<float, Semantics::Triton, kCC>;
     std::vector<std::uint16_t> ref(M * N);
     for(int mm = 0; mm < M; ++mm)
         for(int nn = 0; nn < N; ++nn)

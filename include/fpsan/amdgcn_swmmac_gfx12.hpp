@@ -259,7 +259,7 @@ namespace fpsan
     FPSAN_DEVICE Value<CFragVec_, S, C> NAME(                                                      \
         Value<AVec_, S, C> a, Value<BVec_, S, C> b, Value<CFragVec_, S, C> c, std::uint16_t index) \
     {                                                                                              \
-        if constexpr(S == Semantics::Float)                                                        \
+        if constexpr(S == Semantics::Native)                                                       \
         {                                                                                          \
             auto d = BUILTIN(a.to_float(), b.to_float(), c.to_float(), static_cast<short>(index)); \
             return Value<CFragVec_, S, C>(d);                                                      \
@@ -307,7 +307,7 @@ namespace fpsan
                                               Value<v8f_native, S, C> c,                      \
                                               std::uint16_t           index)                  \
     {                                                                                         \
-        if constexpr(S == Semantics::Float)                                                   \
+        if constexpr(S == Semantics::Native)                                                  \
         {                                                                                     \
             const v2i32_swmmac ai = __builtin_bit_cast(v2i32_swmmac, a.to_float());           \
             const v4i32_swmmac bi = __builtin_bit_cast(v4i32_swmmac, b.to_float());           \

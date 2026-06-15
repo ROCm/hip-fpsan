@@ -213,7 +213,7 @@ namespace fpsan
     FPSAN_DEVICE Value<CVec_, S, C> NAME(                                                     \
         Value<AVec_, S, C> a, Value<BVec_, S, C> b, Value<CVec_, S, C> c, v2i32_native index) \
     {                                                                                         \
-        if constexpr(S == Semantics::Float)                                                   \
+        if constexpr(S == Semantics::Native)                                                  \
         {                                                                                     \
             CVec_ d = BUILTIN(__builtin_bit_cast(v8i32_native, a.to_float()),                 \
                               __builtin_bit_cast(v16i32_native, b.to_float()),                \
@@ -285,7 +285,7 @@ namespace fpsan
     FPSAN_DEVICE Value<CVec_, S, C> NAME(                                                          \
         Value<AVec_, S, C> a, Value<BVec_, S, C> b, Value<CVec_, S, C> c, int index)               \
     {                                                                                              \
-        if constexpr(S == Semantics::Float)                                                        \
+        if constexpr(S == Semantics::Native)                                                       \
         {                                                                                          \
             CVec_ d = BUILTIN(                                                                     \
                 false, a.to_float(), false, b.to_float(), c.to_float(), index, false, false);      \

@@ -124,21 +124,21 @@ namespace
 
 } // namespace
 
-#define AMDGCN_MATH_UNARY_KERNEL(NAME, FT, BUILTIN, FPSAN_OP)                                   \
-    __global__ void k_##NAME(const FT*                                             in,          \
-                             FT*                                                   direct,      \
-                             FT*                                                   wrapper,     \
-                             typename Value<FT, Semantics::FPSan, kCC>::bits_type* pay_direct,  \
-                             typename Value<FT, Semantics::FPSan, kCC>::bits_type* pay_wrapper) \
-    {                                                                                           \
-        const int i = threadIdx.x;                                                              \
-        const FT  x = in[i];                                                                    \
-        direct[i]   = BUILTIN(x);                                                               \
-        Value<FT, Semantics::Float, kCC> vf{x};                                                 \
-        wrapper[i] = fpsan::NAME<Semantics::Float, kCC>(vf).to_float();                         \
-        Value<FT, Semantics::FPSan, kCC> vp{x};                                                 \
-        pay_direct[i]  = fpsan::FPSAN_OP(vp).fpsan_payload();                                   \
-        pay_wrapper[i] = fpsan::NAME<Semantics::FPSan, kCC>(vp).fpsan_payload();                \
+#define AMDGCN_MATH_UNARY_KERNEL(NAME, FT, BUILTIN, FPSAN_OP)                                    \
+    __global__ void k_##NAME(const FT*                                              in,          \
+                             FT*                                                    direct,      \
+                             FT*                                                    wrapper,     \
+                             typename Value<FT, Semantics::Triton, kCC>::bits_type* pay_direct,  \
+                             typename Value<FT, Semantics::Triton, kCC>::bits_type* pay_wrapper) \
+    {                                                                                            \
+        const int i = threadIdx.x;                                                               \
+        const FT  x = in[i];                                                                     \
+        direct[i]   = BUILTIN(x);                                                                \
+        Value<FT, Semantics::Native, kCC> vf{x};                                                 \
+        wrapper[i] = fpsan::NAME<Semantics::Native, kCC>(vf).to_float();                         \
+        Value<FT, Semantics::Triton, kCC> vp{x};                                                 \
+        pay_direct[i]  = fpsan::FPSAN_OP(vp).fpsan_payload();                                    \
+        pay_wrapper[i] = fpsan::NAME<Semantics::Triton, kCC>(vp).fpsan_payload();                \
     }
 
 AMDGCN_MATH_UNARY_KERNEL(amdgcn_rcpf, float, __builtin_amdgcn_rcpf, rcp)
@@ -165,22 +165,22 @@ AMDGCN_MATH_UNARY_KERNEL(amdgcn_cosh, _Float16, __builtin_amdgcn_cosh, cos)
 AMDGCN_MATH_UNARY_KERNEL(amdgcn_fracth, _Float16, __builtin_amdgcn_fracth, fract)
 #undef AMDGCN_MATH_UNARY_KERNEL
 
-#define AMDGCN_MATH_FMED3_KERNEL(NAME, FT, BUILTIN)                                             \
-    __global__ void k_##NAME(const FT*                                             a,           \
-                             const FT*                                             b,           \
-                             const FT*                                             c,           \
-                             FT*                                                   direct,      \
-                             FT*                                                   wrapper,     \
-                             typename Value<FT, Semantics::FPSan, kCC>::bits_type* pay_direct,  \
-                             typename Value<FT, Semantics::FPSan, kCC>::bits_type* pay_wrapper) \
-    {                                                                                           \
-        const int i = threadIdx.x;                                                              \
-        direct[i]   = BUILTIN(a[i], b[i], c[i]);                                                \
-        Value<FT, Semantics::Float, kCC> af{a[i]}, bf{b[i]}, cf{c[i]};                          \
-        wrapper[i] = fpsan::NAME<Semantics::Float, kCC>(af, bf, cf).to_float();                 \
-        Value<FT, Semantics::FPSan, kCC> ap{a[i]}, bp{b[i]}, cp{c[i]};                          \
-        pay_direct[i]  = fpsan::fmed3(ap, bp, cp).fpsan_payload();                              \
-        pay_wrapper[i] = fpsan::NAME<Semantics::FPSan, kCC>(ap, bp, cp).fpsan_payload();        \
+#define AMDGCN_MATH_FMED3_KERNEL(NAME, FT, BUILTIN)                                              \
+    __global__ void k_##NAME(const FT*                                              a,           \
+                             const FT*                                              b,           \
+                             const FT*                                              c,           \
+                             FT*                                                    direct,      \
+                             FT*                                                    wrapper,     \
+                             typename Value<FT, Semantics::Triton, kCC>::bits_type* pay_direct,  \
+                             typename Value<FT, Semantics::Triton, kCC>::bits_type* pay_wrapper) \
+    {                                                                                            \
+        const int i = threadIdx.x;                                                               \
+        direct[i]   = BUILTIN(a[i], b[i], c[i]);                                                 \
+        Value<FT, Semantics::Native, kCC> af{a[i]}, bf{b[i]}, cf{c[i]};                          \
+        wrapper[i] = fpsan::NAME<Semantics::Native, kCC>(af, bf, cf).to_float();                 \
+        Value<FT, Semantics::Triton, kCC> ap{a[i]}, bp{b[i]}, cp{c[i]};                          \
+        pay_direct[i]  = fpsan::fmed3(ap, bp, cp).fpsan_payload();                               \
+        pay_wrapper[i] = fpsan::NAME<Semantics::Triton, kCC>(ap, bp, cp).fpsan_payload();        \
     }
 
 AMDGCN_MATH_FMED3_KERNEL(amdgcn_fmed3f, float, __builtin_amdgcn_fmed3f)
@@ -191,14 +191,14 @@ template <class FT>
 void run_unary(void (*kernel)(const FT*,
                               FT*,
                               FT*,
-                              typename Value<FT, Semantics::FPSan, kCC>::bits_type*,
-                              typename Value<FT, Semantics::FPSan, kCC>::bits_type*),
+                              typename Value<FT, Semantics::Triton, kCC>::bits_type*,
+                              typename Value<FT, Semantics::Triton, kCC>::bits_type*),
                const std::vector<FT>& inputs)
 {
     if(!have_device())
         GTEST_SKIP() << "no HIP device";
 
-    using Bits = typename Value<FT, Semantics::FPSan, kCC>::bits_type;
+    using Bits = typename Value<FT, Semantics::Triton, kCC>::bits_type;
     FT*   dIn  = to_dev(inputs);
     FT *  dDirect, *dWrapper;
     Bits *dPayDirect, *dPayWrapper;
@@ -238,13 +238,13 @@ void run_fmed3(void (*kernel)(const FT*,
                               const FT*,
                               FT*,
                               FT*,
-                              typename Value<FT, Semantics::FPSan, kCC>::bits_type*,
-                              typename Value<FT, Semantics::FPSan, kCC>::bits_type*))
+                              typename Value<FT, Semantics::Triton, kCC>::bits_type*,
+                              typename Value<FT, Semantics::Triton, kCC>::bits_type*))
 {
     if(!have_device())
         GTEST_SKIP() << "no HIP device";
 
-    using Bits = typename Value<FT, Semantics::FPSan, kCC>::bits_type;
+    using Bits = typename Value<FT, Semantics::Triton, kCC>::bits_type;
     auto  a    = make_signed_inputs<FT>();
     auto  b    = make_signed_inputs<FT>();
     auto  c    = make_signed_inputs<FT>();
@@ -355,16 +355,16 @@ __global__ void k_fdot2_pair(const v2h*     a,
     v2h   ai = a[i], bi = b[i];
     float ci  = c[i];
     direct[i] = __builtin_amdgcn_fdot2(ai, bi, ci, false);
-    Value<v2h, Semantics::Float, kCC>   va{ai}, vb{bi};
-    Value<float, Semantics::Float, kCC> vc{ci};
-    wrapper[i] = static_cast<float>(fpsan::amdgcn_fdot2<false, Semantics::Float, kCC>(va, vb, vc));
-    Value<v2h, Semantics::FPSan, kCC>   vap{ai}, vbp{bi};
-    Value<float, Semantics::FPSan, kCC> vcp{ci};
+    Value<v2h, Semantics::Native, kCC>   va{ai}, vb{bi};
+    Value<float, Semantics::Native, kCC> vc{ci};
+    wrapper[i] = static_cast<float>(fpsan::amdgcn_fdot2<false, Semantics::Native, kCC>(va, vb, vc));
+    Value<v2h, Semantics::Triton, kCC>   vap{ai}, vbp{bi};
+    Value<float, Semantics::Triton, kCC> vcp{ci};
     auto expanded = vcp + fpsan::cast<float>(vap.get(0)) * fpsan::cast<float>(vbp.get(0))
                     + fpsan::cast<float>(vap.get(1)) * fpsan::cast<float>(vbp.get(1));
     pay_direct[i] = expanded.fpsan_payload();
     pay_wrapper[i]
-        = fpsan::amdgcn_fdot2<false, Semantics::FPSan, kCC>(vap, vbp, vcp).fpsan_payload();
+        = fpsan::amdgcn_fdot2<false, Semantics::Triton, kCC>(vap, vbp, vcp).fpsan_payload();
 }
 #endif
 
@@ -386,16 +386,16 @@ __global__ void k_fdot2_f16_f16_pair(const v2h*      a,
     v2h      ai = a[i], bi = b[i];
     _Float16 ci = c[i];
     direct[i]   = __builtin_amdgcn_fdot2_f16_f16(ai, bi, ci);
-    Value<v2h, Semantics::Float, kCC>      va{ai}, vb{bi};
-    Value<_Float16, Semantics::Float, kCC> vc{ci};
+    Value<v2h, Semantics::Native, kCC>      va{ai}, vb{bi};
+    Value<_Float16, Semantics::Native, kCC> vc{ci};
     wrapper[i]
-        = static_cast<_Float16>(fpsan::amdgcn_fdot2_f16_f16<Semantics::Float, kCC>(va, vb, vc));
-    Value<v2h, Semantics::FPSan, kCC>      vap{ai}, vbp{bi};
-    Value<_Float16, Semantics::FPSan, kCC> vcp{ci};
+        = static_cast<_Float16>(fpsan::amdgcn_fdot2_f16_f16<Semantics::Native, kCC>(va, vb, vc));
+    Value<v2h, Semantics::Triton, kCC>      vap{ai}, vbp{bi};
+    Value<_Float16, Semantics::Triton, kCC> vcp{ci};
     auto expanded  = vcp + vap.get(0) * vbp.get(0) + vap.get(1) * vbp.get(1);
     pay_direct[i]  = static_cast<std::uint16_t>(expanded.fpsan_payload());
     pay_wrapper[i] = static_cast<std::uint16_t>(
-        fpsan::amdgcn_fdot2_f16_f16<Semantics::FPSan, kCC>(vap, vbp, vcp).fpsan_payload());
+        fpsan::amdgcn_fdot2_f16_f16<Semantics::Triton, kCC>(vap, vbp, vcp).fpsan_payload());
 }
 
 // ---- fdot2_bf16_bf16: v2bf x v2bf -> bf16 ----------------------------------
@@ -415,16 +415,16 @@ __global__ void k_fdot2_bf16_bf16_pair(const v2bf*    a,
     short  c_i = __builtin_bit_cast(short, ci);
     short  d_i = __builtin_amdgcn_fdot2_bf16_bf16(a_i, b_i, c_i);
     direct[i]  = __builtin_bit_cast(__bf16, d_i);
-    Value<v2bf, Semantics::Float, kCC>   va{ai}, vb{bi};
-    Value<__bf16, Semantics::Float, kCC> vc{ci};
+    Value<v2bf, Semantics::Native, kCC>   va{ai}, vb{bi};
+    Value<__bf16, Semantics::Native, kCC> vc{ci};
     wrapper[i]
-        = static_cast<__bf16>(fpsan::amdgcn_fdot2_bf16_bf16<Semantics::Float, kCC>(va, vb, vc));
-    Value<v2bf, Semantics::FPSan, kCC>   vap{ai}, vbp{bi};
-    Value<__bf16, Semantics::FPSan, kCC> vcp{ci};
+        = static_cast<__bf16>(fpsan::amdgcn_fdot2_bf16_bf16<Semantics::Native, kCC>(va, vb, vc));
+    Value<v2bf, Semantics::Triton, kCC>   vap{ai}, vbp{bi};
+    Value<__bf16, Semantics::Triton, kCC> vcp{ci};
     auto expanded  = vcp + vap.get(0) * vbp.get(0) + vap.get(1) * vbp.get(1);
     pay_direct[i]  = static_cast<std::uint16_t>(expanded.fpsan_payload());
     pay_wrapper[i] = static_cast<std::uint16_t>(
-        fpsan::amdgcn_fdot2_bf16_bf16<Semantics::FPSan, kCC>(vap, vbp, vcp).fpsan_payload());
+        fpsan::amdgcn_fdot2_bf16_bf16<Semantics::Triton, kCC>(vap, vbp, vcp).fpsan_payload());
 }
 
 // ---- fdot2_f32_bf16: v2bf x v2bf -> f32 ------------------------------------
@@ -442,17 +442,17 @@ __global__ void k_fdot2_f32_bf16_pair(const v2bf*    a,
     v2i16 a_i = __builtin_bit_cast(v2i16, ai);
     v2i16 b_i = __builtin_bit_cast(v2i16, bi);
     direct[i] = __builtin_amdgcn_fdot2_f32_bf16(a_i, b_i, ci, false);
-    Value<v2bf, Semantics::Float, kCC>  va{ai}, vb{bi};
-    Value<float, Semantics::Float, kCC> vc{ci};
+    Value<v2bf, Semantics::Native, kCC>  va{ai}, vb{bi};
+    Value<float, Semantics::Native, kCC> vc{ci};
     wrapper[i] = static_cast<float>(
-        fpsan::amdgcn_fdot2_f32_bf16<false, Semantics::Float, kCC>(va, vb, vc));
-    Value<v2bf, Semantics::FPSan, kCC>  vap{ai}, vbp{bi};
-    Value<float, Semantics::FPSan, kCC> vcp{ci};
+        fpsan::amdgcn_fdot2_f32_bf16<false, Semantics::Native, kCC>(va, vb, vc));
+    Value<v2bf, Semantics::Triton, kCC>  vap{ai}, vbp{bi};
+    Value<float, Semantics::Triton, kCC> vcp{ci};
     auto expanded = vcp + fpsan::cast<float>(vap.get(0)) * fpsan::cast<float>(vbp.get(0))
                     + fpsan::cast<float>(vap.get(1)) * fpsan::cast<float>(vbp.get(1));
-    pay_direct[i] = expanded.fpsan_payload();
-    pay_wrapper[i]
-        = fpsan::amdgcn_fdot2_f32_bf16<false, Semantics::FPSan, kCC>(vap, vbp, vcp).fpsan_payload();
+    pay_direct[i]  = expanded.fpsan_payload();
+    pay_wrapper[i] = fpsan::amdgcn_fdot2_f32_bf16<false, Semantics::Triton, kCC>(vap, vbp, vcp)
+                         .fpsan_payload();
 }
 #endif
 
@@ -706,22 +706,22 @@ using v4e5 = fpsan::v4e5m2_native;
     {                                                                                              \
         int      i  = threadIdx.x;                                                                 \
         unsigned ai = a[i], bi = b[i];                                                             \
-        float    ci                            = c[i];                                             \
-        direct[i]                              = BUILTIN(ai, bi, ci);                              \
-        AV                                  av = __builtin_bit_cast(AV, ai);                       \
-        BV                                  bv = __builtin_bit_cast(BV, bi);                       \
-        Value<AV, Semantics::Float, kCC>    avF{av};                                               \
-        Value<BV, Semantics::Float, kCC>    bvF{bv};                                               \
-        Value<float, Semantics::Float, kCC> cF{ci};                                                \
-        wrapper[i] = static_cast<float>(fpsan::NAME<Semantics::Float, kCC>(avF, bvF, cF));         \
-        Value<AV, Semantics::FPSan, kCC>    avP{av};                                               \
-        Value<BV, Semantics::FPSan, kCC>    bvP{bv};                                               \
-        Value<float, Semantics::FPSan, kCC> cP{ci};                                                \
-        auto                                expanded = cP;                                         \
+        float    ci                             = c[i];                                            \
+        direct[i]                               = BUILTIN(ai, bi, ci);                             \
+        AV                                   av = __builtin_bit_cast(AV, ai);                      \
+        BV                                   bv = __builtin_bit_cast(BV, bi);                      \
+        Value<AV, Semantics::Native, kCC>    avF{av};                                              \
+        Value<BV, Semantics::Native, kCC>    bvF{bv};                                              \
+        Value<float, Semantics::Native, kCC> cF{ci};                                               \
+        wrapper[i] = static_cast<float>(fpsan::NAME<Semantics::Native, kCC>(avF, bvF, cF));        \
+        Value<AV, Semantics::Triton, kCC>    avP{av};                                              \
+        Value<BV, Semantics::Triton, kCC>    bvP{bv};                                              \
+        Value<float, Semantics::Triton, kCC> cP{ci};                                               \
+        auto                                 expanded = cP;                                        \
         for(int k = 0; k < 4; ++k)                                                                 \
             expanded = expanded + fpsan::cast<float>(avP.get(k)) * fpsan::cast<float>(bvP.get(k)); \
         pay_direct[i]  = expanded.fpsan_payload();                                                 \
-        pay_wrapper[i] = fpsan::NAME<Semantics::FPSan, kCC>(avP, bvP, cP).fpsan_payload();         \
+        pay_wrapper[i] = fpsan::NAME<Semantics::Triton, kCC>(avP, bvP, cP).fpsan_payload();        \
     }
 
 DOT4_PAIR_KERNEL(amdgcn_dot4_f32_fp8_fp8, v4e4, v4e4, __builtin_amdgcn_dot4_f32_fp8_fp8)

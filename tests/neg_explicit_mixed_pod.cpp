@@ -5,7 +5,7 @@
 #include "fpsan/fpsan.hpp"
 int main()
 {
-    fpsan::Value<float, fpsan::Semantics::Float, fpsan::Conversions::Explicit> x(1.0f);
+    fpsan::Value<float, fpsan::Semantics::Native, fpsan::Conversions::Explicit> x(1.0f);
     auto y = x + 2.0f; // no implicit conversion, no mixed-POD operator
     (void)y;
 }

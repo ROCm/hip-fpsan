@@ -5,8 +5,8 @@
 // ----------------------------------------------------------------------------
 // Precision casts between scalar Values, fpsan::cast<ToFT>(Value<FromFT,...>).
 //
-//   Semantics::Float : the native conversion (static_cast<ToFT>).
-//   Semantics::FPSan : Triton's fp-cast semantics for arith.extf / arith.truncf
+//   Semantics::Native : the native conversion (static_cast<ToFT>).
+//   Semantics::Triton : Triton's fp-cast semantics for arith.extf / arith.truncf
 //                      / tt.fp_to_fp, namely
 //                        embed(src)  ->  signed-resize the payload to the
 //                        destination width  ->  unembed(dst)
@@ -32,7 +32,7 @@ namespace fpsan
         using To = Value<ToFT, S, C>;
         static_assert(!Value<FromFT, S, C>::is_vector && !To::is_vector,
                       "fpsan::cast currently supports scalar Values only");
-        if constexpr(S == Semantics::Float)
+        if constexpr(S == Semantics::Native)
         {
             return To(static_cast<ToFT>(v.to_float()));
         }

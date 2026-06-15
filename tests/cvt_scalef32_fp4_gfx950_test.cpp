@@ -39,7 +39,7 @@ using fpsan::detail::kFp4E2M1;
 using fpsan::detail::narrow_to_f32;
 
 static constexpr Conversions kCC = Conversions::Explicit;
-using VF                         = Value<float, Semantics::FPSan, kCC>;
+using VF                         = Value<float, Semantics::Triton, kCC>;
 
 namespace
 {
@@ -58,8 +58,8 @@ namespace
 __global__ void k_f32_unpack(const unsigned* packed, float* out)
 {
     int  l = threadIdx.x;
-    auto r = fpsan::amdgcn_cvt_scalef32_pk_f32_fp4<0, Semantics::Float, kCC>(
-        packed[l], Value<float, Semantics::Float, kCC>{1.0f});
+    auto r = fpsan::amdgcn_cvt_scalef32_pk_f32_fp4<0, Semantics::Native, kCC>(
+        packed[l], Value<float, Semantics::Native, kCC>{1.0f});
     out[2 * l]     = r.get(0).to_float();
     out[2 * l + 1] = r.get(1).to_float();
 }
@@ -92,11 +92,11 @@ TEST(CvtScalef32Fp4Wrap, FloatUnpackAllCodes)
 template <int Sel>
 __global__ void k_f32_pack(unsigned old, float a, float b, unsigned* out)
 {
-    *out = fpsan::amdgcn_cvt_scalef32_pk_fp4_f32<Sel, Semantics::Float, kCC>(
+    *out = fpsan::amdgcn_cvt_scalef32_pk_fp4_f32<Sel, Semantics::Native, kCC>(
         old,
-        Value<float, Semantics::Float, kCC>{a},
-        Value<float, Semantics::Float, kCC>{b},
-        Value<float, Semantics::Float, kCC>{1.0f});
+        Value<float, Semantics::Native, kCC>{a},
+        Value<float, Semantics::Native, kCC>{b},
+        Value<float, Semantics::Native, kCC>{1.0f});
 }
 
 TEST(CvtScalef32Fp4Wrap, FloatPackExactBitsAndSel)
@@ -140,14 +140,14 @@ TEST(CvtScalef32Fp4Wrap, FloatPackExactBitsAndSel)
 __global__ void k_f32_scale(
     unsigned packed, float scale, float* outUnpack, float a, float pscale, unsigned* outPack)
 {
-    auto r = fpsan::amdgcn_cvt_scalef32_pk_f32_fp4<0, Semantics::Float, kCC>(
-        packed, Value<float, Semantics::Float, kCC>{scale});
+    auto r = fpsan::amdgcn_cvt_scalef32_pk_f32_fp4<0, Semantics::Native, kCC>(
+        packed, Value<float, Semantics::Native, kCC>{scale});
     outUnpack[0] = r.get(0).to_float();
-    *outPack     = fpsan::amdgcn_cvt_scalef32_pk_fp4_f32<0, Semantics::Float, kCC>(
+    *outPack     = fpsan::amdgcn_cvt_scalef32_pk_fp4_f32<0, Semantics::Native, kCC>(
         0u,
-        Value<float, Semantics::Float, kCC>{a},
-        Value<float, Semantics::Float, kCC>{0.0f},
-        Value<float, Semantics::Float, kCC>{pscale});
+        Value<float, Semantics::Native, kCC>{a},
+        Value<float, Semantics::Native, kCC>{0.0f},
+        Value<float, Semantics::Native, kCC>{pscale});
 }
 
 TEST(CvtScalef32Fp4Wrap, FloatScaleDirection)
@@ -174,7 +174,7 @@ TEST(CvtScalef32Fp4Wrap, FloatScaleDirection)
 // *scale. Reference is explicit sext + public Value multiply.
 __global__ void k_fpsan_unpack(unsigned packed, float scale, unsigned* out)
 {
-    auto r = fpsan::amdgcn_cvt_scalef32_pk_f32_fp4<1, Semantics::FPSan, kCC>(packed, VF{scale});
+    auto r = fpsan::amdgcn_cvt_scalef32_pk_f32_fp4<1, Semantics::Triton, kCC>(packed, VF{scale});
     out[0] = r.get(0).fpsan_payload();
     out[1] = r.get(1).fpsan_payload();
 }
@@ -204,7 +204,7 @@ TEST(CvtScalef32Fp4Wrap, FpsanUnpackSelAndWiden)
 // Sel, `old` preserved. Reference uses public Value division.
 __global__ void k_fpsan_pack(unsigned old, float a, float b, float scale, unsigned* out)
 {
-    *out = fpsan::amdgcn_cvt_scalef32_pk_fp4_f32<2, Semantics::FPSan, kCC>(
+    *out = fpsan::amdgcn_cvt_scalef32_pk_fp4_f32<2, Semantics::Triton, kCC>(
         old, VF{a}, VF{b}, VF{scale});
 }
 
@@ -236,7 +236,7 @@ TEST(CvtScalef32Fp4Wrap, FpsanPackSelDivideAndPreserve)
 // sr_pk_fp4_f32: exact (seed-invariant) packing matches the deterministic pack.
 __global__ void k_fpsan_srpack(float a, float b, unsigned seed, unsigned* out)
 {
-    *out = fpsan::amdgcn_cvt_scalef32_sr_pk_fp4_f32<0, Semantics::FPSan, kCC>(
+    *out = fpsan::amdgcn_cvt_scalef32_sr_pk_fp4_f32<0, Semantics::Triton, kCC>(
         0u, VF{a}, VF{b}, seed, VF{1.0f});
 }
 
@@ -265,8 +265,8 @@ TEST(CvtScalef32Fp4Wrap, FpsanSrPackMatchesDeterministic)
 // reference), confirming the wrappers compile and are hardware-correct.
 __global__ void k_f16_unpack(unsigned packed, float* out)
 {
-    auto r = fpsan::amdgcn_cvt_scalef32_pk_f16_fp4<0, Semantics::Float, kCC>(
-        packed, Value<float, Semantics::Float, kCC>{1.0f});
+    auto r = fpsan::amdgcn_cvt_scalef32_pk_f16_fp4<0, Semantics::Native, kCC>(
+        packed, Value<float, Semantics::Native, kCC>{1.0f});
     out[0] = static_cast<float>(static_cast<_Float16>(r.get(0)));
     out[1] = static_cast<float>(static_cast<_Float16>(r.get(1)));
 }

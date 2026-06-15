@@ -166,7 +166,7 @@ __global__ void
     for(int reg = 0; reg < 4; ++reg)
     {
         const int i = 4 * g + reg;
-        if constexpr(S == Semantics::Float)
+        if constexpr(S == Semantics::Native)
             D[i * N + j] = d.get(reg).to_float();
         else
             D[i * N + j] = d.get(reg).fpsan_payload();
@@ -217,7 +217,7 @@ __global__ void
             auto loc = fpsan::detail::output_loc_32(M, N, i, jj, 0);
             if(loc.lane == lane)
             {
-                if constexpr(S == Semantics::Float)
+                if constexpr(S == Semantics::Native)
                     D[i * N + jj] = d.get(loc.reg).to_float();
                 else
                     D[i * N + jj] = d.get(loc.reg).fpsan_payload();
@@ -260,9 +260,9 @@ static void run_smf_layout(int m, int n, int k)
     float* dD;
     HIP_CHECK(hipMalloc(&dD, ref.size() * sizeof(float)));
     if(m == 16)
-        k_smf_16x16x32<E, Semantics::Float, float><<<1, WAVE>>>(dA, dB, dC, dI, dD);
+        k_smf_16x16x32<E, Semantics::Native, float><<<1, WAVE>>>(dA, dB, dC, dI, dD);
     else
-        k_smf_32x32x16<E, Semantics::Float, float><<<1, WAVE>>>(dA, dB, dC, dI, dD);
+        k_smf_32x32x16<E, Semantics::Native, float><<<1, WAVE>>>(dA, dB, dC, dI, dD);
     HIP_CHECK(hipDeviceSynchronize());
 
     std::vector<float> got(ref.size());
@@ -286,8 +286,8 @@ static void run_smf_fpsan(int m, int n, int k)
     const int  groups = k / 4;
     const int  ccols  = 2 * groups;
     SparseData data   = make_sparse_data(m, n, k);
-    using VF          = Value<float, Semantics::FPSan, kCC>;
-    using VE          = Value<E, Semantics::FPSan, kCC>;
+    using VF          = Value<float, Semantics::Triton, kCC>;
+    using VE          = Value<E, Semantics::Triton, kCC>;
     std::vector<std::uint32_t> ref(m * n);
     for(int i = 0; i < m; ++i)
         for(int j = 0; j < n; ++j)
@@ -314,9 +314,9 @@ static void run_smf_fpsan(int m, int n, int k)
     std::uint32_t* dD;
     HIP_CHECK(hipMalloc(&dD, ref.size() * sizeof(std::uint32_t)));
     if(m == 16)
-        k_smf_16x16x32<E, Semantics::FPSan, std::uint32_t><<<1, WAVE>>>(dA, dB, dC, dI, dD);
+        k_smf_16x16x32<E, Semantics::Triton, std::uint32_t><<<1, WAVE>>>(dA, dB, dC, dI, dD);
     else
-        k_smf_32x32x16<E, Semantics::FPSan, std::uint32_t><<<1, WAVE>>>(dA, dB, dC, dI, dD);
+        k_smf_32x32x16<E, Semantics::Triton, std::uint32_t><<<1, WAVE>>>(dA, dB, dC, dI, dD);
     HIP_CHECK(hipDeviceSynchronize());
 
     std::vector<std::uint32_t> got(ref.size());
@@ -379,7 +379,7 @@ __global__ void
     for(int reg = 0; reg < 4; ++reg)
     {
         const int i = 4 * g + reg;
-        if constexpr(S == Semantics::Float)
+        if constexpr(S == Semantics::Native)
             D[i * N + j] = d.get(reg).to_float();
         else
             D[i * N + j] = d.get(reg).fpsan_payload();
@@ -444,7 +444,7 @@ __global__ void
             auto loc = fpsan::detail::output_loc_32(M, N, i, jj, 0);
             if(loc.lane == lane)
             {
-                if constexpr(S == Semantics::Float)
+                if constexpr(S == Semantics::Native)
                     D[i * N + jj] = d.get(loc.reg).to_float();
                 else
                     D[i * N + jj] = d.get(loc.reg).fpsan_payload();
@@ -464,9 +464,9 @@ static void run_smf_fp8(int m, int k)
     SparseData                 data   = make_sparse_fp8_data(m, k);
     std::vector<float>         ref(m * n);
     std::vector<std::uint32_t> refp(m * n);
-    using VF = Value<float, Semantics::FPSan, kCC>;
-    using VA = Value<AE, Semantics::FPSan, kCC>;
-    using VB = Value<BE, Semantics::FPSan, kCC>;
+    using VF = Value<float, Semantics::Triton, kCC>;
+    using VA = Value<AE, Semantics::Triton, kCC>;
+    using VB = Value<BE, Semantics::Triton, kCC>;
 
     for(int i = 0; i < m; ++i)
         for(int j = 0; j < n; ++j)
@@ -503,16 +503,16 @@ static void run_smf_fp8(int m, int k)
 
     if(m == 16)
     {
-        k_smf_fp8_16x16x64<AE, BE, Semantics::Float, float><<<1, WAVE>>>(dA, dB, dC, dI, dDf);
+        k_smf_fp8_16x16x64<AE, BE, Semantics::Native, float><<<1, WAVE>>>(dA, dB, dC, dI, dDf);
         HIP_CHECK(hipDeviceSynchronize());
-        k_smf_fp8_16x16x64<AE, BE, Semantics::FPSan, std::uint32_t>
+        k_smf_fp8_16x16x64<AE, BE, Semantics::Triton, std::uint32_t>
             <<<1, WAVE>>>(dA, dB, dC, dI, dDp);
     }
     else
     {
-        k_smf_fp8_32x32x32<AE, BE, Semantics::Float, float><<<1, WAVE>>>(dA, dB, dC, dI, dDf);
+        k_smf_fp8_32x32x32<AE, BE, Semantics::Native, float><<<1, WAVE>>>(dA, dB, dC, dI, dDf);
         HIP_CHECK(hipDeviceSynchronize());
-        k_smf_fp8_32x32x32<AE, BE, Semantics::FPSan, std::uint32_t>
+        k_smf_fp8_32x32x32<AE, BE, Semantics::Triton, std::uint32_t>
             <<<1, WAVE>>>(dA, dB, dC, dI, dDp);
     }
     HIP_CHECK(hipDeviceSynchronize());

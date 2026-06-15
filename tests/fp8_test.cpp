@@ -144,7 +144,7 @@ TEST(Fp8, ExhaustiveFloatRoundTripAmdE5M2)
 template <class FP8>
 void fpsan_fixed_points()
 {
-    using V = Value<FP8, Semantics::FPSan, Conversions::Explicit>;
+    using V = Value<FP8, Semantics::Triton, Conversions::Explicit>;
     // 0 -> payload 0; 1 -> payload 1; -1 -> payload 0xFF.
     EXPECT_EQ(int(V(FP8(0.0f)).fpsan_payload()), 0);
     EXPECT_EQ(int(V(FP8(1.0f)).fpsan_payload()), 1);
@@ -175,7 +175,7 @@ TEST(Fp8, FpsanFixedPointsAmdE5M2)
 template <class FP8>
 void fpsan_cast_roundtrip()
 {
-    using V8 = Value<FP8, Semantics::FPSan, Conversions::Explicit>;
+    using V8 = Value<FP8, Semantics::Triton, Conversions::Explicit>;
     for(int i = 0; i < 256; ++i)
     {
         std::uint8_t b = static_cast<std::uint8_t>(i);
@@ -213,7 +213,7 @@ TEST(Fp8, FpsanCastRoundTripAmdE5M2)
 template <class FP8>
 void float_mode_cast_matches_native()
 {
-    using VF8 = Value<FP8, Semantics::Float, Conversions::Explicit>;
+    using VF8 = Value<FP8, Semantics::Native, Conversions::Explicit>;
     for(int i = 0; i < 256; ++i)
     {
         std::uint8_t b = static_cast<std::uint8_t>(i);

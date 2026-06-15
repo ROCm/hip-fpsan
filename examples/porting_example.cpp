@@ -9,15 +9,15 @@
 // docs/tutorial-porting.md.
 //
 //   Stage 0: Scalar = float                            (original code)
-//   Stage 1: Scalar = Value<float, fpsan::Semantics::Float,
+//   Stage 1: Scalar = Value<float, fpsan::Semantics::Native,
 //   fpsan::Conversions::Implicit>  (drop-in, identical math) Stage 2: Scalar =
-//   Value<float, fpsan::Semantics::Float, fpsan::Conversions::Explicit>
+//   Value<float, fpsan::Semantics::Native, fpsan::Conversions::Explicit>
 //   (explicit conversions:
 //            find accidental float<->wrapper mixing at compile time)
-//   Stage 3: Scalar = Value<float, fpsan::Semantics::FPSan,
+//   Stage 3: Scalar = Value<float, fpsan::Semantics::Triton,
 //   fpsan::Conversions::Explicit>   (FPSan semantics on)
 //
-// (Semantics::FPSan with Conversions::Implicit is also legal; turning on
+// (Semantics::Triton with Conversions::Implicit is also legal; turning on
 // explicit conversions first is just a recommended safety step.)
 //
 // Build (from this directory):
@@ -50,19 +50,19 @@ int main()
 
     // Stage 0 + 1: identical results (drop-in).
     float s0 = weighted_norm<float>(xs, ws);
-    using S1 = fpsan::Value<float, fpsan::Semantics::Float, fpsan::Conversions::Implicit>;
+    using S1 = fpsan::Value<float, fpsan::Semantics::Native, fpsan::Conversions::Implicit>;
     float s1 = static_cast<float>(weighted_norm<S1>(xs, ws));
     std::printf("stage0 float            = %.6f\n", s0);
     std::printf("stage1 <float,0,0>      = %.6f  (%s)\n", s1, s0 == s1 ? "identical" : "DIFFERS");
 
     // Stage 2: explicit conversions on; same numbers, stricter type checking.
-    using S2 = fpsan::Value<float, fpsan::Semantics::Float, fpsan::Conversions::Explicit>;
+    using S2 = fpsan::Value<float, fpsan::Semantics::Native, fpsan::Conversions::Explicit>;
     float s2 = static_cast<float>(weighted_norm<S2>(xs, ws));
     std::printf("stage2 <float,0,1>      = %.6f  (%s)\n", s2, s0 == s2 ? "identical" : "DIFFERS");
 
     // Stage 3: FPSan semantics. Numbers are now scrambled payloads; what matters
     // is that algebraically-equivalent variants agree. We just show it runs.
-    using S3 = fpsan::Value<float, fpsan::Semantics::FPSan, fpsan::Conversions::Explicit>;
+    using S3 = fpsan::Value<float, fpsan::Semantics::Triton, fpsan::Conversions::Explicit>;
     S3 s3    = weighted_norm<S3>(xs, ws);
     std::printf("stage3 <float,1,1>      = payload %u (numerically meaningless)\n",
                 s3.fpsan_payload());

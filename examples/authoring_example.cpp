@@ -8,7 +8,7 @@
 // We write a small numeric routine once, generic over the scalar type, then
 // instantiate it two ways:
 //   * Scalar = float                          -> ordinary IEEE arithmetic
-//   * Scalar = Value<float, fpsan::Semantics::FPSan,
+//   * Scalar = Value<float, fpsan::Semantics::Triton,
 //   fpsan::Conversions::Implicit> -> FPSan integer-payload algebra
 //
 // The routine computes the same sum two ways that are equal in exact real
@@ -54,7 +54,7 @@ int main()
                 f_rev,
                 f_fwd == f_rev ? "equal" : "DIFFER (rounding)");
 
-    using FpsanF = fpsan::Value<float, fpsan::Semantics::FPSan, fpsan::Conversions::Implicit>;
+    using FpsanF = fpsan::Value<float, fpsan::Semantics::Triton, fpsan::Conversions::Implicit>;
     FpsanF s_fwd = sum_forward<FpsanF>(v);
     FpsanF s_rev = sum_reverse<FpsanF>(v);
     std::printf("fpsan       : forward payload=%u reverse payload=%u  %s\n",

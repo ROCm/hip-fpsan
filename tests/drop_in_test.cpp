@@ -3,7 +3,7 @@
 //
 // tests/drop_in_test.cpp
 //
-// Demonstrates that Value<T, fpsan::Semantics::Float,
+// Demonstrates that Value<T, fpsan::Semantics::Native,
 // fpsan::Conversions::Implicit> is a bit-exact drop-in for T: a generic numeric
 // kernel, instantiated on the wrapper, produces identical bits to the same
 // kernel on the raw float. Also covers numeric_limits and io.
@@ -59,10 +59,10 @@ namespace
 
 TEST(DropIn, KernelMatchesRawFloatBitExactly)
 {
-    std::vector<double>                                                 input = make_input(32);
-    float                                                               raw = kernel<float>(input);
-    Value<float, fpsan::Semantics::Float, fpsan::Conversions::Implicit> wrapped
-        = kernel<Value<float, fpsan::Semantics::Float, fpsan::Conversions::Implicit>>(input);
+    std::vector<double>                                                  input = make_input(32);
+    float                                                                raw = kernel<float>(input);
+    Value<float, fpsan::Semantics::Native, fpsan::Conversions::Implicit> wrapped
+        = kernel<Value<float, fpsan::Semantics::Native, fpsan::Conversions::Implicit>>(input);
     EXPECT_EQ(bits_of(static_cast<float>(wrapped)), bits_of(raw));
 }
 
@@ -70,14 +70,14 @@ TEST(DropIn, DoubleKernelMatchesRawDoubleBitExactly)
 {
     std::vector<double> input = make_input(24);
     double              raw   = kernel<double>(input);
-    Value<double, fpsan::Semantics::Float, fpsan::Conversions::Implicit> wrapped
-        = kernel<Value<double, fpsan::Semantics::Float, fpsan::Conversions::Implicit>>(input);
+    Value<double, fpsan::Semantics::Native, fpsan::Conversions::Implicit> wrapped
+        = kernel<Value<double, fpsan::Semantics::Native, fpsan::Conversions::Implicit>>(input);
     EXPECT_EQ(bits_of(static_cast<double>(wrapped)), bits_of(raw));
 }
 
 TEST(DropIn, NumericLimitsForward)
 {
-    using W  = Value<float, fpsan::Semantics::Float, fpsan::Conversions::Implicit>;
+    using W  = Value<float, fpsan::Semantics::Native, fpsan::Conversions::Implicit>;
     using NL = std::numeric_limits<W>;
     EXPECT_TRUE(NL::is_specialized);
     EXPECT_TRUE(NL::is_signed);
@@ -90,25 +90,26 @@ TEST(DropIn, NumericLimitsForward)
               bits_of(std::numeric_limits<float>::lowest()));
     // FPSan-mode wrapper is not iec559; mode=false wrapper of float is.
     EXPECT_TRUE(NL::is_iec559);
-    EXPECT_FALSE((std::numeric_limits<
-                  Value<float, fpsan::Semantics::FPSan, fpsan::Conversions::Implicit>>::is_iec559));
+    EXPECT_FALSE(
+        (std::numeric_limits<
+            Value<float, fpsan::Semantics::Triton, fpsan::Conversions::Implicit>>::is_iec559));
 }
 
 TEST(DropIn, StreamOutput)
 {
     std::ostringstream a;
-    a << Value<float, fpsan::Semantics::Float, fpsan::Conversions::Implicit>(2.5f);
+    a << Value<float, fpsan::Semantics::Native, fpsan::Conversions::Implicit>(2.5f);
     EXPECT_EQ(a.str(), "2.5");
 
     std::ostringstream b;
-    b << Value<float, fpsan::Semantics::FPSan, fpsan::Conversions::Implicit>(
+    b << Value<float, fpsan::Semantics::Triton, fpsan::Conversions::Implicit>(
         1.0f); // payload of 1.0 is 1
     EXPECT_NE(b.str().find("payload=1"), std::string::npos);
 }
 
 TEST(DropIn, ExplicitModeUsableWithExplicitSyntax)
 {
-    using E = Value<float, fpsan::Semantics::Float, fpsan::Conversions::Explicit>;
+    using E = Value<float, fpsan::Semantics::Native, fpsan::Conversions::Explicit>;
     E x(1.0f); // direct-init OK even though explicit
     EXPECT_EQ(bits_of(static_cast<float>(x)), bits_of(1.0f)); // explicit cast OK
     E y = x + E(2.0f); // homogeneous op with explicit construction
@@ -117,10 +118,10 @@ TEST(DropIn, ExplicitModeUsableWithExplicitSyntax)
 
 TEST(DropIn, CopyAssignValueSemantics)
 {
-    Value<float, fpsan::Semantics::FPSan, fpsan::Conversions::Implicit> a(3.0f);
-    Value<float, fpsan::Semantics::FPSan, fpsan::Conversions::Implicit> b = a; // copy
+    Value<float, fpsan::Semantics::Triton, fpsan::Conversions::Implicit> a(3.0f);
+    Value<float, fpsan::Semantics::Triton, fpsan::Conversions::Implicit> b = a; // copy
     EXPECT_TRUE(a == b);
-    Value<float, fpsan::Semantics::FPSan, fpsan::Conversions::Implicit> c(9.0f);
+    Value<float, fpsan::Semantics::Triton, fpsan::Conversions::Implicit> c(9.0f);
     c = a; // assign
     EXPECT_TRUE(c == a);
 }

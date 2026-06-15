@@ -62,22 +62,22 @@ namespace
     }
 } // namespace
 
-#define BF16_TRANS_KERNEL(name, FPSAN_OP)                                                         \
-    __global__ void k_##name##_pair(const __bf16*  in,                                            \
-                                    __bf16*        direct,                                        \
-                                    __bf16*        via_wrapper,                                   \
-                                    std::uint16_t* pay_direct,                                    \
-                                    std::uint16_t* pay_wrapper)                                   \
-    {                                                                                             \
-        int    i  = threadIdx.x;                                                                  \
-        __bf16 x  = in[i];                                                                        \
-        direct[i] = __builtin_##name(x);                                                          \
-        Value<__bf16, Semantics::Float, kCC> vf{x};                                               \
-        via_wrapper[i] = static_cast<__bf16>(fpsan::name<Semantics::Float, kCC>(vf));             \
-        Value<__bf16, Semantics::FPSan, kCC> vp{x};                                               \
-        pay_direct[i] = static_cast<std::uint16_t>(fpsan::FPSAN_OP(vp).fpsan_payload());          \
-        pay_wrapper[i]                                                                            \
-            = static_cast<std::uint16_t>(fpsan::name<Semantics::FPSan, kCC>(vp).fpsan_payload()); \
+#define BF16_TRANS_KERNEL(name, FPSAN_OP)                                                          \
+    __global__ void k_##name##_pair(const __bf16*  in,                                             \
+                                    __bf16*        direct,                                         \
+                                    __bf16*        via_wrapper,                                    \
+                                    std::uint16_t* pay_direct,                                     \
+                                    std::uint16_t* pay_wrapper)                                    \
+    {                                                                                              \
+        int    i  = threadIdx.x;                                                                   \
+        __bf16 x  = in[i];                                                                         \
+        direct[i] = __builtin_##name(x);                                                           \
+        Value<__bf16, Semantics::Native, kCC> vf{x};                                               \
+        via_wrapper[i] = static_cast<__bf16>(fpsan::name<Semantics::Native, kCC>(vf));             \
+        Value<__bf16, Semantics::Triton, kCC> vp{x};                                               \
+        pay_direct[i] = static_cast<std::uint16_t>(fpsan::FPSAN_OP(vp).fpsan_payload());           \
+        pay_wrapper[i]                                                                             \
+            = static_cast<std::uint16_t>(fpsan::name<Semantics::Triton, kCC>(vp).fpsan_payload()); \
     }
 
 BF16_TRANS_KERNEL(amdgcn_rcp_bf16, rcp)

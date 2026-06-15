@@ -27,11 +27,11 @@ namespace fpsan
 
 // ---- class / classf / classh (per-lane bool, classifies the value's IEEE
 // category against the mask) -------------------------------------------------
-#define FPSAN_DEFINE_AMDGCN_CLASS(name, type, BUILTIN)                               \
-    template <Semantics S = Semantics::Float, Conversions C = Conversions::Explicit> \
-    FPSAN_DEVICE bool name(Value<type, S, C> v, int mask)                            \
-    {                                                                                \
-        return BUILTIN(v.to_float(), mask);                                          \
+#define FPSAN_DEFINE_AMDGCN_CLASS(name, type, BUILTIN)                                \
+    template <Semantics S = Semantics::Native, Conversions C = Conversions::Explicit> \
+    FPSAN_DEVICE bool name(Value<type, S, C> v, int mask)                             \
+    {                                                                                 \
+        return BUILTIN(v.to_float(), mask);                                           \
     }
 
     FPSAN_DEFINE_AMDGCN_CLASS(amdgcn_classf, float, __builtin_amdgcn_classf)
@@ -44,11 +44,11 @@ namespace fpsan
 // Returns the same-shape ballot mask the AMD builtin returns; both modes call
 // the same builtin on the represented float (Value::to_float() handles the
 // FPSan-mode unembed transparently).
-#define FPSAN_DEFINE_AMDGCN_FCMP(name, type, BUILTIN)                                          \
-    template <int Pred, Semantics S = Semantics::Float, Conversions C = Conversions::Explicit> \
-    FPSAN_DEVICE std::uint64_t name(Value<type, S, C> a, Value<type, S, C> b)                  \
-    {                                                                                          \
-        return BUILTIN(a.to_float(), b.to_float(), Pred);                                      \
+#define FPSAN_DEFINE_AMDGCN_FCMP(name, type, BUILTIN)                                           \
+    template <int Pred, Semantics S = Semantics::Native, Conversions C = Conversions::Explicit> \
+    FPSAN_DEVICE std::uint64_t name(Value<type, S, C> a, Value<type, S, C> b)                   \
+    {                                                                                           \
+        return BUILTIN(a.to_float(), b.to_float(), Pred);                                       \
     }
 
     FPSAN_DEFINE_AMDGCN_FCMP(amdgcn_fcmpf, float, __builtin_amdgcn_fcmpf)

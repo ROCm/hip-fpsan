@@ -44,7 +44,7 @@ __global__ void k_ldexpf(const float* in, Out* out, int n)
     int                  l = threadIdx.x;
     Value<float, S, kCC> v{in[l]};
     auto                 r = fpsan::amdgcn_ldexpf<S, kCC>(v, n);
-    if constexpr(S == Semantics::Float)
+    if constexpr(S == Semantics::Native)
         out[l] = r.to_float();
     else
         out[l] = r.fpsan_payload();
@@ -67,7 +67,7 @@ TEST(AmdgcnLdexp, F32)
         {
             float* dO;
             HIP_CHECK(hipMalloc(&dO, N * sizeof(float)));
-            k_ldexpf<Semantics::Float, float><<<1, N>>>(dIn, dO, n);
+            k_ldexpf<Semantics::Native, float><<<1, N>>>(dIn, dO, n);
             HIP_CHECK(hipDeviceSynchronize());
             std::vector<float> got(N);
             HIP_CHECK(hipMemcpy(got.data(), dO, N * sizeof(float), hipMemcpyDeviceToHost));
@@ -77,13 +77,13 @@ TEST(AmdgcnLdexp, F32)
         }
         // FPSan: payload == (v * 2^n) in the ring.
         {
-            using VF = Value<float, Semantics::FPSan, kCC>;
+            using VF = Value<float, Semantics::Triton, kCC>;
             std::vector<std::uint32_t> ref(N);
             for(int i = 0; i < N; ++i)
                 ref[i] = (VF(in[i]) * VF(std::ldexp(1.0f, n))).fpsan_payload();
             std::uint32_t* dO;
             HIP_CHECK(hipMalloc(&dO, N * sizeof(std::uint32_t)));
-            k_ldexpf<Semantics::FPSan, std::uint32_t><<<1, N>>>(dIn, dO, n);
+            k_ldexpf<Semantics::Triton, std::uint32_t><<<1, N>>>(dIn, dO, n);
             HIP_CHECK(hipDeviceSynchronize());
             std::vector<std::uint32_t> got(N);
             HIP_CHECK(hipMemcpy(got.data(), dO, N * sizeof(std::uint32_t), hipMemcpyDeviceToHost));
@@ -101,7 +101,7 @@ __global__ void k_ldexp(const double* in, Out* out, int n)
     int                   l = threadIdx.x;
     Value<double, S, kCC> v{in[l]};
     auto                  r = fpsan::amdgcn_ldexp<S, kCC>(v, n);
-    if constexpr(S == Semantics::Float)
+    if constexpr(S == Semantics::Native)
         out[l] = r.to_float();
     else
         out[l] = r.fpsan_payload();
@@ -123,7 +123,7 @@ TEST(AmdgcnLdexp, F64)
         {
             double* dO;
             HIP_CHECK(hipMalloc(&dO, N * sizeof(double)));
-            k_ldexp<Semantics::Float, double><<<1, N>>>(dIn, dO, n);
+            k_ldexp<Semantics::Native, double><<<1, N>>>(dIn, dO, n);
             HIP_CHECK(hipDeviceSynchronize());
             std::vector<double> got(N);
             HIP_CHECK(hipMemcpy(got.data(), dO, N * sizeof(double), hipMemcpyDeviceToHost));
@@ -132,13 +132,13 @@ TEST(AmdgcnLdexp, F64)
             (void)hipFree(dO);
         }
         {
-            using VD = Value<double, Semantics::FPSan, kCC>;
+            using VD = Value<double, Semantics::Triton, kCC>;
             std::vector<std::uint64_t> ref(N);
             for(int i = 0; i < N; ++i)
                 ref[i] = (VD(in[i]) * VD(std::ldexp(1.0, n))).fpsan_payload();
             std::uint64_t* dO;
             HIP_CHECK(hipMalloc(&dO, N * sizeof(std::uint64_t)));
-            k_ldexp<Semantics::FPSan, std::uint64_t><<<1, N>>>(dIn, dO, n);
+            k_ldexp<Semantics::Triton, std::uint64_t><<<1, N>>>(dIn, dO, n);
             HIP_CHECK(hipDeviceSynchronize());
             std::vector<std::uint64_t> got(N);
             HIP_CHECK(hipMemcpy(got.data(), dO, N * sizeof(std::uint64_t), hipMemcpyDeviceToHost));
@@ -156,7 +156,7 @@ __global__ void k_ldexph(const float* in, Out* out, int n)
     int                     l = threadIdx.x;
     Value<_Float16, S, kCC> v{static_cast<_Float16>(in[l])};
     auto                    r = fpsan::amdgcn_ldexph<S, kCC>(v, n);
-    if constexpr(S == Semantics::Float)
+    if constexpr(S == Semantics::Native)
         out[l] = static_cast<float>(r.to_float());
     else
         out[l] = r.fpsan_payload();
@@ -178,7 +178,7 @@ TEST(AmdgcnLdexp, F16)
         {
             float* dO;
             HIP_CHECK(hipMalloc(&dO, N * sizeof(float)));
-            k_ldexph<Semantics::Float, float><<<1, N>>>(dIn, dO, n);
+            k_ldexph<Semantics::Native, float><<<1, N>>>(dIn, dO, n);
             HIP_CHECK(hipDeviceSynchronize());
             std::vector<float> got(N);
             HIP_CHECK(hipMemcpy(got.data(), dO, N * sizeof(float), hipMemcpyDeviceToHost));
@@ -191,7 +191,7 @@ TEST(AmdgcnLdexp, F16)
             (void)hipFree(dO);
         }
         {
-            using VH = Value<_Float16, Semantics::FPSan, kCC>;
+            using VH = Value<_Float16, Semantics::Triton, kCC>;
             std::vector<std::uint32_t> ref(N);
             for(int i = 0; i < N; ++i)
                 ref[i] = (VH(static_cast<_Float16>(in[i]))
@@ -199,7 +199,7 @@ TEST(AmdgcnLdexp, F16)
                              .fpsan_payload();
             std::uint32_t* dO;
             HIP_CHECK(hipMalloc(&dO, N * sizeof(std::uint32_t)));
-            k_ldexph<Semantics::FPSan, std::uint32_t><<<1, N>>>(dIn, dO, n);
+            k_ldexph<Semantics::Triton, std::uint32_t><<<1, N>>>(dIn, dO, n);
             HIP_CHECK(hipDeviceSynchronize());
             std::vector<std::uint32_t> got(N);
             HIP_CHECK(hipMemcpy(got.data(), dO, N * sizeof(std::uint32_t), hipMemcpyDeviceToHost));

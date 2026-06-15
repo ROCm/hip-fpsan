@@ -37,7 +37,7 @@ using fpsan::detail::kFp8E5M3;
 using fpsan::detail::narrow_to_f32;
 
 static constexpr Conversions kCC = Conversions::Explicit;
-using VF                         = Value<float, Semantics::FPSan, kCC>;
+using VF                         = Value<float, Semantics::Triton, kCC>;
 
 namespace
 {
@@ -72,7 +72,7 @@ TEST(CvtFp8E5M3, HostCodecMatchesGuideTable)
 __global__ void k_e5m3_decode_all(const int* packed, float* out)
 {
     int l  = threadIdx.x;
-    out[l] = fpsan::amdgcn_cvt_f32_fp8_e5m3<0, Semantics::Float, kCC>(packed[l]).to_float();
+    out[l] = fpsan::amdgcn_cvt_f32_fp8_e5m3<0, Semantics::Native, kCC>(packed[l]).to_float();
 }
 
 TEST(CvtFp8E5M3, DecodeAllBytes)
@@ -105,7 +105,7 @@ template <int ByteIdx>
 __global__ void k_e5m3_decode_bytesel(const int* packed, float* out)
 {
     int l  = threadIdx.x;
-    out[l] = fpsan::amdgcn_cvt_f32_fp8_e5m3<ByteIdx, Semantics::Float, kCC>(packed[l]).to_float();
+    out[l] = fpsan::amdgcn_cvt_f32_fp8_e5m3<ByteIdx, Semantics::Native, kCC>(packed[l]).to_float();
 }
 
 template <int ByteIdx>
@@ -144,8 +144,8 @@ TEST(CvtFp8E5M3, DecodeByteSel)
 template <bool DstLo>
 __global__ void k_e5m3_pack(int old, float a, float b, int* out)
 {
-    *out = fpsan::amdgcn_cvt_pk_fp8_f32_e5m3<DstLo, Semantics::Float, kCC>(
-        Value<float, Semantics::Float, kCC>{a}, Value<float, Semantics::Float, kCC>{b}, old);
+    *out = fpsan::amdgcn_cvt_pk_fp8_f32_e5m3<DstLo, Semantics::Native, kCC>(
+        Value<float, Semantics::Native, kCC>{a}, Value<float, Semantics::Native, kCC>{b}, old);
 }
 
 template <bool DstLo>
@@ -198,10 +198,10 @@ TEST(CvtFp8E5M3, PackHighHalf)
 __global__ void k_e5m3_roundtrip(const int* bytes, float* out)
 {
     int   l  = threadIdx.x;
-    float v  = fpsan::amdgcn_cvt_f32_fp8_e5m3<0, Semantics::Float, kCC>(bytes[l]).to_float();
-    int   pk = fpsan::amdgcn_cvt_pk_fp8_f32_e5m3<true, Semantics::Float, kCC>(
-        Value<float, Semantics::Float, kCC>{v}, Value<float, Semantics::Float, kCC>{0.0f}, 0);
-    out[l] = fpsan::amdgcn_cvt_f32_fp8_e5m3<0, Semantics::Float, kCC>(pk).to_float();
+    float v  = fpsan::amdgcn_cvt_f32_fp8_e5m3<0, Semantics::Native, kCC>(bytes[l]).to_float();
+    int   pk = fpsan::amdgcn_cvt_pk_fp8_f32_e5m3<true, Semantics::Native, kCC>(
+        Value<float, Semantics::Native, kCC>{v}, Value<float, Semantics::Native, kCC>{0.0f}, 0);
+    out[l] = fpsan::amdgcn_cvt_f32_fp8_e5m3<0, Semantics::Native, kCC>(pk).to_float();
 }
 
 TEST(CvtFp8E5M3, PackDecodeRoundTrip)
@@ -231,8 +231,8 @@ TEST(CvtFp8E5M3, PackDecodeRoundTrip)
 template <int ByteIdx>
 __global__ void k_e5m3_sr(int old, float v, unsigned seed, int* out)
 {
-    *out = fpsan::amdgcn_cvt_sr_fp8_f32_e5m3<ByteIdx, Semantics::Float, kCC>(
-        Value<float, Semantics::Float, kCC>{v}, old, seed);
+    *out = fpsan::amdgcn_cvt_sr_fp8_f32_e5m3<ByteIdx, Semantics::Native, kCC>(
+        Value<float, Semantics::Native, kCC>{v}, old, seed);
 }
 
 TEST(CvtFp8E5M3, SrPackExact)
@@ -262,7 +262,7 @@ TEST(CvtFp8E5M3, SrPackExact)
 __global__ void k_e5m3_fpsan_decode(const int* packed, unsigned* out)
 {
     int l  = threadIdx.x;
-    out[l] = fpsan::amdgcn_cvt_f32_fp8_e5m3<0, Semantics::FPSan, kCC>(packed[l]).fpsan_payload();
+    out[l] = fpsan::amdgcn_cvt_f32_fp8_e5m3<0, Semantics::Triton, kCC>(packed[l]).fpsan_payload();
 }
 
 TEST(CvtFp8E5M3, FpsanDecodeWiden8)
@@ -287,7 +287,7 @@ TEST(CvtFp8E5M3, FpsanDecodeWiden8)
 
 __global__ void k_e5m3_fpsan_pack(int old, float a, float b, int* out)
 {
-    *out = fpsan::amdgcn_cvt_pk_fp8_f32_e5m3<true, Semantics::FPSan, kCC>(VF{a}, VF{b}, old);
+    *out = fpsan::amdgcn_cvt_pk_fp8_f32_e5m3<true, Semantics::Triton, kCC>(VF{a}, VF{b}, old);
 }
 
 TEST(CvtFp8E5M3, FpsanPackLow8)

@@ -5,7 +5,7 @@
 #include "fpsan/fpsan.hpp"
 int main()
 {
-    fpsan::Value<float, fpsan::Semantics::Float, fpsan::Conversions::Explicit> x
+    fpsan::Value<float, fpsan::Semantics::Native, fpsan::Conversions::Explicit> x
         = 1.0f; // copy-init needs implicit ctor
     (void)x;
 }

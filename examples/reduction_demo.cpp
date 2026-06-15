@@ -113,7 +113,7 @@ auto cpu_naive(const float* x)
     F acc{0.f};
     for(int i = 0; i < N; ++i)
         acc = acc + fpsan::cast<float>(B(static_cast<__bf16>(x[i])));
-    if constexpr(S == Semantics::Float)
+    if constexpr(S == Semantics::Native)
         return static_cast<float>(acc);
     else
         return acc.fpsan_payload();
@@ -137,7 +137,7 @@ __global__ void k_wfred(const float* x, Out* out)
     auto sum = fpsan::amdgcn_wave_reduce_fadd_f32<0>(acc);
     if(lane == 0)
     {
-        if constexpr(S == Semantics::Float)
+        if constexpr(S == Semantics::Native)
             *out = static_cast<float>(sum);
         else
             *out = sum.fpsan_payload();
@@ -259,7 +259,7 @@ __global__ void k_matrix_column_sums(const float* x, Out* col_out)
     // Lane n in 0..15 holds D[0][n] = column-n sum in accumulator register 0.
     if(lane < NN)
     {
-        if constexpr(S == Semantics::Float)
+        if constexpr(S == Semantics::Native)
             col_out[lane] = static_cast<float>(d.get(0));
         else
             col_out[lane] = d.get(0).fpsan_payload();
@@ -277,13 +277,13 @@ auto host_sum16(const In* cols)
     for(int i = 0; i < NN; ++i)
     {
         F v{0.f};
-        if constexpr(S == Semantics::Float)
+        if constexpr(S == Semantics::Native)
             v = F{cols[i]};
         else
             v = F::from_fpsan_payload(cols[i]);
         acc = acc + v;
     }
-    if constexpr(S == Semantics::Float)
+    if constexpr(S == Semantics::Native)
         return static_cast<float>(acc);
     else
         return acc.fpsan_payload();
@@ -329,40 +329,40 @@ int main()
     HIP_CHECK(hipMemcpy(d_in, input.data(), N * sizeof(float), hipMemcpyHostToDevice));
 
     // --- Float mode.
-    const float cpu_f = cpu_naive<Semantics::Float>(input.data());
+    const float cpu_f = cpu_naive<Semantics::Native>(input.data());
 
     float* d_wfred_f;
     HIP_CHECK(hipMalloc(&d_wfred_f, sizeof(float)));
-    k_wfred<Semantics::Float><<<1, wave>>>(d_in, d_wfred_f);
+    k_wfred<Semantics::Native><<<1, wave>>>(d_in, d_wfred_f);
     HIP_CHECK(hipDeviceSynchronize());
     float wfred_f = 0;
     HIP_CHECK(hipMemcpy(&wfred_f, d_wfred_f, sizeof(float), hipMemcpyDeviceToHost));
 
     float* d_cols_f;
     HIP_CHECK(hipMalloc(&d_cols_f, NN * sizeof(float)));
-    k_matrix_column_sums<Semantics::Float><<<1, wave>>>(d_in, d_cols_f);
+    k_matrix_column_sums<Semantics::Native><<<1, wave>>>(d_in, d_cols_f);
     HIP_CHECK(hipDeviceSynchronize());
     float cols_f[NN]{};
     HIP_CHECK(hipMemcpy(cols_f, d_cols_f, NN * sizeof(float), hipMemcpyDeviceToHost));
-    const float wmma_f = host_sum16<Semantics::Float>(cols_f);
+    const float wmma_f = host_sum16<Semantics::Native>(cols_f);
 
     // --- FPSan mode.
-    const std::uint32_t cpu_p = cpu_naive<Semantics::FPSan>(input.data());
+    const std::uint32_t cpu_p = cpu_naive<Semantics::Triton>(input.data());
 
     std::uint32_t* d_wfred_p;
     HIP_CHECK(hipMalloc(&d_wfred_p, sizeof(std::uint32_t)));
-    k_wfred<Semantics::FPSan><<<1, wave>>>(d_in, d_wfred_p);
+    k_wfred<Semantics::Triton><<<1, wave>>>(d_in, d_wfred_p);
     HIP_CHECK(hipDeviceSynchronize());
     std::uint32_t wfred_p = 0;
     HIP_CHECK(hipMemcpy(&wfred_p, d_wfred_p, sizeof(std::uint32_t), hipMemcpyDeviceToHost));
 
     std::uint32_t* d_cols_p;
     HIP_CHECK(hipMalloc(&d_cols_p, NN * sizeof(std::uint32_t)));
-    k_matrix_column_sums<Semantics::FPSan><<<1, wave>>>(d_in, d_cols_p);
+    k_matrix_column_sums<Semantics::Triton><<<1, wave>>>(d_in, d_cols_p);
     HIP_CHECK(hipDeviceSynchronize());
     std::uint32_t cols_p[NN]{};
     HIP_CHECK(hipMemcpy(cols_p, d_cols_p, NN * sizeof(std::uint32_t), hipMemcpyDeviceToHost));
-    const std::uint32_t wmma_p = host_sum16<Semantics::FPSan>(cols_p);
+    const std::uint32_t wmma_p = host_sum16<Semantics::Triton>(cols_p);
 
     // --- Report.
     std::printf("Device %s (warpSize=%d).\n", props.gcnArchName, wave);

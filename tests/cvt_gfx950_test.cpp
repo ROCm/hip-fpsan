@@ -76,7 +76,7 @@ __global__ void k_run(const float* in, Out* out)
     Value<float, S, kCC> a{in[2 * l]}, b{in[2 * l + 1]};
     int                  packed = CvtPk<FP8, WordSel>::template pack<S>(a, b, 0);
     auto                 r      = CvtPk<FP8, WordSel>::template unpack<S>(packed);
-    if constexpr(S == Semantics::Float)
+    if constexpr(S == Semantics::Native)
     {
         out[2 * l]     = r.get(0).to_float();
         out[2 * l + 1] = r.get(1).to_float();
@@ -103,7 +103,7 @@ void run_cvt_pk()
     {
         float* dO;
         HIP_CHECK(hipMalloc(&dO, 2 * LANES * sizeof(float)));
-        k_run<Semantics::Float, FP8, WordSel, float><<<1, LANES>>>(dIn, dO);
+        k_run<Semantics::Native, FP8, WordSel, float><<<1, LANES>>>(dIn, dO);
         HIP_CHECK(hipDeviceSynchronize());
         std::vector<float> got(2 * LANES);
         HIP_CHECK(hipMemcpy(got.data(), dO, 2 * LANES * sizeof(float), hipMemcpyDeviceToHost));
@@ -114,13 +114,13 @@ void run_cvt_pk()
     // FPSan: must equal the direct payload-ring composition
     // cast<float>(cast<fp8>).
     {
-        using VF = Value<float, Semantics::FPSan, kCC>;
+        using VF = Value<float, Semantics::Triton, kCC>;
         std::vector<std::uint32_t> ref(2 * LANES);
         for(int i = 0; i < 2 * LANES; ++i)
             ref[i] = fpsan::cast<float>(fpsan::cast<FP8>(VF(in[i]))).fpsan_payload();
         std::uint32_t* dO;
         HIP_CHECK(hipMalloc(&dO, 2 * LANES * sizeof(std::uint32_t)));
-        k_run<Semantics::FPSan, FP8, WordSel, std::uint32_t><<<1, LANES>>>(dIn, dO);
+        k_run<Semantics::Triton, FP8, WordSel, std::uint32_t><<<1, LANES>>>(dIn, dO);
         HIP_CHECK(hipDeviceSynchronize());
         std::vector<std::uint32_t> got(2 * LANES);
         HIP_CHECK(
@@ -175,8 +175,8 @@ TEST(CvtPkF32, PackWritesSameWordInBothModes)
     HIP_CHECK(hipMalloc(&dHiF, LANES * 4));
     HIP_CHECK(hipMalloc(&dLoP, LANES * 4));
     HIP_CHECK(hipMalloc(&dHiP, LANES * 4));
-    k_pack_words<Semantics::Float><<<1, LANES>>>(dIn, dLoF, dHiF);
-    k_pack_words<Semantics::FPSan><<<1, LANES>>>(dIn, dLoP, dHiP);
+    k_pack_words<Semantics::Native><<<1, LANES>>>(dIn, dLoF, dHiF);
+    k_pack_words<Semantics::Triton><<<1, LANES>>>(dIn, dLoP, dHiP);
     HIP_CHECK(hipDeviceSynchronize());
     std::vector<int> loF(LANES), hiF(LANES), loP(LANES), hiP(LANES);
     HIP_CHECK(hipMemcpy(loF.data(), dLoF, LANES * 4, hipMemcpyDeviceToHost));
@@ -212,7 +212,7 @@ template <class FP8>
 __global__ void k_unpack_all_bytes(const int* packed, float* out)
 {
     int  l = threadIdx.x; // lane l carries fp8 byte l in word0/byte0.
-    auto r = CvtPk<FP8, 0>::template unpack<Semantics::Float>(packed[l]);
+    auto r = CvtPk<FP8, 0>::template unpack<Semantics::Native>(packed[l]);
     out[l] = r.get(0).to_float();
 }
 
@@ -308,7 +308,7 @@ __global__ void k_sr_roundtrip(const float* in, Out* out)
     Value<float, S, kCC> v{in[l]};
     int                  packed = CvtOps<FP8>::template sr<0, S>(v, 0, 0x1234u + l);
     auto                 f      = CvtOps<FP8>::template f32<0, S>(packed);
-    if constexpr(S == Semantics::Float)
+    if constexpr(S == Semantics::Native)
         out[l] = f.to_float();
     else
         out[l] = f.fpsan_payload();
@@ -327,7 +327,7 @@ void run_cvt_sr()
     {
         float* dO;
         HIP_CHECK(hipMalloc(&dO, LANES * sizeof(float)));
-        k_sr_roundtrip<Semantics::Float, FP8, float><<<1, LANES>>>(dIn, dO);
+        k_sr_roundtrip<Semantics::Native, FP8, float><<<1, LANES>>>(dIn, dO);
         HIP_CHECK(hipDeviceSynchronize());
         std::vector<float> got(LANES);
         HIP_CHECK(hipMemcpy(got.data(), dO, LANES * sizeof(float), hipMemcpyDeviceToHost));
@@ -336,13 +336,13 @@ void run_cvt_sr()
         (void)hipFree(dO);
     }
     {
-        using VF = Value<float, Semantics::FPSan, kCC>;
+        using VF = Value<float, Semantics::Triton, kCC>;
         std::vector<std::uint32_t> ref(LANES);
         for(int i = 0; i < LANES; ++i)
             ref[i] = fpsan::cast<float>(fpsan::cast<FP8>(VF(in[i]))).fpsan_payload();
         std::uint32_t* dO;
         HIP_CHECK(hipMalloc(&dO, LANES * sizeof(std::uint32_t)));
-        k_sr_roundtrip<Semantics::FPSan, FP8, std::uint32_t><<<1, LANES>>>(dIn, dO);
+        k_sr_roundtrip<Semantics::Triton, FP8, std::uint32_t><<<1, LANES>>>(dIn, dO);
         HIP_CHECK(hipDeviceSynchronize());
         std::vector<std::uint32_t> got(LANES);
         HIP_CHECK(hipMemcpy(got.data(), dO, LANES * sizeof(std::uint32_t), hipMemcpyDeviceToHost));
@@ -372,7 +372,7 @@ __global__ void k_scalef32_unpack(const float* in, Out* out, float scale)
     Value<float, S, kCC> v{in[l]};
     int                  packed = CvtOps<FP8>::template sr<0, S>(v, 0, 0u);
     auto                 f = CvtOps<FP8>::template sf32<0, S>(packed, Value<float, S, kCC>{scale});
-    if constexpr(S == Semantics::Float)
+    if constexpr(S == Semantics::Native)
         out[l] = f.to_float();
     else
         out[l] = f.fpsan_payload();
@@ -392,7 +392,7 @@ void run_cvt_scalef32_unpack()
     {
         float* dO;
         HIP_CHECK(hipMalloc(&dO, LANES * sizeof(float)));
-        k_scalef32_unpack<Semantics::Float, FP8, float><<<1, LANES>>>(dIn, dO, scale);
+        k_scalef32_unpack<Semantics::Native, FP8, float><<<1, LANES>>>(dIn, dO, scale);
         HIP_CHECK(hipDeviceSynchronize());
         std::vector<float> got(LANES);
         HIP_CHECK(hipMemcpy(got.data(), dO, LANES * sizeof(float), hipMemcpyDeviceToHost));
@@ -401,13 +401,13 @@ void run_cvt_scalef32_unpack()
         (void)hipFree(dO);
     }
     {
-        using VF = Value<float, Semantics::FPSan, kCC>;
+        using VF = Value<float, Semantics::Triton, kCC>;
         std::vector<std::uint32_t> ref(LANES);
         for(int i = 0; i < LANES; ++i)
             ref[i] = (fpsan::cast<float>(fpsan::cast<FP8>(VF(in[i]))) * VF(scale)).fpsan_payload();
         std::uint32_t* dO;
         HIP_CHECK(hipMalloc(&dO, LANES * sizeof(std::uint32_t)));
-        k_scalef32_unpack<Semantics::FPSan, FP8, std::uint32_t><<<1, LANES>>>(dIn, dO, scale);
+        k_scalef32_unpack<Semantics::Triton, FP8, std::uint32_t><<<1, LANES>>>(dIn, dO, scale);
         HIP_CHECK(hipDeviceSynchronize());
         std::vector<std::uint32_t> got(LANES);
         HIP_CHECK(hipMemcpy(got.data(), dO, LANES * sizeof(std::uint32_t), hipMemcpyDeviceToHost));
@@ -473,7 +473,7 @@ __global__ void k_scaled_pack(const float* in, Out* out, float scale)
     Value<float, S, kCC> v{in[l]};
     Value<float, S, kCC> sc{scale};
     int                  packed = ScaledPackOps<FP8>::pack(v, Value<float, S, kCC>{0.0f}, sc, 0);
-    if constexpr(S == Semantics::Float)
+    if constexpr(S == Semantics::Native)
     {
         auto f = ScaledPackOps<FP8>::unpack0(packed, sc);
         out[l] = f.to_float();
@@ -498,7 +498,7 @@ void run_cvt_scalef32_pack()
     {
         float* dO;
         HIP_CHECK(hipMalloc(&dO, LANES * sizeof(float)));
-        k_scaled_pack<Semantics::Float, FP8, float><<<1, LANES>>>(dIn, dO, scale);
+        k_scaled_pack<Semantics::Native, FP8, float><<<1, LANES>>>(dIn, dO, scale);
         HIP_CHECK(hipDeviceSynchronize());
         std::vector<float> got(LANES);
         HIP_CHECK(hipMemcpy(got.data(), dO, LANES * sizeof(float), hipMemcpyDeviceToHost));
@@ -507,7 +507,7 @@ void run_cvt_scalef32_pack()
         (void)hipFree(dO);
     }
     {
-        using VF = Value<float, Semantics::FPSan, kCC>;
+        using VF = Value<float, Semantics::Triton, kCC>;
         std::vector<std::uint32_t> ref(LANES);
         for(int i = 0; i < LANES; ++i)
             ref[i] = static_cast<std::uint32_t>(
@@ -515,7 +515,7 @@ void run_cvt_scalef32_pack()
                      & 0xFFu;
         std::uint32_t* dO;
         HIP_CHECK(hipMalloc(&dO, LANES * sizeof(std::uint32_t)));
-        k_scaled_pack<Semantics::FPSan, FP8, std::uint32_t><<<1, LANES>>>(dIn, dO, scale);
+        k_scaled_pack<Semantics::Triton, FP8, std::uint32_t><<<1, LANES>>>(dIn, dO, scale);
         HIP_CHECK(hipDeviceSynchronize());
         std::vector<std::uint32_t> got(LANES);
         HIP_CHECK(hipMemcpy(got.data(), dO, LANES * sizeof(std::uint32_t), hipMemcpyDeviceToHost));

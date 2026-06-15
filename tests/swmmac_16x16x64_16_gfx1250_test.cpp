@@ -7,7 +7,7 @@
 // structured sparsity; K=64 dense / K=32 compressed; f16/bf16/f32 accumulators).
 // Same two-property structure as the fp8 SWMMAC and dense WMMA suites:
 //
-//  (1) LayoutMatchesHardware: the software sparse dataflow (Semantics::Float)
+//  (1) LayoutMatchesHardware: the software sparse dataflow (Semantics::Native)
 //      must match the real builtin bit-for-bit on exact-integer inputs. This
 //      validates the compressed-A layout (Swmmac16x16x64CompressedALayout), the
 //      dense-B layout (Wmma16x16x64Layout) and the sparse INDEX layout
@@ -109,13 +109,13 @@ __global__ void k_builtin(const typename Harness<Traits>::AElem* A,
                           const int*                             IDX, // [32]
                           typename Harness<Traits>::CElem*       D)
 {
-    int                                                          lane = threadIdx.x;
-    Value<typename Harness<Traits>::AVec, Semantics::Float, kCC> a;
-    Value<typename Harness<Traits>::BVec, Semantics::Float, kCC> b;
-    Value<typename Harness<Traits>::CVec, Semantics::Float, kCC> c;
-    load_frags<Traits, Semantics::Float>(A, B, C, lane, a, b, c);
+    int                                                           lane = threadIdx.x;
+    Value<typename Harness<Traits>::AVec, Semantics::Native, kCC> a;
+    Value<typename Harness<Traits>::BVec, Semantics::Native, kCC> b;
+    Value<typename Harness<Traits>::CVec, Semantics::Native, kCC> c;
+    load_frags<Traits, Semantics::Native>(A, B, C, lane, a, b, c);
     int  idx = IDX[lane];
-    auto d   = Traits::template call<Semantics::Float, kCC>(a, b, c, idx);
+    auto d   = Traits::template call<Semantics::Native, kCC>(a, b, c, idx);
     for(int e = 0; e < 8; ++e)
         D[(e + 8 * (lane >> 4)) * N + (lane & 15)] = d.get(e).to_float();
 }
@@ -127,16 +127,16 @@ __global__ void k_float_dataflow(const typename Harness<Traits>::AElem* A,
                                  const int*                             IDX,
                                  typename Harness<Traits>::CElem*       D)
 {
-    int                                                          lane = threadIdx.x;
-    Value<typename Harness<Traits>::AVec, Semantics::Float, kCC> a;
-    Value<typename Harness<Traits>::BVec, Semantics::Float, kCC> b;
-    Value<typename Harness<Traits>::CVec, Semantics::Float, kCC> c;
-    load_frags<Traits, Semantics::Float>(A, B, C, lane, a, b, c);
+    int                                                           lane = threadIdx.x;
+    Value<typename Harness<Traits>::AVec, Semantics::Native, kCC> a;
+    Value<typename Harness<Traits>::BVec, Semantics::Native, kCC> b;
+    Value<typename Harness<Traits>::CVec, Semantics::Native, kCC> c;
+    load_frags<Traits, Semantics::Native>(A, B, C, lane, a, b, c);
     int  idx = IDX[lane];
     auto d   = fpsan::detail::swmmac_software_16x16x64_16<typename Harness<Traits>::AVec,
                                                           typename Harness<Traits>::BVec,
                                                           typename Harness<Traits>::CVec,
-                                                          Semantics::Float,
+                                                          Semantics::Native,
                                                           kCC>(a, b, c, idx);
     for(int e = 0; e < 8; ++e)
         D[(e + 8 * (lane >> 4)) * N + (lane & 15)] = d.get(e).to_float();
@@ -149,13 +149,13 @@ __global__ void k_fpsan(const typename Harness<Traits>::AElem* A,
                         const int*                             IDX,
                         typename Harness<Traits>::CBits*       Dpay)
 {
-    int                                                          lane = threadIdx.x;
-    Value<typename Harness<Traits>::AVec, Semantics::FPSan, kCC> a;
-    Value<typename Harness<Traits>::BVec, Semantics::FPSan, kCC> b;
-    Value<typename Harness<Traits>::CVec, Semantics::FPSan, kCC> c;
-    load_frags<Traits, Semantics::FPSan>(A, B, C, lane, a, b, c);
+    int                                                           lane = threadIdx.x;
+    Value<typename Harness<Traits>::AVec, Semantics::Triton, kCC> a;
+    Value<typename Harness<Traits>::BVec, Semantics::Triton, kCC> b;
+    Value<typename Harness<Traits>::CVec, Semantics::Triton, kCC> c;
+    load_frags<Traits, Semantics::Triton>(A, B, C, lane, a, b, c);
     int  idx = IDX[lane];
-    auto d   = Traits::template call<Semantics::FPSan, kCC>(a, b, c, idx);
+    auto d   = Traits::template call<Semantics::Triton, kCC>(a, b, c, idx);
     for(int e = 0; e < 8; ++e)
         Dpay[(e + 8 * (lane >> 4)) * N + (lane & 15)] = d.get(e).fpsan_payload();
 }
@@ -263,9 +263,9 @@ void run_fpsan_matches_scalar_reference()
         GTEST_SKIP() << "no HIP device";
     Mats<Traits> m = make_inputs<Traits>();
 
-    using VA = Value<AE, Semantics::FPSan, kCC>;
-    using VB = Value<BE, Semantics::FPSan, kCC>;
-    using VC = Value<CE, Semantics::FPSan, kCC>;
+    using VA = Value<AE, Semantics::Triton, kCC>;
+    using VB = Value<BE, Semantics::Triton, kCC>;
+    using VC = Value<CE, Semantics::Triton, kCC>;
     std::vector<CBits> ref(M * N);
     for(int i = 0; i < M; ++i)
         for(int j = 0; j < N; ++j)

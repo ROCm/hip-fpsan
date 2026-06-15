@@ -54,8 +54,8 @@ struct UnpackVec<fpsan::fp8_e4m3, float>
 {
     __device__ static float e0(int p, float s)
     {
-        return fpsan::amdgcn_cvt_scalef32_pk_f32_fp8<false, Semantics::Float, kCC>(
-                   p, Value<float, Semantics::Float, kCC>{s})
+        return fpsan::amdgcn_cvt_scalef32_pk_f32_fp8<false, Semantics::Native, kCC>(
+                   p, Value<float, Semantics::Native, kCC>{s})
             .get(0)
             .to_float();
     }
@@ -65,8 +65,8 @@ struct UnpackVec<fpsan::fp8_e5m2, float>
 {
     __device__ static float e0(int p, float s)
     {
-        return fpsan::amdgcn_cvt_scalef32_pk_f32_bf8<false, Semantics::Float, kCC>(
-                   p, Value<float, Semantics::Float, kCC>{s})
+        return fpsan::amdgcn_cvt_scalef32_pk_f32_bf8<false, Semantics::Native, kCC>(
+                   p, Value<float, Semantics::Native, kCC>{s})
             .get(0)
             .to_float();
     }
@@ -77,8 +77,8 @@ struct UnpackVec<fpsan::fp8_e4m3, _Float16>
     __device__ static float e0(int p, float s)
     {
         return static_cast<float>(
-            fpsan::amdgcn_cvt_scalef32_pk_f16_fp8<false, Semantics::Float, kCC>(
-                p, Value<float, Semantics::Float, kCC>{s})
+            fpsan::amdgcn_cvt_scalef32_pk_f16_fp8<false, Semantics::Native, kCC>(
+                p, Value<float, Semantics::Native, kCC>{s})
                 .get(0)
                 .to_float());
     }
@@ -89,8 +89,8 @@ struct UnpackVec<fpsan::fp8_e5m2, _Float16>
     __device__ static float e0(int p, float s)
     {
         return static_cast<float>(
-            fpsan::amdgcn_cvt_scalef32_pk_f16_bf8<false, Semantics::Float, kCC>(
-                p, Value<float, Semantics::Float, kCC>{s})
+            fpsan::amdgcn_cvt_scalef32_pk_f16_bf8<false, Semantics::Native, kCC>(
+                p, Value<float, Semantics::Native, kCC>{s})
                 .get(0)
                 .to_float());
     }
@@ -101,8 +101,8 @@ struct UnpackVec<fpsan::fp8_e4m3, __bf16>
     __device__ static float e0(int p, float s)
     {
         return static_cast<float>(
-            fpsan::amdgcn_cvt_scalef32_pk_bf16_fp8<false, Semantics::Float, kCC>(
-                p, Value<float, Semantics::Float, kCC>{s})
+            fpsan::amdgcn_cvt_scalef32_pk_bf16_fp8<false, Semantics::Native, kCC>(
+                p, Value<float, Semantics::Native, kCC>{s})
                 .get(0)
                 .to_float());
     }
@@ -113,8 +113,8 @@ struct UnpackVec<fpsan::fp8_e5m2, __bf16>
     __device__ static float e0(int p, float s)
     {
         return static_cast<float>(
-            fpsan::amdgcn_cvt_scalef32_pk_bf16_bf8<false, Semantics::Float, kCC>(
-                p, Value<float, Semantics::Float, kCC>{s})
+            fpsan::amdgcn_cvt_scalef32_pk_bf16_bf8<false, Semantics::Native, kCC>(
+                p, Value<float, Semantics::Native, kCC>{s})
                 .get(0)
                 .to_float());
     }
@@ -259,7 +259,7 @@ __global__ void k_roundtrip(const float* in, Out* out, float scale)
     Value<float, S, kCC> sc{scale};
     int                  packed = PackVec<FP8, SrcVEC>::template pack<S>(0, v, sc);
     auto                 r      = PackVec<FP8, SrcVEC>::template unpack<S>(packed, sc);
-    if constexpr(S == Semantics::Float)
+    if constexpr(S == Semantics::Native)
     {
         out[2 * l]     = r.get(0).to_float();
         out[2 * l + 1] = r.get(1).to_float();
@@ -286,7 +286,7 @@ void run_roundtrip()
     {
         float* dO;
         HIP_CHECK(hipMalloc(&dO, 2 * LANES * sizeof(float)));
-        k_roundtrip<Semantics::Float, FP8, SrcVEC, SrcElem, float><<<1, LANES>>>(dIn, dO, scale);
+        k_roundtrip<Semantics::Native, FP8, SrcVEC, SrcElem, float><<<1, LANES>>>(dIn, dO, scale);
         HIP_CHECK(hipDeviceSynchronize());
         std::vector<float> got(2 * LANES);
         HIP_CHECK(hipMemcpy(got.data(), dO, 2 * LANES * sizeof(float), hipMemcpyDeviceToHost));
@@ -297,8 +297,8 @@ void run_roundtrip()
     // FPSan: payload must equal the payload-ring reference. Pack divides, unpack
     // multiplies: cast<float>(cast<FP8>(cast<SrcElem>(x) / scale)) * scale.
     {
-        using VF = Value<float, Semantics::FPSan, kCC>;
-        using VS = Value<SrcElem, Semantics::FPSan, kCC>;
+        using VF = Value<float, Semantics::Triton, kCC>;
+        using VS = Value<SrcElem, Semantics::Triton, kCC>;
         std::vector<std::uint32_t> ref(2 * LANES);
         for(int i = 0; i < 2 * LANES; ++i)
         {
@@ -308,7 +308,7 @@ void run_roundtrip()
         }
         std::uint32_t* dO;
         HIP_CHECK(hipMalloc(&dO, 2 * LANES * sizeof(std::uint32_t)));
-        k_roundtrip<Semantics::FPSan, FP8, SrcVEC, SrcElem, std::uint32_t>
+        k_roundtrip<Semantics::Triton, FP8, SrcVEC, SrcElem, std::uint32_t>
             <<<1, LANES>>>(dIn, dO, scale);
         HIP_CHECK(hipDeviceSynchronize());
         std::vector<std::uint32_t> got(2 * LANES);

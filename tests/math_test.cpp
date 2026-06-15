@@ -41,7 +41,7 @@ namespace
 // ---- exp2 / exp payloads match the ground-truth reference exactly ----------
 TEST(Math, Exp2ExpMatchGroundTruthFloat)
 {
-    using F         = Value<float, fpsan::Semantics::FPSan, fpsan::Conversions::Explicit>;
+    using F         = Value<float, fpsan::Semantics::Triton, fpsan::Conversions::Explicit>;
     const auto& fmt = fpsan_generic::formats::F32;
     for(float x : xs())
     {
@@ -54,7 +54,7 @@ TEST(Math, Exp2ExpMatchGroundTruthFloat)
 TEST(Math, Exp2MatchesGroundTruthFloat16Exhaustive)
 {
 #if FPSAN_HAS_FLOAT16
-    using F = Value<_Float16, fpsan::Semantics::FPSan, fpsan::Conversions::Explicit>;
+    using F = Value<_Float16, fpsan::Semantics::Triton, fpsan::Conversions::Explicit>;
     fpsan_generic::FPFormat fmt{"half", 16, 5, 10, 15, true};
     for(uint32_t b = 0; b < (1u << 16); ++b)
     {
@@ -73,7 +73,7 @@ TEST(Math, Exp2MatchesGroundTruthFloat16Exhaustive)
 // ---- algebraic identities (exact in FPSan mode) ----------------------------
 TEST(Math, ExpHomomorphism)
 {
-    using F = Value<float, fpsan::Semantics::FPSan, fpsan::Conversions::Explicit>;
+    using F = Value<float, fpsan::Semantics::Triton, fpsan::Conversions::Explicit>;
     for(float a : xs())
         for(float b : xs())
         {
@@ -87,7 +87,7 @@ TEST(Math, ExpHomomorphism)
 
 TEST(Math, TrigAngleAddition)
 {
-    using F = Value<float, fpsan::Semantics::FPSan, fpsan::Conversions::Explicit>;
+    using F = Value<float, fpsan::Semantics::Triton, fpsan::Conversions::Explicit>;
     for(float a : xs())
         for(float b : xs())
         {
@@ -104,7 +104,7 @@ TEST(Math, TrigAngleAddition)
 // ---- tagged ops: deterministic, op-distinct, not real math -----------------
 TEST(Math, TaggedDeterministicAndDistinct)
 {
-    using F = Value<float, fpsan::Semantics::FPSan, fpsan::Conversions::Explicit>;
+    using F = Value<float, fpsan::Semantics::Triton, fpsan::Conversions::Explicit>;
     for(float x : xs())
     {
         F a(x), b(x);
@@ -136,7 +136,7 @@ TEST(Math, TaggedDeterministicAndDistinct)
 // ---- native (mode=false) parity with std:: ---------------------------------
 TEST(Math, NativeParity)
 {
-    using F = Value<float, fpsan::Semantics::Float, fpsan::Conversions::Explicit>;
+    using F = Value<float, fpsan::Semantics::Native, fpsan::Conversions::Explicit>;
     for(float x : xs())
     {
         F a(x);
@@ -158,7 +158,7 @@ TEST(Math, NativeParity)
 // ---- modular: fma / fmod / min / max ---------------------------------------
 TEST(Math, FmaMatchesMulAdd)
 {
-    using F = Value<float, fpsan::Semantics::FPSan, fpsan::Conversions::Explicit>;
+    using F = Value<float, fpsan::Semantics::Triton, fpsan::Conversions::Explicit>;
     for(float a : xs())
         for(float b : xs())
             for(float c : xs())
@@ -170,7 +170,7 @@ TEST(Math, FmaMatchesMulAdd)
 
 TEST(Math, MinMaxNativeParity)
 {
-    using F = Value<float, fpsan::Semantics::Float, fpsan::Conversions::Explicit>;
+    using F = Value<float, fpsan::Semantics::Native, fpsan::Conversions::Explicit>;
     for(float a : xs())
         for(float b : xs())
         {
@@ -181,7 +181,7 @@ TEST(Math, MinMaxNativeParity)
 
 TEST(Math, MinMaxFpsanIdempotentCommutative)
 {
-    using F = Value<float, fpsan::Semantics::FPSan, fpsan::Conversions::Explicit>;
+    using F = Value<float, fpsan::Semantics::Triton, fpsan::Conversions::Explicit>;
     for(float a : xs())
     {
         F A(a);

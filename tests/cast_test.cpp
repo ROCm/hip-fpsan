@@ -23,7 +23,7 @@ using fpsan::Value;
 // unembed.
 TEST(Cast, FpsanF16ToF32FixedPoints)
 {
-    using H = Value<_Float16, Semantics::FPSan, Conversions::Explicit>;
+    using H = Value<_Float16, Semantics::Triton, Conversions::Explicit>;
     // 0, 1, -1 are shared fixed points (payload 0, 1, all-ones) at every width,
     // so the sign-resize maps them across precisions exactly.
     EXPECT_EQ(cast<float>(H(_Float16(0))).fpsan_payload(), 0u);
@@ -33,7 +33,7 @@ TEST(Cast, FpsanF16ToF32FixedPoints)
 
 TEST(Cast, FpsanF32ToF16ToF32RoundTrips)
 {
-    using H = Value<_Float16, Semantics::FPSan, Conversions::Explicit>;
+    using H = Value<_Float16, Semantics::Triton, Conversions::Explicit>;
     // truncate(sign_extend(p)) == p, so f16 -> f32 -> f16 recovers the payload.
     for(int i = 0; i < (1 << 16); ++i)
     {
@@ -48,8 +48,8 @@ TEST(Cast, FpsanF32ToF16ToF32RoundTrips)
 
 TEST(Cast, FloatModeIsNativeConversion)
 {
-    using H = Value<_Float16, Semantics::Float, Conversions::Explicit>;
-    using F = Value<float, Semantics::Float, Conversions::Explicit>;
+    using H = Value<_Float16, Semantics::Native, Conversions::Explicit>;
+    using F = Value<float, Semantics::Native, Conversions::Explicit>;
     for(float x : {0.0f, 1.5f, -2.25f, 100.0f, 0.1f})
     {
         F f(x);

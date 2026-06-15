@@ -7,7 +7,7 @@
 // independent properties, run for every variant:
 //
 //  (1) Layout + dataflow vs the real hardware. Our reverse-engineered software
-//      MMA, run with *real float* arithmetic (Semantics::Float dataflow), must
+//      MMA, run with *real float* arithmetic (Semantics::Native dataflow), must
 //      match the real builtin bit-for-bit on EXACT-integer inputs (so FP
 //      rounding / accumulation order can't mask a layout error). This validates
 //      the fragment layout maps + cross-lane gather against the hardware.
@@ -120,12 +120,12 @@ __global__ void k_builtin(const typename Harness<Traits>::AElem* A,
                           const typename Harness<Traits>::CElem* C,
                           typename Harness<Traits>::CElem*       D)
 {
-    int                                                          lane = threadIdx.x;
-    Value<typename Harness<Traits>::AVec, Semantics::Float, kCC> a;
-    Value<typename Harness<Traits>::BVec, Semantics::Float, kCC> b;
-    Value<typename Harness<Traits>::CVec, Semantics::Float, kCC> c;
-    load_frags<Traits, Semantics::Float>(A, B, C, lane, a, b, c);
-    auto d = Traits::template call<Semantics::Float, kCC>(a, b, c);
+    int                                                           lane = threadIdx.x;
+    Value<typename Harness<Traits>::AVec, Semantics::Native, kCC> a;
+    Value<typename Harness<Traits>::BVec, Semantics::Native, kCC> b;
+    Value<typename Harness<Traits>::CVec, Semantics::Native, kCC> c;
+    load_frags<Traits, Semantics::Native>(A, B, C, lane, a, b, c);
+    auto d = Traits::template call<Semantics::Native, kCC>(a, b, c);
     for(int e = 0; e < 8; ++e)
         D[(e + 8 * (lane >> 4)) * N + (lane & 15)] = d.get(e).to_float();
 }
@@ -138,11 +138,11 @@ __global__ void k_float_dataflow(const typename Harness<Traits>::AElem* A,
                                  const typename Harness<Traits>::CElem* C,
                                  typename Harness<Traits>::CElem*       D)
 {
-    int                                                          lane = threadIdx.x;
-    Value<typename Harness<Traits>::AVec, Semantics::Float, kCC> a;
-    Value<typename Harness<Traits>::BVec, Semantics::Float, kCC> b;
-    Value<typename Harness<Traits>::CVec, Semantics::Float, kCC> c;
-    load_frags<Traits, Semantics::Float>(A, B, C, lane, a, b, c);
+    int                                                           lane = threadIdx.x;
+    Value<typename Harness<Traits>::AVec, Semantics::Native, kCC> a;
+    Value<typename Harness<Traits>::BVec, Semantics::Native, kCC> b;
+    Value<typename Harness<Traits>::CVec, Semantics::Native, kCC> c;
+    load_frags<Traits, Semantics::Native>(A, B, C, lane, a, b, c);
     auto d = fpsan::detail::wmma_16x16x16_dataflow(a, b, c);
     for(int e = 0; e < 8; ++e)
         D[(e + 8 * (lane >> 4)) * N + (lane & 15)] = d.get(e).to_float();
@@ -156,12 +156,12 @@ __global__ void k_fpsan(const typename Harness<Traits>::AElem* A,
                         const typename Harness<Traits>::CElem* C,
                         typename Harness<Traits>::CBits*       Dpay)
 {
-    int                                                          lane = threadIdx.x;
-    Value<typename Harness<Traits>::AVec, Semantics::FPSan, kCC> a;
-    Value<typename Harness<Traits>::BVec, Semantics::FPSan, kCC> b;
-    Value<typename Harness<Traits>::CVec, Semantics::FPSan, kCC> c;
-    load_frags<Traits, Semantics::FPSan>(A, B, C, lane, a, b, c);
-    auto d = Traits::template call<Semantics::FPSan, kCC>(a, b, c);
+    int                                                           lane = threadIdx.x;
+    Value<typename Harness<Traits>::AVec, Semantics::Triton, kCC> a;
+    Value<typename Harness<Traits>::BVec, Semantics::Triton, kCC> b;
+    Value<typename Harness<Traits>::CVec, Semantics::Triton, kCC> c;
+    load_frags<Traits, Semantics::Triton>(A, B, C, lane, a, b, c);
+    auto d = Traits::template call<Semantics::Triton, kCC>(a, b, c);
     for(int e = 0; e < 8; ++e)
         Dpay[(e + 8 * (lane >> 4)) * N + (lane & 15)] = d.get(e).fpsan_payload();
 }
@@ -249,9 +249,9 @@ void run_fpsan_matches_scalar_reference()
 
     // Host scalar FPSan reference using the same dataflow:
     //   D[m][n] = C[m][n] + sum_k cast<CE>(A[m][k]) * cast<CE>(B[k][n]).
-    using VA = Value<AE, Semantics::FPSan, kCC>;
-    using VB = Value<BE, Semantics::FPSan, kCC>;
-    using VC = Value<CE, Semantics::FPSan, kCC>;
+    using VA = Value<AE, Semantics::Triton, kCC>;
+    using VB = Value<BE, Semantics::Triton, kCC>;
+    using VC = Value<CE, Semantics::Triton, kCC>;
     std::vector<CBits> ref(M * N);
     for(int mm = 0; mm < M; ++mm)
         for(int nn = 0; nn < N; ++nn)
