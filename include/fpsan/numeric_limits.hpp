@@ -37,7 +37,7 @@ namespace std
         static constexpr bool                    is_bounded        = base::is_bounded;
         // A wrapper is not literally the IEC559 type, and FPSan mode is certainly
         // not.
-        static constexpr bool is_iec559      = base::is_iec559 && (S == fpsan::Semantics::Float);
+        static constexpr bool is_iec559      = base::is_iec559 && (S == fpsan::Semantics::Native);
         static constexpr int  digits         = base::digits;
         static constexpr int  digits10       = base::digits10;
         static constexpr int  max_digits10   = base::max_digits10;

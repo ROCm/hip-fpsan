@@ -1,2 +1,6 @@
 # In-tree build directory (out-of-tree builds are preferred; see README)
 /build/
+
+# Typically a user-created symlink to the build directory, to enable discovery
+# by clangd.
+compile_commands.json

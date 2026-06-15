@@ -19,7 +19,7 @@
 #include <cstdint>
 #include <vector>
 
-using F = fpsan::Value<float, fpsan::Semantics::FPSan, fpsan::Conversions::Explicit>;
+using F = fpsan::Value<float, fpsan::Semantics::Triton, fpsan::Conversions::Explicit>;
 
 __global__ void fpsan_kernel(const float*   a,
                              const float*   b,

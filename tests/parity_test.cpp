@@ -110,7 +110,7 @@ namespace
             // FPSan mode is integer/constexpr payload algebra: it MUST match
             // bit-for-bit. Float mode is native hardware arithmetic, whose
             // rounding may differ host vs device -- out of scope here.
-            if constexpr(S == Semantics::FPSan)
+            if constexpr(S == Semantics::Triton)
             {
                 EXPECT_EQ(d.storage_add, h.storage_add) << label << " add @" << i;
                 EXPECT_EQ(d.storage_sub, h.storage_sub) << label << " sub @" << i;
@@ -144,7 +144,7 @@ namespace
         // Host invariant on the shared body: in FPSan mode the payload ring laws
         // are exact and must always hold. Float mode is native arithmetic, so no
         // algebraic-law conformance is asserted.
-        if constexpr(S == Semantics::FPSan)
+        if constexpr(S == Semantics::Triton)
             for(int i = 0; i < n; ++i)
                 EXPECT_EQ(host[i].laws & fpsan_test::kRingLaws, fpsan_test::kRingLaws)
                     << label << " ring law @" << i;
@@ -162,11 +162,11 @@ namespace
         run_parity<FT, Semantics::SEM, Conversions::CONV>(#TAG "/" #SEM "/" #CONV); \
     }
 
-#define PARITY_ALL_MODES(FT, TAG)        \
-    PARITY_ONE(FT, TAG, Float, Implicit) \
-    PARITY_ONE(FT, TAG, Float, Explicit) \
-    PARITY_ONE(FT, TAG, FPSan, Implicit) \
-    PARITY_ONE(FT, TAG, FPSan, Explicit)
+#define PARITY_ALL_MODES(FT, TAG)         \
+    PARITY_ONE(FT, TAG, Native, Implicit) \
+    PARITY_ONE(FT, TAG, Native, Explicit) \
+    PARITY_ONE(FT, TAG, Triton, Implicit) \
+    PARITY_ONE(FT, TAG, Triton, Explicit)
 
 PARITY_ALL_MODES(float, F32)
 PARITY_ALL_MODES(double, F64)

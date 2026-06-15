@@ -27,7 +27,7 @@ class fpsan::Value;
 
 | parameter | values |
 |-----------|--------|
-| `semantics` | `Semantics::Float` = native arithmetic of `float_type` (drop-in); `Semantics::FPSan` = FPSan integer-payload arithmetic |
+| `semantics` | `Semantics::Native` = native arithmetic of `float_type` (drop-in); `Semantics::Triton` = FPSan integer-payload arithmetic |
 | `conversions` | `Conversions::Implicit` = implicit casts to/from numbers (like a POD); `Conversions::Explicit` = every conversion / 1-arg ctor is `explicit` |
 
 As a scalar, `float_type` is any IEEE-style binary float the library has a layout
@@ -53,13 +53,13 @@ plain `float` and migrate in small, compiler-checked steps —
 
 ```
 float
-  → Value<float, Semantics::Float, Conversions::Implicit>   // bit-exact drop-in for float
-  → Value<float, Semantics::Float, Conversions::Explicit>   // same results; no silent casts
-  → Value<float, Semantics::FPSan, Conversions::Explicit>   // algebraic-equivalence checking
+  → Value<float, Semantics::Native, Conversions::Implicit>   // bit-exact drop-in for float
+  → Value<float, Semantics::Native, Conversions::Explicit>   // same results; no silent casts
+  → Value<float, Semantics::Triton, Conversions::Explicit>   // algebraic-equivalence checking
 ```
 
-`Semantics::Float` keeps native IEEE results; `Conversions::Explicit` flushes out
-implicit conversions; `Semantics::FPSan` then replaces arithmetic with
+`Semantics::Native` keeps native IEEE results; `Conversions::Explicit` flushes out
+implicit conversions; `Semantics::Triton` then replaces arithmetic with
 integer-payload algebra that obeys *exact* laws (associativity, distributivity,
 `exp(x+y) = exp(x)·exp(y)`), so algebraically-equal expressions produce the
 **same payload** — e.g. `(a + b) + c == a + (b + c)` holds on the nose. The
@@ -70,7 +70,7 @@ FPSan payloads; see the blog post linked above for the why.
 
 ```cpp
 #include <fpsan/fpsan.hpp>
-using S = fpsan::Value<float, fpsan::Semantics::FPSan, fpsan::Conversions::Implicit>;
+using S = fpsan::Value<float, fpsan::Semantics::Triton, fpsan::Conversions::Implicit>;
 S a = 1e8f, b = -1e8f, c = 1.0f;
 bool exact = ((a + b) + c == a + (b + c)); // true under FPSan (false for float)
 ```

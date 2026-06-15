@@ -76,7 +76,7 @@ template <class FP8>
 __global__ void k_decode_all_bytes(const int* packed, _Float16* out)
 {
     int l  = threadIdx.x; // lane l carries fp8 byte l in byte0.
-    out[l] = DecodeOps<FP8>::template f16<0, Semantics::Float>(packed[l]).to_float();
+    out[l] = DecodeOps<FP8>::template f16<0, Semantics::Native>(packed[l]).to_float();
 }
 
 template <class FP8>
@@ -121,7 +121,7 @@ template <class FP8, int ByteIdx>
 __global__ void k_decode_bytesel(const int* packed, _Float16* out)
 {
     int l  = threadIdx.x;
-    out[l] = DecodeOps<FP8>::template f16<ByteIdx, Semantics::Float>(packed[l]).to_float();
+    out[l] = DecodeOps<FP8>::template f16<ByteIdx, Semantics::Native>(packed[l]).to_float();
 }
 
 template <class FP8, int ByteIdx>
@@ -213,7 +213,7 @@ __global__ void k_pk_roundtrip(const _Float16* in, Out* out)
     Value<v2h, S, kCC> ab{v2h{in[2 * l], in[2 * l + 1]}};
     short              p = PkOps<FP8>::template pack<S>(ab);
     auto               r = PkOps<FP8>::template unpack<S>(p);
-    if constexpr(S == Semantics::Float)
+    if constexpr(S == Semantics::Native)
     {
         out[2 * l]     = r.get(0).to_float();
         out[2 * l + 1] = r.get(1).to_float();
@@ -238,7 +238,7 @@ void run_pk_roundtrip()
     {
         _Float16* dO;
         HIP_CHECK(hipMalloc(&dO, 2 * LANES * sizeof(_Float16)));
-        k_pk_roundtrip<Semantics::Float, FP8, _Float16><<<1, LANES>>>(dIn, dO);
+        k_pk_roundtrip<Semantics::Native, FP8, _Float16><<<1, LANES>>>(dIn, dO);
         HIP_CHECK(hipDeviceSynchronize());
         std::vector<_Float16> got(2 * LANES);
         HIP_CHECK(hipMemcpy(got.data(), dO, 2 * LANES * sizeof(_Float16), hipMemcpyDeviceToHost));
@@ -247,14 +247,14 @@ void run_pk_roundtrip()
         (void)hipFree(dO);
     }
     {
-        using VH = Value<_Float16, Semantics::FPSan, kCC>;
+        using VH = Value<_Float16, Semantics::Triton, kCC>;
         std::vector<std::uint16_t> ref(2 * LANES);
         for(int i = 0; i < 2 * LANES; ++i)
             ref[i] = static_cast<std::uint16_t>(
                 fpsan::cast<_Float16>(fpsan::cast<FP8>(VH(in[i]))).fpsan_payload());
         std::uint16_t* dO;
         HIP_CHECK(hipMalloc(&dO, 2 * LANES * sizeof(std::uint16_t)));
-        k_pk_roundtrip<Semantics::FPSan, FP8, std::uint16_t><<<1, LANES>>>(dIn, dO);
+        k_pk_roundtrip<Semantics::Triton, FP8, std::uint16_t><<<1, LANES>>>(dIn, dO);
         HIP_CHECK(hipDeviceSynchronize());
         std::vector<std::uint16_t> got(2 * LANES);
         HIP_CHECK(
@@ -280,10 +280,10 @@ TEST(CvtF16Fp8, Bf8PkRoundTrip)
 template <class FP8>
 __global__ void k_pack_bytes(const _Float16* in, std::uint16_t* out)
 {
-    using v2h                           = fpsan::v2h_native;
-    int                               l = threadIdx.x;
-    Value<v2h, Semantics::Float, kCC> ab{v2h{in[2 * l], in[2 * l + 1]}};
-    out[l] = static_cast<std::uint16_t>(PkOps<FP8>::template pack<Semantics::Float>(ab));
+    using v2h                            = fpsan::v2h_native;
+    int                                l = threadIdx.x;
+    Value<v2h, Semantics::Native, kCC> ab{v2h{in[2 * l], in[2 * l + 1]}};
+    out[l] = static_cast<std::uint16_t>(PkOps<FP8>::template pack<Semantics::Native>(ab));
 }
 
 template <class FP8>
@@ -366,7 +366,7 @@ __global__ void k_sr_roundtrip(const _Float16* in, Out* out)
     Value<_Float16, S, kCC> v{in[l]};
     int                     packed = SrOps<FP8>::template sr<S>(v, 0, 0x1234u + l);
     auto                    f      = SrOps<FP8>::template dec<S>(packed);
-    if constexpr(S == Semantics::Float)
+    if constexpr(S == Semantics::Native)
         out[l] = f.to_float();
     else
         out[l] = f.fpsan_payload();
@@ -385,7 +385,7 @@ void run_sr_roundtrip()
     {
         _Float16* dO;
         HIP_CHECK(hipMalloc(&dO, LANES * sizeof(_Float16)));
-        k_sr_roundtrip<Semantics::Float, FP8, _Float16><<<1, LANES>>>(dIn, dO);
+        k_sr_roundtrip<Semantics::Native, FP8, _Float16><<<1, LANES>>>(dIn, dO);
         HIP_CHECK(hipDeviceSynchronize());
         std::vector<_Float16> got(LANES);
         HIP_CHECK(hipMemcpy(got.data(), dO, LANES * sizeof(_Float16), hipMemcpyDeviceToHost));
@@ -394,14 +394,14 @@ void run_sr_roundtrip()
         (void)hipFree(dO);
     }
     {
-        using VH = Value<_Float16, Semantics::FPSan, kCC>;
+        using VH = Value<_Float16, Semantics::Triton, kCC>;
         std::vector<std::uint16_t> ref(LANES);
         for(int i = 0; i < LANES; ++i)
             ref[i] = static_cast<std::uint16_t>(
                 fpsan::cast<_Float16>(fpsan::cast<FP8>(VH(in[i]))).fpsan_payload());
         std::uint16_t* dO;
         HIP_CHECK(hipMalloc(&dO, LANES * sizeof(std::uint16_t)));
-        k_sr_roundtrip<Semantics::FPSan, FP8, std::uint16_t><<<1, LANES>>>(dIn, dO);
+        k_sr_roundtrip<Semantics::Triton, FP8, std::uint16_t><<<1, LANES>>>(dIn, dO);
         HIP_CHECK(hipDeviceSynchronize());
         std::vector<std::uint16_t> got(LANES);
         HIP_CHECK(hipMemcpy(got.data(), dO, LANES * sizeof(std::uint16_t), hipMemcpyDeviceToHost));

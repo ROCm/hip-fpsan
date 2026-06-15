@@ -140,7 +140,7 @@ namespace
         fpsan::v2u32_native p;                                                       \
         p[0]   = in[0];                                                              \
         p[1]   = in[1];                                                              \
-        auto r = fpsan::WRAP<0, Semantics::Float, kCC>(p, scale);                    \
+        auto r = fpsan::WRAP<0, Semantics::Native, kCC>(p, scale);                   \
         for(int i = 0; i < 8; ++i)                                                   \
             out[i] = r.get(i).to_float();                                            \
     }                                                                                \
@@ -174,7 +174,7 @@ PK8_BYTES_GOLDEN(Bf8ToBf16, amdgcn_cvt_scale_pk8_bf16_bf8, kFp8E5M2, __bf16)
 #define PK8_NIB_GOLDEN(CASE, WRAP, DST)                                                       \
     __global__ void CASE##_k(unsigned packed, unsigned scale, float* out)                     \
     {                                                                                         \
-        auto r = fpsan::WRAP<0, Semantics::Float, kCC>(packed, scale);                        \
+        auto r = fpsan::WRAP<0, Semantics::Native, kCC>(packed, scale);                       \
         for(int i = 0; i < 8; ++i)                                                            \
             out[i] = r.get(i).to_float();                                                     \
     }                                                                                         \
@@ -207,7 +207,7 @@ PK8_NIB_GOLDEN(Fp4ToBf16, amdgcn_cvt_scale_pk8_bf16_fp4, __bf16)
         p[0]   = in[0];                                                              \
         p[1]   = in[1];                                                              \
         p[2]   = in[2];                                                              \
-        auto r = fpsan::WRAP<0, Semantics::Float, kCC>(p, scale);                    \
+        auto r = fpsan::WRAP<0, Semantics::Native, kCC>(p, scale);                   \
         for(int i = 0; i < 16; ++i)                                                  \
             out[i] = r.get(i).to_float();                                            \
     }                                                                                \
@@ -247,7 +247,7 @@ __global__ void k_pk8_scale_x2(const unsigned* in, unsigned scale, float* out)
     fpsan::v2u32_native p;
     p[0]   = in[0];
     p[1]   = in[1];
-    auto r = fpsan::amdgcn_cvt_scale_pk8_f32_fp8<0, Semantics::Float, kCC>(p, scale);
+    auto r = fpsan::amdgcn_cvt_scale_pk8_f32_fp8<0, Semantics::Native, kCC>(p, scale);
     for(int i = 0; i < 8; ++i)
         out[i] = r.get(i).to_float();
 }
@@ -282,7 +282,7 @@ __global__ void k_fpsan_pk8_fp8(const unsigned* in, unsigned scale, int* out)
     fpsan::v2u32_native p;
     p[0]   = in[0];
     p[1]   = in[1];
-    auto r = fpsan::amdgcn_cvt_scale_pk8_f32_fp8<0, Semantics::FPSan, kCC>(p, scale);
+    auto r = fpsan::amdgcn_cvt_scale_pk8_f32_fp8<0, Semantics::Triton, kCC>(p, scale);
     for(int i = 0; i < 8; ++i)
         out[i] = r.get(i).fpsan_payload();
 }
@@ -316,7 +316,7 @@ __global__ void k_fpsan_pk16_fp6(const unsigned* in, unsigned scale, int* out)
     p[0]   = in[0];
     p[1]   = in[1];
     p[2]   = in[2];
-    auto r = fpsan::amdgcn_cvt_scale_pk16_f32_fp6<0, Semantics::FPSan, kCC>(p, scale);
+    auto r = fpsan::amdgcn_cvt_scale_pk16_f32_fp6<0, Semantics::Triton, kCC>(p, scale);
     for(int i = 0; i < 16; ++i)
         out[i] = r.get(i).fpsan_payload();
 }

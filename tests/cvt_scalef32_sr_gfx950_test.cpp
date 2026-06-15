@@ -51,7 +51,7 @@ using fpsan::detail::kFp8E5M2;
 using fpsan::detail::narrow_to_f32;
 
 static constexpr Conversions kCC = Conversions::Explicit;
-using VF                         = Value<float, Semantics::FPSan, kCC>;
+using VF                         = Value<float, Semantics::Triton, kCC>;
 using v6u                        = unsigned __attribute__((ext_vector_type(6)));
 
 namespace
@@ -106,10 +106,10 @@ __global__ void k_a_float_all(const int* src, float* lane0, float* lane1)
 {
     int               l  = threadIdx.x;
     fpsan::v2h_native ov = {(_Float16)111.0f, (_Float16)222.0f};
-    auto              r  = F16Fp8<FP8>::template call<0, false, Semantics::Float>(
-        Value<fpsan::v2h_native, Semantics::Float, kCC>(ov),
+    auto              r  = F16Fp8<FP8>::template call<0, false, Semantics::Native>(
+        Value<fpsan::v2h_native, Semantics::Native, kCC>(ov),
         src[l],
-        Value<float, Semantics::Float, kCC>{1.0f});
+        Value<float, Semantics::Native, kCC>{1.0f});
     lane0[l] = static_cast<float>(static_cast<_Float16>(r.get(0)));
     lane1[l] = static_cast<float>(static_cast<_Float16>(r.get(1)));
 }
@@ -160,17 +160,17 @@ template <class FP8>
 __global__ void k_a_float_sel(int src, float scale, float* out)
 {
     fpsan::v2h_native ov = {(_Float16)111.0f, (_Float16)222.0f};
-    using VV             = Value<fpsan::v2h_native, Semantics::Float, kCC>;
-    using VS             = Value<float, Semantics::Float, kCC>;
+    using VV             = Value<fpsan::v2h_native, Semantics::Native, kCC>;
+    using VS             = Value<float, Semantics::Native, kCC>;
     auto w               = [&](int idx, auto r) {
         out[2 * idx]     = static_cast<float>(static_cast<_Float16>(r.get(0)));
         out[2 * idx + 1] = static_cast<float>(static_cast<_Float16>(r.get(1)));
     };
-    w(0, (F16Fp8<FP8>::template call<0, false, Semantics::Float>(VV(ov), src, VS{scale})));
-    w(1, (F16Fp8<FP8>::template call<0, true, Semantics::Float>(VV(ov), src, VS{scale})));
-    w(2, (F16Fp8<FP8>::template call<1, false, Semantics::Float>(VV(ov), src, VS{scale})));
-    w(3, (F16Fp8<FP8>::template call<2, true, Semantics::Float>(VV(ov), src, VS{scale})));
-    w(4, (F16Fp8<FP8>::template call<3, false, Semantics::Float>(VV(ov), src, VS{scale})));
+    w(0, (F16Fp8<FP8>::template call<0, false, Semantics::Native>(VV(ov), src, VS{scale})));
+    w(1, (F16Fp8<FP8>::template call<0, true, Semantics::Native>(VV(ov), src, VS{scale})));
+    w(2, (F16Fp8<FP8>::template call<1, false, Semantics::Native>(VV(ov), src, VS{scale})));
+    w(3, (F16Fp8<FP8>::template call<2, true, Semantics::Native>(VV(ov), src, VS{scale})));
+    w(4, (F16Fp8<FP8>::template call<3, false, Semantics::Native>(VV(ov), src, VS{scale})));
 }
 
 template <class FP8>
@@ -227,12 +227,12 @@ TEST(CvtScalef32Sr, A_FloatSelLoHiScale_Bf8)
 template <class FP8>
 __global__ void k_a_fpsan(int src, float scale, unsigned* out)
 {
-    using VV = Value<fpsan::v2h_native, Semantics::FPSan, kCC>;
+    using VV = Value<fpsan::v2h_native, Semantics::Triton, kCC>;
     VV old{};
-    old.set(0, Value<_Float16, Semantics::FPSan, kCC>::from_fpsan_payload(0x1234));
-    old.set(1, Value<_Float16, Semantics::FPSan, kCC>::from_fpsan_payload(0x5678));
-    auto lo = F16Fp8<FP8>::template call<1, false, Semantics::FPSan>(old, src, VF{scale});
-    auto hi = F16Fp8<FP8>::template call<2, true, Semantics::FPSan>(old, src, VF{scale});
+    old.set(0, Value<_Float16, Semantics::Triton, kCC>::from_fpsan_payload(0x1234));
+    old.set(1, Value<_Float16, Semantics::Triton, kCC>::from_fpsan_payload(0x5678));
+    auto lo = F16Fp8<FP8>::template call<1, false, Semantics::Triton>(old, src, VF{scale});
+    auto hi = F16Fp8<FP8>::template call<2, true, Semantics::Triton>(old, src, VF{scale});
     out[0]  = lo.get(0).fpsan_payload();
     out[1]  = lo.get(1).fpsan_payload();
     out[2]  = hi.get(0).fpsan_payload();
@@ -244,7 +244,7 @@ void run_a_fpsan()
 {
     if(!have_device())
         GTEST_SKIP() << "no HIP device";
-    using V8 = Value<FP8, Semantics::FPSan, kCC>;
+    using V8 = Value<FP8, Semantics::Triton, kCC>;
     // payload bytes 0xA3 (byte1) and 0x5C (byte2).
     unsigned    byte1 = 0xA3, byte2 = 0x5C;
     int         src   = static_cast<int>((byte1 << 8) | (byte2 << 16));
@@ -348,7 +348,7 @@ void run_b(const fpsan::detail::FpFormat& fmt)
     {
         int* dO;
         HIP_CHECK(hipMalloc(&dO, N * sizeof(int)));
-        k_b<Semantics::Float, FP8, SrcElem, int><<<1, N>>>(old, dV, 0xABCDu, scale, dO);
+        k_b<Semantics::Native, FP8, SrcElem, int><<<1, N>>>(old, dV, 0xABCDu, scale, dO);
         HIP_CHECK(hipDeviceSynchronize());
         auto g = from_dev(dO, N);
         for(int l = 0; l < N; ++l)
@@ -366,11 +366,11 @@ void run_b(const fpsan::detail::FpFormat& fmt)
     }
     // ---- FPSan: byte == cast<FP8>(cast<float>(v)/scale) payload; seed opaque.
     {
-        using VS = Value<SrcElem, Semantics::FPSan, kCC>;
+        using VS = Value<SrcElem, Semantics::Triton, kCC>;
         unsigned* dO;
         HIP_CHECK(hipMalloc(&dO, N * sizeof(unsigned)));
         // A different seed must give the same answer (opaque).
-        k_b<Semantics::FPSan, FP8, SrcElem, unsigned><<<1, N>>>(old, dV, 0x12345u, scale, dO);
+        k_b<Semantics::Triton, FP8, SrcElem, unsigned><<<1, N>>>(old, dV, 0x12345u, scale, dO);
         HIP_CHECK(hipDeviceSynchronize());
         auto g = from_dev(dO, N);
         for(int l = 0; l < N; ++l)
@@ -492,7 +492,7 @@ void run_c(const fpsan::detail::FpFormat& fmt)
 
     // ---- Float: contiguous stream of host codes
     // f32_to_narrow(SrcElem(x)/scale).
-    k_c<Semantics::Float, SrcElem, VEC, IsFp6><<<1, 1>>>(dIn, 0xABCDu, scale, dO);
+    k_c<Semantics::Native, SrcElem, VEC, IsFp6><<<1, 1>>>(dIn, 0xABCDu, scale, dO);
     HIP_CHECK(hipDeviceSynchronize());
     {
         auto         g = from_dev(dO, 6);
@@ -509,10 +509,10 @@ void run_c(const fpsan::detail::FpFormat& fmt)
     }
     // ---- FPSan: contiguous stream of (cast<float>(v)/scale) payloads & 0x3F;
     // seed opaque.
-    k_c<Semantics::FPSan, SrcElem, VEC, IsFp6><<<1, 1>>>(dIn, 0x999u, scale, dO);
+    k_c<Semantics::Triton, SrcElem, VEC, IsFp6><<<1, 1>>>(dIn, 0x999u, scale, dO);
     HIP_CHECK(hipDeviceSynchronize());
     {
-        using VS       = Value<SrcElem, Semantics::FPSan, kCC>;
+        using VS       = Value<SrcElem, Semantics::Triton, kCC>;
         auto         g = from_dev(dO, 6);
         std::uint8_t codes[32];
         for(int i = 0; i < 32; ++i)
@@ -614,7 +614,7 @@ void run_d()
         float a = pick_fp4() * scale;
         float b = pick_fp4() * scale;
         // ---- Float: byte0 = lo nibble enc(a/scale) | hi nibble enc(b/scale).
-        k_d<Semantics::Float, SrcElem, VEC><<<1, 1>>>(old, a, b, 0xABCDu, scale, dO);
+        k_d<Semantics::Native, SrcElem, VEC><<<1, 1>>>(old, a, b, 0xABCDu, scale, dO);
         HIP_CHECK(hipDeviceSynchronize());
         {
             unsigned g  = from_dev(dO, 1)[0] & 0xFF;
@@ -625,10 +625,10 @@ void run_d()
             EXPECT_EQ(g, na | (nb << 4)) << "Float a=" << a << " b=" << b;
         }
         // ---- FPSan: byte0 = (a/scale)payload | (b/scale)payload<<4; seed opaque.
-        k_d<Semantics::FPSan, SrcElem, VEC><<<1, 1>>>(old, a, b, 0x777u + t, scale, dO);
+        k_d<Semantics::Triton, SrcElem, VEC><<<1, 1>>>(old, a, b, 0x777u + t, scale, dO);
         HIP_CHECK(hipDeviceSynchronize());
         {
-            using VS   = Value<SrcElem, Semantics::FPSan, kCC>;
+            using VS   = Value<SrcElem, Semantics::Triton, kCC>;
             unsigned g = from_dev(dO, 1)[0] & 0xFF;
             unsigned na
                 = (fpsan::cast<float>(VS{static_cast<SrcElem>(a)}) / VF{scale}).fpsan_payload()

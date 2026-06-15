@@ -16,9 +16,9 @@
 //
 // with a, b, c, d being Value fragments (vector Values) instead of raw vectors.
 //
-//   Semantics::Float : bit-cast to the native vectors and call the real builtin
+//   Semantics::Native : bit-cast to the native vectors and call the real builtin
 //                      (true hardware MMA -- fast and bit-faithful).
-//   Semantics::FPSan : a wave-cooperative software MMA computing D = A*B + C in
+//   Semantics::Triton : a wave-cooperative software MMA computing D = A*B + C in
 //                      the payload ring, using the hardware fragment layout so
 //                      results match an FPSan scalar/Triton reference.
 //
@@ -356,8 +356,8 @@ namespace fpsan
         // fragment layout is fixed; the accumulator type is whatever C and D carry
         // (== AVec/BVec for the f16/bf16 'same-type' variants, == f32 for the f32-out
         // variants). Generic over Value Semantics: real-float arithmetic at
-        // Semantics::Float is used as an oracle vs the real builtin in tests, and at
-        // Semantics::FPSan the same arithmetic happens in the payload ring.
+        // Semantics::Native is used as an oracle vs the real builtin in tests, and at
+        // Semantics::Triton the same arithmetic happens in the payload ring.
         template <class AVec, class BVec, class CVec, Semantics S, Conversions C>
         FPSAN_DEVICE Value<CVec, S, C>
             wmma_16x16x16_dataflow(Value<AVec, S, C> a, Value<BVec, S, C> b, Value<CVec, S, C> c)
@@ -1326,11 +1326,11 @@ namespace fpsan
 #if !defined(__HIP_DEVICE_COMPILE__) || defined(__GFX11__)
 
 #if !defined(__HIP_DEVICE_COMPILE__) || __has_builtin(__builtin_amdgcn_wmma_f32_16x16x16_f16_w32)
-    template <Semantics S = Semantics::Float, Conversions C = Conversions::Explicit>
+    template <Semantics S = Semantics::Native, Conversions C = Conversions::Explicit>
     FPSAN_DEVICE Value<v8f_native, S, C> amdgcn_wmma_f32_16x16x16_f16_w32(
         Value<v16h_wmma_native, S, C> a, Value<v16h_wmma_native, S, C> b, Value<v8f_native, S, C> c)
     {
-        if constexpr(S == Semantics::Float)
+        if constexpr(S == Semantics::Native)
         {
             v8f_native d = __builtin_amdgcn_wmma_f32_16x16x16_f16_w32(
                 a.to_float(), b.to_float(), c.to_float());
@@ -1344,13 +1344,13 @@ namespace fpsan
 #endif
 
 #if !defined(__HIP_DEVICE_COMPILE__) || __has_builtin(__builtin_amdgcn_wmma_f32_16x16x16_bf16_w32)
-    template <Semantics S = Semantics::Float, Conversions C = Conversions::Explicit>
+    template <Semantics S = Semantics::Native, Conversions C = Conversions::Explicit>
     FPSAN_DEVICE Value<v8f_native, S, C>
                  amdgcn_wmma_f32_16x16x16_bf16_w32(Value<v16bf_wmma_native, S, C> a,
                                                    Value<v16bf_wmma_native, S, C> b,
                                                    Value<v8f_native, S, C>        c)
     {
-        if constexpr(S == Semantics::Float)
+        if constexpr(S == Semantics::Native)
         {
             const v16i16_wmma_native ai = __builtin_bit_cast(v16i16_wmma_native, a.to_float());
             const v16i16_wmma_native bi = __builtin_bit_cast(v16i16_wmma_native, b.to_float());
@@ -1366,14 +1366,14 @@ namespace fpsan
 
 #if !defined(__HIP_DEVICE_COMPILE__) || __has_builtin(__builtin_amdgcn_wmma_f16_16x16x16_f16_w32)
     template <bool        Opsel = false,
-              Semantics   S     = Semantics::Float,
+              Semantics   S     = Semantics::Native,
               Conversions C     = Conversions::Explicit>
     FPSAN_DEVICE Value<v16h_wmma_native, S, C>
                  amdgcn_wmma_f16_16x16x16_f16_w32(Value<v16h_wmma_native, S, C> a,
                                                   Value<v16h_wmma_native, S, C> b,
                                                   Value<v16h_wmma_native, S, C> c)
     {
-        if constexpr(S == Semantics::Float)
+        if constexpr(S == Semantics::Native)
         {
             v16h_wmma_native d = __builtin_amdgcn_wmma_f16_16x16x16_f16_w32(
                 a.to_float(), b.to_float(), c.to_float(), Opsel);
@@ -1389,14 +1389,14 @@ namespace fpsan
 #if !defined(__HIP_DEVICE_COMPILE__) \
     || __has_builtin(__builtin_amdgcn_wmma_f16_16x16x16_f16_tied_w32)
     template <bool        Opsel = false,
-              Semantics   S     = Semantics::Float,
+              Semantics   S     = Semantics::Native,
               Conversions C     = Conversions::Explicit>
     FPSAN_DEVICE Value<v16h_wmma_native, S, C>
                  amdgcn_wmma_f16_16x16x16_f16_tied_w32(Value<v16h_wmma_native, S, C> a,
                                                        Value<v16h_wmma_native, S, C> b,
                                                        Value<v16h_wmma_native, S, C> c)
     {
-        if constexpr(S == Semantics::Float)
+        if constexpr(S == Semantics::Native)
         {
             v16h_wmma_native d = __builtin_amdgcn_wmma_f16_16x16x16_f16_tied_w32(
                 a.to_float(), b.to_float(), c.to_float(), Opsel);
@@ -1411,14 +1411,14 @@ namespace fpsan
 
 #if !defined(__HIP_DEVICE_COMPILE__) || __has_builtin(__builtin_amdgcn_wmma_bf16_16x16x16_bf16_w32)
     template <bool        Opsel = false,
-              Semantics   S     = Semantics::Float,
+              Semantics   S     = Semantics::Native,
               Conversions C     = Conversions::Explicit>
     FPSAN_DEVICE Value<v16bf_wmma_native, S, C>
                  amdgcn_wmma_bf16_16x16x16_bf16_w32(Value<v16bf_wmma_native, S, C> a,
                                                     Value<v16bf_wmma_native, S, C> b,
                                                     Value<v16bf_wmma_native, S, C> c)
     {
-        if constexpr(S == Semantics::Float)
+        if constexpr(S == Semantics::Native)
         {
             const v16i16_wmma_native ai = __builtin_bit_cast(v16i16_wmma_native, a.to_float());
             const v16i16_wmma_native bi = __builtin_bit_cast(v16i16_wmma_native, b.to_float());
@@ -1437,14 +1437,14 @@ namespace fpsan
 #if !defined(__HIP_DEVICE_COMPILE__) \
     || __has_builtin(__builtin_amdgcn_wmma_bf16_16x16x16_bf16_tied_w32)
     template <bool        Opsel = false,
-              Semantics   S     = Semantics::Float,
+              Semantics   S     = Semantics::Native,
               Conversions C     = Conversions::Explicit>
     FPSAN_DEVICE Value<v16bf_wmma_native, S, C>
                  amdgcn_wmma_bf16_16x16x16_bf16_tied_w32(Value<v16bf_wmma_native, S, C> a,
                                                          Value<v16bf_wmma_native, S, C> b,
                                                          Value<v16bf_wmma_native, S, C> c)
     {
-        if constexpr(S == Semantics::Float)
+        if constexpr(S == Semantics::Native)
         {
             const v16i16_wmma_native ai = __builtin_bit_cast(v16i16_wmma_native, a.to_float());
             const v16i16_wmma_native bi = __builtin_bit_cast(v16i16_wmma_native, b.to_float());
@@ -1463,11 +1463,11 @@ namespace fpsan
 // gfx11 wave64 variants. The builtins share A/B with wave32 but use the smaller
 // C/D ABI implied by four rows per accumulator register.
 #if !defined(__HIP_DEVICE_COMPILE__) || __has_builtin(__builtin_amdgcn_wmma_f32_16x16x16_f16_w64)
-    template <Semantics S = Semantics::Float, Conversions C = Conversions::Explicit>
+    template <Semantics S = Semantics::Native, Conversions C = Conversions::Explicit>
     FPSAN_DEVICE Value<v4f_native, S, C> amdgcn_wmma_f32_16x16x16_f16_w64(
         Value<v16h_wmma_native, S, C> a, Value<v16h_wmma_native, S, C> b, Value<v4f_native, S, C> c)
     {
-        if constexpr(S == Semantics::Float)
+        if constexpr(S == Semantics::Native)
         {
             v4f_native d = __builtin_amdgcn_wmma_f32_16x16x16_f16_w64(
                 a.to_float(), b.to_float(), c.to_float());
@@ -1481,13 +1481,13 @@ namespace fpsan
 #endif
 
 #if !defined(__HIP_DEVICE_COMPILE__) || __has_builtin(__builtin_amdgcn_wmma_f32_16x16x16_bf16_w64)
-    template <Semantics S = Semantics::Float, Conversions C = Conversions::Explicit>
+    template <Semantics S = Semantics::Native, Conversions C = Conversions::Explicit>
     FPSAN_DEVICE Value<v4f_native, S, C>
                  amdgcn_wmma_f32_16x16x16_bf16_w64(Value<v16bf_wmma_native, S, C> a,
                                                    Value<v16bf_wmma_native, S, C> b,
                                                    Value<v4f_native, S, C>        c)
     {
-        if constexpr(S == Semantics::Float)
+        if constexpr(S == Semantics::Native)
         {
             const v16i16_wmma_native ai = __builtin_bit_cast(v16i16_wmma_native, a.to_float());
             const v16i16_wmma_native bi = __builtin_bit_cast(v16i16_wmma_native, b.to_float());
@@ -1503,12 +1503,12 @@ namespace fpsan
 
 #if !defined(__HIP_DEVICE_COMPILE__) || __has_builtin(__builtin_amdgcn_wmma_f16_16x16x16_f16_w64)
     template <bool        Opsel = false,
-              Semantics   S     = Semantics::Float,
+              Semantics   S     = Semantics::Native,
               Conversions C     = Conversions::Explicit>
     FPSAN_DEVICE Value<v8h_native, S, C> amdgcn_wmma_f16_16x16x16_f16_w64(
         Value<v16h_wmma_native, S, C> a, Value<v16h_wmma_native, S, C> b, Value<v8h_native, S, C> c)
     {
-        if constexpr(S == Semantics::Float)
+        if constexpr(S == Semantics::Native)
         {
             v8h_native d = __builtin_amdgcn_wmma_f16_16x16x16_f16_w64(
                 a.to_float(), b.to_float(), c.to_float(), Opsel);
@@ -1524,12 +1524,12 @@ namespace fpsan
 #if !defined(__HIP_DEVICE_COMPILE__) \
     || __has_builtin(__builtin_amdgcn_wmma_f16_16x16x16_f16_tied_w64)
     template <bool        Opsel = false,
-              Semantics   S     = Semantics::Float,
+              Semantics   S     = Semantics::Native,
               Conversions C     = Conversions::Explicit>
     FPSAN_DEVICE Value<v8h_native, S, C> amdgcn_wmma_f16_16x16x16_f16_tied_w64(
         Value<v16h_wmma_native, S, C> a, Value<v16h_wmma_native, S, C> b, Value<v8h_native, S, C> c)
     {
-        if constexpr(S == Semantics::Float)
+        if constexpr(S == Semantics::Native)
         {
             v8h_native d = __builtin_amdgcn_wmma_f16_16x16x16_f16_tied_w64(
                 a.to_float(), b.to_float(), c.to_float(), Opsel);
@@ -1544,14 +1544,14 @@ namespace fpsan
 
 #if !defined(__HIP_DEVICE_COMPILE__) || __has_builtin(__builtin_amdgcn_wmma_bf16_16x16x16_bf16_w64)
     template <bool        Opsel = false,
-              Semantics   S     = Semantics::Float,
+              Semantics   S     = Semantics::Native,
               Conversions C     = Conversions::Explicit>
     FPSAN_DEVICE Value<v8bf_native, S, C>
                  amdgcn_wmma_bf16_16x16x16_bf16_w64(Value<v16bf_wmma_native, S, C> a,
                                                     Value<v16bf_wmma_native, S, C> b,
                                                     Value<v8bf_native, S, C>       c)
     {
-        if constexpr(S == Semantics::Float)
+        if constexpr(S == Semantics::Native)
         {
             const v16i16_wmma_native ai = __builtin_bit_cast(v16i16_wmma_native, a.to_float());
             const v16i16_wmma_native bi = __builtin_bit_cast(v16i16_wmma_native, b.to_float());
@@ -1570,14 +1570,14 @@ namespace fpsan
 #if !defined(__HIP_DEVICE_COMPILE__) \
     || __has_builtin(__builtin_amdgcn_wmma_bf16_16x16x16_bf16_tied_w64)
     template <bool        Opsel = false,
-              Semantics   S     = Semantics::Float,
+              Semantics   S     = Semantics::Native,
               Conversions C     = Conversions::Explicit>
     FPSAN_DEVICE Value<v8bf_native, S, C>
                  amdgcn_wmma_bf16_16x16x16_bf16_tied_w64(Value<v16bf_wmma_native, S, C> a,
                                                          Value<v16bf_wmma_native, S, C> b,
                                                          Value<v8bf_native, S, C>       c)
     {
-        if constexpr(S == Semantics::Float)
+        if constexpr(S == Semantics::Native)
         {
             const v16i16_wmma_native ai = __builtin_bit_cast(v16i16_wmma_native, a.to_float());
             const v16i16_wmma_native bi = __builtin_bit_cast(v16i16_wmma_native, b.to_float());
@@ -1620,7 +1620,7 @@ namespace fpsan
     FPSAN_DEVICE Value<CVec_, S, C> NAME(                                 \
         Value<AVec_, S, C> a, Value<BVec_, S, C> b, Value<CVec_, S, C> c) \
     {                                                                     \
-        if constexpr(S == Semantics::Float)                               \
+        if constexpr(S == Semantics::Native)                              \
         {                                                                 \
             CVec_ d = BUILTIN(a.to_float(), b.to_float(), c.to_float());  \
             return Value<CVec_, S, C>(d);                                 \
@@ -1638,7 +1638,7 @@ namespace fpsan
     FPSAN_DEVICE Value<v8f_native, S, C> NAME(                                     \
         Value<AVec_, S, C> a, Value<BVec_, S, C> b, Value<v8f_native, S, C> c)     \
     {                                                                              \
-        if constexpr(S == Semantics::Float)                                        \
+        if constexpr(S == Semantics::Native)                                       \
         {                                                                          \
             v8f_native d = BUILTIN(__builtin_bit_cast(v2i32_native, a.to_float()), \
                                    __builtin_bit_cast(v2i32_native, b.to_float()), \
@@ -1720,7 +1720,7 @@ namespace fpsan
                                                                      Value<v2f_native, S, C> b,
                                                                      Value<v8f_native, S, C> c)
     {
-        if constexpr(S == Semantics::Float)
+        if constexpr(S == Semantics::Native)
         {
             v8f_native d = __builtin_amdgcn_wmma_f32_16x16x4_f32(false,
                                                                  a.to_float(),
@@ -1746,7 +1746,7 @@ namespace fpsan
     FPSAN_DEVICE Value<CVec_, S, C> NAME(                                                  \
         Value<AVec_, S, C> a, Value<AVec_, S, C> b, Value<CVec_, S, C> c)                  \
     {                                                                                      \
-        if constexpr(S == Semantics::Float)                                                \
+        if constexpr(S == Semantics::Native)                                               \
         {                                                                                  \
             CVec_ d = BUILTIN(false,                                                       \
                               a.to_float(),                                                \
@@ -1787,7 +1787,7 @@ namespace fpsan
     FPSAN_DEVICE Value<v8bf_native, S, C> amdgcn_wmma_bf16f32_16x16x32_bf16(
         Value<v16bf_native, S, C> a, Value<v16bf_native, S, C> b, Value<v8f_native, S, C> c)
     {
-        if constexpr(S == Semantics::Float)
+        if constexpr(S == Semantics::Native)
         {
             v8bf_native d = __builtin_amdgcn_wmma_bf16f32_16x16x32_bf16(false,
                                                                         a.to_float(),
@@ -1827,7 +1827,7 @@ namespace fpsan
     FPSAN_DEVICE Value<CVec_, S, C> NAME(                                                  \
         Value<AVec_, S, C> a, Value<BVec_, S, C> b, Value<CVec_, S, C> c)                  \
     {                                                                                      \
-        if constexpr(S == Semantics::Float)                                                \
+        if constexpr(S == Semantics::Native)                                               \
         {                                                                                  \
             CVec_ d = BUILTIN(__builtin_bit_cast(v8i32_native, a.to_float()),              \
                               __builtin_bit_cast(v8i32_native, b.to_float()),              \
@@ -1901,7 +1901,7 @@ namespace fpsan
     FPSAN_DEVICE Value<CVec_, S, C> NAME(                                                   \
         Value<AVec_, S, C> a, Value<BVec_, S, C> b, Value<CVec_, S, C> c)                   \
     {                                                                                       \
-        if constexpr(S == Semantics::Float)                                                 \
+        if constexpr(S == Semantics::Native)                                                \
         {                                                                                   \
             CVec_ d = BUILTIN(__builtin_bit_cast(v16i32_native, a.to_float()),              \
                               __builtin_bit_cast(v16i32_native, b.to_float()),              \
@@ -1982,7 +1982,7 @@ namespace fpsan
 #if !defined(__HIP_DEVICE_COMPILE__) || __has_builtin(__builtin_amdgcn_wmma_f32_16x16x128_f8f6f4)
     template <int         AFMT,
               int         BFMT,
-              Semantics   S    = Semantics::Float,
+              Semantics   S    = Semantics::Native,
               Conversions C    = Conversions::Explicit,
               int         Cmod = 0>
     FPSAN_DEVICE Value<v8f_native, S, C> amdgcn_wmma_f32_16x16x128_f8f6f4_sub(
@@ -1992,7 +1992,7 @@ namespace fpsan
                       "the _sub wrapper is for fp6/bf6/fp4 formats (2-4); use the dedicated "
                       "fp8/bf8 K=128 wrappers for 8-bit operands. Mixing an 8-bit operand with "
                       "a sub-byte one needs a dedicated WMMA mix model (not yet grounded).");
-        if constexpr(S == Semantics::Float)
+        if constexpr(S == Semantics::Native)
         {
             v8f_native d = __builtin_amdgcn_wmma_f32_16x16x128_f8f6f4(
                 AFMT, a, BFMT, b, static_cast<short>(Cmod), c.to_float());
@@ -2026,7 +2026,7 @@ namespace fpsan
     // modifier (Cmod).
     template <int         AFMT,
               int         BFMT,
-              Semantics   S    = Semantics::Float,
+              Semantics   S    = Semantics::Native,
               Conversions C    = Conversions::Explicit,
               int         Cmod = 0>
     FPSAN_DEVICE Value<v8f_native, S, C> amdgcn_wmma_f32_16x16x128_f8f6f4_mixed(
@@ -2037,7 +2037,7 @@ namespace fpsan
                       "(fmt 2-4) operand; use _sub for sub x sub or the fp8/bf8 wrappers for 8x8.");
         static_assert(AFMT >= 0 && AFMT <= 4 && BFMT >= 0 && BFMT <= 4,
                       "f8f6f4 format must be 0-4");
-        if constexpr(S == Semantics::Float)
+        if constexpr(S == Semantics::Native)
         {
             v8f_native d = __builtin_amdgcn_wmma_f32_16x16x128_f8f6f4(
                 AFMT, a, BFMT, b, static_cast<short>(Cmod), c.to_float());
@@ -2076,7 +2076,7 @@ namespace fpsan
     || __has_builtin(__builtin_amdgcn_wmma_scale_f32_16x16x128_f8f6f4)
     template <int         AFMT,
               int         BFMT,
-              Semantics   S         = Semantics::Float,
+              Semantics   S         = Semantics::Native,
               Conversions C         = Conversions::Explicit,
               int         Cmod      = 0,
               int         AScaleFmt = 0,
@@ -2087,7 +2087,7 @@ namespace fpsan
         static_assert(AFMT >= 2 && AFMT <= 4 && BFMT >= 2 && BFMT <= 4,
                       "the _sub wrapper is for fp6/bf6/fp4 formats (2-4); mixing an 8-bit operand "
                       "with a sub-byte one needs a dedicated WMMA mix model (not yet grounded).");
-        if constexpr(S == Semantics::Float)
+        if constexpr(S == Semantics::Native)
         {
             v8f_native d
                 = __builtin_amdgcn_wmma_scale_f32_16x16x128_f8f6f4(AFMT,
@@ -2131,7 +2131,7 @@ namespace fpsan
     // the builtin. AScaleFmt/BScaleFmt: 0 = E8M0FNU, 2 = E4M3FN.
     template <int         AFMT,
               int         BFMT,
-              Semantics   S         = Semantics::Float,
+              Semantics   S         = Semantics::Native,
               Conversions C         = Conversions::Explicit,
               int         Cmod      = 0,
               int         AScaleFmt = 0,
@@ -2144,7 +2144,7 @@ namespace fpsan
                       "sub-byte (fmt 2-4) operand; use _sub for sub x sub.");
         static_assert(AFMT >= 0 && AFMT <= 4 && BFMT >= 0 && BFMT <= 4,
                       "f8f6f4 format must be 0-4");
-        if constexpr(S == Semantics::Float)
+        if constexpr(S == Semantics::Native)
         {
             v8f_native d
                 = __builtin_amdgcn_wmma_scale_f32_16x16x128_f8f6f4(AFMT,
@@ -2194,7 +2194,7 @@ namespace fpsan
     || __has_builtin(__builtin_amdgcn_wmma_scale16_f32_16x16x128_f8f6f4)
     template <int         AFMT,
               int         BFMT,
-              Semantics   S         = Semantics::Float,
+              Semantics   S         = Semantics::Native,
               Conversions C         = Conversions::Explicit,
               int         Cmod      = 0,
               int         AScaleFmt = 0,
@@ -2205,7 +2205,7 @@ namespace fpsan
         static_assert(AFMT >= 2 && AFMT <= 4 && BFMT >= 2 && BFMT <= 4,
                       "the _sub wrapper is for fp6/bf6/fp4 formats (2-4); mixing an 8-bit operand "
                       "with a sub-byte one needs a dedicated WMMA mix model (not yet grounded).");
-        if constexpr(S == Semantics::Float)
+        if constexpr(S == Semantics::Native)
         {
             v8f_native d
                 = __builtin_amdgcn_wmma_scale16_f32_16x16x128_f8f6f4(AFMT,
@@ -2252,7 +2252,7 @@ namespace fpsan
     // builtin; FPSan runs the mixed scaled16 dataflow.
     template <int         AFMT,
               int         BFMT,
-              Semantics   S         = Semantics::Float,
+              Semantics   S         = Semantics::Native,
               Conversions C         = Conversions::Explicit,
               int         Cmod      = 0,
               int         AScaleFmt = 0,
@@ -2265,7 +2265,7 @@ namespace fpsan
                       "sub-byte (fmt 2-4) operand; use _sub for sub x sub.");
         static_assert(AFMT >= 0 && AFMT <= 4 && BFMT >= 0 && BFMT <= 4,
                       "f8f6f4 format must be 0-4");
-        if constexpr(S == Semantics::Float)
+        if constexpr(S == Semantics::Native)
         {
             v8f_native d
                 = __builtin_amdgcn_wmma_scale16_f32_16x16x128_f8f6f4(AFMT,
@@ -2314,11 +2314,11 @@ namespace fpsan
 // fragment ABI is the silicon-grounded layout in detail::Wmma32x16x128F4Layout.
 // =============================================================================
 #if !defined(__HIP_DEVICE_COMPILE__) || __has_builtin(__builtin_amdgcn_wmma_f32_32x16x128_f4)
-    template <Semantics S = Semantics::Float, Conversions C = Conversions::Explicit, int Cmod = 0>
+    template <Semantics S = Semantics::Native, Conversions C = Conversions::Explicit, int Cmod = 0>
     FPSAN_DEVICE Value<v16f_native, S, C>
         amdgcn_wmma_f32_32x16x128_f4(v16i32_native a, v8i32_native b, Value<v16f_native, S, C> c)
     {
-        if constexpr(S == Semantics::Float)
+        if constexpr(S == Semantics::Native)
         {
             v16f_native d = __builtin_amdgcn_wmma_f32_32x16x128_f4(
                 a, b, static_cast<short>(Cmod), c.to_float());
@@ -2345,7 +2345,7 @@ namespace fpsan
 // detail::wmma_sub_scale_byte / wmma_sub_scale16_byte).
 // =============================================================================
 #if !defined(__HIP_DEVICE_COMPILE__) || __has_builtin(__builtin_amdgcn_wmma_scale_f32_32x16x128_f4)
-    template <Semantics   S         = Semantics::Float,
+    template <Semantics   S         = Semantics::Native,
               Conversions C         = Conversions::Explicit,
               int         Cmod      = 0,
               int         AScaleFmt = 0,
@@ -2353,7 +2353,7 @@ namespace fpsan
     FPSAN_DEVICE Value<v16f_native, S, C> amdgcn_wmma_scale_f32_32x16x128_f4(
         v16i32_native a, v8i32_native b, Value<v16f_native, S, C> c, int sa, int sb)
     {
-        if constexpr(S == Semantics::Float)
+        if constexpr(S == Semantics::Native)
         {
             v16f_native d = __builtin_amdgcn_wmma_scale_f32_32x16x128_f4(a,
                                                                          b,
@@ -2384,7 +2384,7 @@ namespace fpsan
 
 #if !defined(__HIP_DEVICE_COMPILE__) \
     || __has_builtin(__builtin_amdgcn_wmma_scale16_f32_32x16x128_f4)
-    template <Semantics   S         = Semantics::Float,
+    template <Semantics   S         = Semantics::Native,
               Conversions C         = Conversions::Explicit,
               int         Cmod      = 0,
               int         AScaleFmt = 0,
@@ -2392,7 +2392,7 @@ namespace fpsan
     FPSAN_DEVICE Value<v16f_native, S, C> amdgcn_wmma_scale16_f32_32x16x128_f4(
         v16i32_native a, v8i32_native b, Value<v16f_native, S, C> c, long sa, long sb)
     {
-        if constexpr(S == Semantics::Float)
+        if constexpr(S == Semantics::Native)
         {
             v16f_native d = __builtin_amdgcn_wmma_scale16_f32_32x16x128_f4(a,
                                                                            b,

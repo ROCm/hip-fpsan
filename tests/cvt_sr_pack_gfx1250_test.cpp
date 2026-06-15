@@ -37,7 +37,7 @@ using fpsan::Semantics;
 using fpsan::Value;
 
 static constexpr Conversions kCC = Conversions::Explicit;
-using FVF                        = Value<float, Semantics::Float, kCC>;
+using FVF                        = Value<float, Semantics::Native, kCC>;
 
 #if !defined(__HIP_DEVICE_COMPILE__) || __has_builtin(__builtin_amdgcn_cvt_sr_fp8_f32)
 
@@ -46,19 +46,19 @@ using FVF                        = Value<float, Semantics::Float, kCC>;
 __global__ void k_chain_fp8_f32(float v0, float v1, float v2, float v3, int* out)
 {
     int p = 0;
-    p     = fpsan::amdgcn_cvt_sr_fp8_f32<0, Semantics::Float, kCC>(FVF{v0}, p, 0x111u);
-    p     = fpsan::amdgcn_cvt_sr_fp8_f32<1, Semantics::Float, kCC>(FVF{v1}, p, 0x222u);
-    p     = fpsan::amdgcn_cvt_sr_fp8_f32<2, Semantics::Float, kCC>(FVF{v2}, p, 0x333u);
-    p     = fpsan::amdgcn_cvt_sr_fp8_f32<3, Semantics::Float, kCC>(FVF{v3}, p, 0x444u);
+    p     = fpsan::amdgcn_cvt_sr_fp8_f32<0, Semantics::Native, kCC>(FVF{v0}, p, 0x111u);
+    p     = fpsan::amdgcn_cvt_sr_fp8_f32<1, Semantics::Native, kCC>(FVF{v1}, p, 0x222u);
+    p     = fpsan::amdgcn_cvt_sr_fp8_f32<2, Semantics::Native, kCC>(FVF{v2}, p, 0x333u);
+    p     = fpsan::amdgcn_cvt_sr_fp8_f32<3, Semantics::Native, kCC>(FVF{v3}, p, 0x444u);
     *out  = p;
 }
 __global__ void k_chain_bf8_f32(float v0, float v1, float v2, float v3, int* out)
 {
     int p = 0;
-    p     = fpsan::amdgcn_cvt_sr_bf8_f32<0, Semantics::Float, kCC>(FVF{v0}, p, 0x111u);
-    p     = fpsan::amdgcn_cvt_sr_bf8_f32<1, Semantics::Float, kCC>(FVF{v1}, p, 0x222u);
-    p     = fpsan::amdgcn_cvt_sr_bf8_f32<2, Semantics::Float, kCC>(FVF{v2}, p, 0x333u);
-    p     = fpsan::amdgcn_cvt_sr_bf8_f32<3, Semantics::Float, kCC>(FVF{v3}, p, 0x444u);
+    p     = fpsan::amdgcn_cvt_sr_bf8_f32<0, Semantics::Native, kCC>(FVF{v0}, p, 0x111u);
+    p     = fpsan::amdgcn_cvt_sr_bf8_f32<1, Semantics::Native, kCC>(FVF{v1}, p, 0x222u);
+    p     = fpsan::amdgcn_cvt_sr_bf8_f32<2, Semantics::Native, kCC>(FVF{v2}, p, 0x333u);
+    p     = fpsan::amdgcn_cvt_sr_bf8_f32<3, Semantics::Native, kCC>(FVF{v3}, p, 0x444u);
     *out  = p;
 }
 
@@ -95,7 +95,7 @@ TEST(CvtSrPack, ChainBf8F32)
 // Single sr call must preserve the other 3 bytes of a nonzero `old`.
 __global__ void k_preserve_fp8_f32(int old, float v, unsigned seed, int* out)
 {
-    *out = fpsan::amdgcn_cvt_sr_fp8_f32<2, Semantics::Float, kCC>(FVF{v}, old, seed);
+    *out = fpsan::amdgcn_cvt_sr_fp8_f32<2, Semantics::Native, kCC>(FVF{v}, old, seed);
 }
 
 TEST(CvtSrPack, PreservesOldFp8F32)
@@ -121,22 +121,22 @@ TEST(CvtSrPack, PreservesOldFp8F32)
 
 __global__ void k_chain_fp8_f16(_Float16 v0, _Float16 v1, _Float16 v2, _Float16 v3, int* out)
 {
-    using H = Value<_Float16, Semantics::Float, kCC>;
+    using H = Value<_Float16, Semantics::Native, kCC>;
     int p   = 0;
-    p       = fpsan::amdgcn_cvt_sr_fp8_f16<0, Semantics::Float, kCC>(H{v0}, p, 0x111u);
-    p       = fpsan::amdgcn_cvt_sr_fp8_f16<1, Semantics::Float, kCC>(H{v1}, p, 0x222u);
-    p       = fpsan::amdgcn_cvt_sr_fp8_f16<2, Semantics::Float, kCC>(H{v2}, p, 0x333u);
-    p       = fpsan::amdgcn_cvt_sr_fp8_f16<3, Semantics::Float, kCC>(H{v3}, p, 0x444u);
+    p       = fpsan::amdgcn_cvt_sr_fp8_f16<0, Semantics::Native, kCC>(H{v0}, p, 0x111u);
+    p       = fpsan::amdgcn_cvt_sr_fp8_f16<1, Semantics::Native, kCC>(H{v1}, p, 0x222u);
+    p       = fpsan::amdgcn_cvt_sr_fp8_f16<2, Semantics::Native, kCC>(H{v2}, p, 0x333u);
+    p       = fpsan::amdgcn_cvt_sr_fp8_f16<3, Semantics::Native, kCC>(H{v3}, p, 0x444u);
     *out    = p;
 }
 __global__ void k_chain_bf8_f16(_Float16 v0, _Float16 v1, _Float16 v2, _Float16 v3, int* out)
 {
-    using H = Value<_Float16, Semantics::Float, kCC>;
+    using H = Value<_Float16, Semantics::Native, kCC>;
     int p   = 0;
-    p       = fpsan::amdgcn_cvt_sr_bf8_f16<0, Semantics::Float, kCC>(H{v0}, p, 0x111u);
-    p       = fpsan::amdgcn_cvt_sr_bf8_f16<1, Semantics::Float, kCC>(H{v1}, p, 0x222u);
-    p       = fpsan::amdgcn_cvt_sr_bf8_f16<2, Semantics::Float, kCC>(H{v2}, p, 0x333u);
-    p       = fpsan::amdgcn_cvt_sr_bf8_f16<3, Semantics::Float, kCC>(H{v3}, p, 0x444u);
+    p       = fpsan::amdgcn_cvt_sr_bf8_f16<0, Semantics::Native, kCC>(H{v0}, p, 0x111u);
+    p       = fpsan::amdgcn_cvt_sr_bf8_f16<1, Semantics::Native, kCC>(H{v1}, p, 0x222u);
+    p       = fpsan::amdgcn_cvt_sr_bf8_f16<2, Semantics::Native, kCC>(H{v2}, p, 0x333u);
+    p       = fpsan::amdgcn_cvt_sr_bf8_f16<3, Semantics::Native, kCC>(H{v3}, p, 0x444u);
     *out    = p;
 }
 

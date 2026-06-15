@@ -89,7 +89,7 @@ TYPED_TEST_P(CoreTyped, FixedPoints)
 {
     using FT = typename TypeParam::ftype;
     using F  = Value<FT, TypeParam::sem, TypeParam::conv>;
-    if constexpr(TypeParam::sem == Semantics::FPSan)
+    if constexpr(TypeParam::sem == Semantics::Triton)
     {
         using B = typename F::bits_type;
         EXPECT_EQ(F(FT(0)).fpsan_payload(), B(0));
@@ -126,7 +126,7 @@ TYPED_TEST_P(CoreTyped, RingLaws)
                 // In FPSan mode these are EXACT (integer ring). In Float mode they are
                 // the native float laws, which can round; so only assert the exact
                 // ones in FPSan mode.
-                if constexpr(TypeParam::sem == Semantics::FPSan)
+                if constexpr(TypeParam::sem == Semantics::Triton)
                 {
                     EXPECT_TRUE((a + b) + c == a + (b + c));
                     EXPECT_TRUE((a * b) * c == a * (b * c));
@@ -147,7 +147,7 @@ TYPED_TEST_P(CoreTyped, ModeFalseMatchesNative)
 {
     using FT = typename TypeParam::ftype;
     using F  = Value<FT, TypeParam::sem, TypeParam::conv>;
-    if constexpr(TypeParam::sem == Semantics::Float)
+    if constexpr(TypeParam::sem == Semantics::Native)
     {
         auto s = samples<FT>();
         for(FT x : s)
@@ -175,11 +175,11 @@ REGISTER_TYPED_TEST_SUITE_P(CoreTyped,
 
 // Build the type list: all (mode x explicit) combinations for each available
 // float type.
-#define FPSAN_CFGS(FT)                                    \
-    Cfg<FT, Semantics::Float, Conversions::Implicit>,     \
-        Cfg<FT, Semantics::Float, Conversions::Explicit>, \
-        Cfg<FT, Semantics::FPSan, Conversions::Implicit>, \
-        Cfg<FT, Semantics::FPSan, Conversions::Explicit>
+#define FPSAN_CFGS(FT)                                     \
+    Cfg<FT, Semantics::Native, Conversions::Implicit>,     \
+        Cfg<FT, Semantics::Native, Conversions::Explicit>, \
+        Cfg<FT, Semantics::Triton, Conversions::Implicit>, \
+        Cfg<FT, Semantics::Triton, Conversions::Explicit>
 
 using CoreConfigs = ::testing::Types<FPSAN_CFGS(float),
                                      FPSAN_CFGS(double)
@@ -203,7 +203,7 @@ namespace
     template <class FT>
     void cross_check_all_bits(const fpsan_generic::FPFormat& fmt)
     {
-        using F          = Value<FT, fpsan::Semantics::FPSan, fpsan::Conversions::Explicit>;
+        using F          = Value<FT, fpsan::Semantics::Triton, fpsan::Conversions::Explicit>;
         using B          = typename F::bits_type;
         const uint64_t n = uint64_t{1} << (sizeof(FT) * 8);
         for(uint64_t b = 0; b < n; ++b)
@@ -237,7 +237,7 @@ TEST(GroundTruth, Float32Samples)
     const auto& fmt = fpsan_generic::formats::F32;
     for(float x : samples<float>())
     {
-        uint32_t lib = Value<float, fpsan::Semantics::FPSan, fpsan::Conversions::Explicit>(x)
+        uint32_t lib = Value<float, fpsan::Semantics::Triton, fpsan::Conversions::Explicit>(x)
                            .fpsan_payload();
         uint32_t gen = fpsan_generic::FPSanFloat::embed(fmt, (uint32_t)bits_of(x)).payload();
         EXPECT_EQ(lib, gen) << "x=" << x;
@@ -250,7 +250,7 @@ TEST(GroundTruth, Float32Samples)
 #if FPSAN_HAS_FLOAT16
 TEST(Exhaustive, Float16Bijection)
 {
-    using F = Value<_Float16, fpsan::Semantics::FPSan, fpsan::Conversions::Explicit>;
+    using F = Value<_Float16, fpsan::Semantics::Triton, fpsan::Conversions::Explicit>;
     std::vector<int> hit(1 << 16, 0);
     for(uint32_t b = 0; b < (1u << 16); ++b)
     {
@@ -277,7 +277,7 @@ TEST(Exhaustive, Float16Bijection)
 // ===========================================================================
 TEST(MixedPod, ImplicitScalarOps)
 {
-    using Ff = Value<float, fpsan::Semantics::Float, fpsan::Conversions::Implicit>;
+    using Ff = Value<float, fpsan::Semantics::Native, fpsan::Conversions::Implicit>;
     Ff u(1.0f);
     EXPECT_EQ(bits_of((u + 2.0f).to_float()), bits_of(3.0f));
     EXPECT_EQ(bits_of((2.0f + u).to_float()), bits_of(3.0f));
@@ -285,7 +285,7 @@ TEST(MixedPod, ImplicitScalarOps)
     EXPECT_TRUE(u < 2.0f);
     EXPECT_TRUE(2.0f > u);
 
-    using Ft = Value<float, fpsan::Semantics::FPSan, fpsan::Conversions::Implicit>;
+    using Ft = Value<float, fpsan::Semantics::Triton, fpsan::Conversions::Implicit>;
     Ft p(2.0f), three(3.0f);
     // mixed op must embed the scalar and combine payloads: same as homogeneous.
     EXPECT_TRUE(p + 3.0f == p + three);

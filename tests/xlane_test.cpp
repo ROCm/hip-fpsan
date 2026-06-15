@@ -50,7 +50,7 @@ __global__ void k_readlane(Out* out, int from)
     const int            lane = threadIdx.x;
     Value<float, S, kCC> v{lane_input_float(lane)};
     auto                 r = fpsan::amdgcn_readlane(v, from);
-    if constexpr(S == Semantics::Float)
+    if constexpr(S == Semantics::Native)
         out[lane] = static_cast<float>(r);
     else
         out[lane] = r.fpsan_payload();
@@ -62,7 +62,7 @@ void test_readlane(int from)
     int ndev = 0;
     if(hipGetDeviceCount(&ndev) != hipSuccess || ndev == 0)
         GTEST_SKIP() << "no HIP device";
-    using Out = std::conditional_t<S == Semantics::Float, float, std::uint32_t>;
+    using Out = std::conditional_t<S == Semantics::Native, float, std::uint32_t>;
     Out* d_out;
     HIP_CHECK(hipMalloc(&d_out, LANES * sizeof(Out)));
     k_readlane<S><<<1, LANES>>>(d_out, from);
@@ -75,7 +75,7 @@ void test_readlane(int from)
     const float src = static_cast<float>(from * 7 + 1) - 100.f;
     V           src_v{src};
     Out         expected;
-    if constexpr(S == Semantics::Float)
+    if constexpr(S == Semantics::Native)
         expected = static_cast<float>(src_v);
     else
         expected = src_v.fpsan_payload();
@@ -86,28 +86,28 @@ void test_readlane(int from)
 
 TEST(Xlane, ReadlaneFloat0)
 {
-    test_readlane<Semantics::Float>(0);
+    test_readlane<Semantics::Native>(0);
 }
 TEST(Xlane, ReadlaneFloat17)
 {
-    test_readlane<Semantics::Float>(17);
+    test_readlane<Semantics::Native>(17);
 }
 TEST(Xlane, ReadlaneFpsan0)
 {
-    test_readlane<Semantics::FPSan>(0);
+    test_readlane<Semantics::Triton>(0);
 }
 TEST(Xlane, ReadlaneFpsan17)
 {
-    test_readlane<Semantics::FPSan>(17);
+    test_readlane<Semantics::Triton>(17);
 }
 #if FPSAN_TEST_FORCE_WAVE_SIZE == 64
 TEST(Xlane, ReadlaneFloat48)
 {
-    test_readlane<Semantics::Float>(48);
+    test_readlane<Semantics::Native>(48);
 }
 TEST(Xlane, ReadlaneFpsan48)
 {
-    test_readlane<Semantics::FPSan>(48);
+    test_readlane<Semantics::Triton>(48);
 }
 #endif
 
@@ -118,7 +118,7 @@ __global__ void k_readfirstlane(Out* out)
     const int            lane = threadIdx.x;
     Value<float, S, kCC> v{lane_input_float(lane)};
     auto                 r = fpsan::amdgcn_readfirstlane(v);
-    if constexpr(S == Semantics::Float)
+    if constexpr(S == Semantics::Native)
         out[lane] = static_cast<float>(r);
     else
         out[lane] = r.fpsan_payload();
@@ -130,7 +130,7 @@ void test_readfirstlane()
     int ndev = 0;
     if(hipGetDeviceCount(&ndev) != hipSuccess || ndev == 0)
         GTEST_SKIP() << "no HIP device";
-    using Out = std::conditional_t<S == Semantics::Float, float, std::uint32_t>;
+    using Out = std::conditional_t<S == Semantics::Native, float, std::uint32_t>;
     Out* d_out;
     HIP_CHECK(hipMalloc(&d_out, LANES * sizeof(Out)));
     k_readfirstlane<S><<<1, LANES>>>(d_out);
@@ -141,7 +141,7 @@ void test_readfirstlane()
     const float src = static_cast<float>(0 * 7 + 1) - 100.f;
     V           src_v{src};
     Out         expected;
-    if constexpr(S == Semantics::Float)
+    if constexpr(S == Semantics::Native)
         expected = static_cast<float>(src_v);
     else
         expected = src_v.fpsan_payload();
@@ -152,11 +152,11 @@ void test_readfirstlane()
 
 TEST(Xlane, ReadfirstlaneFloat)
 {
-    test_readfirstlane<Semantics::Float>();
+    test_readfirstlane<Semantics::Native>();
 }
 TEST(Xlane, ReadfirstlaneFpsan)
 {
-    test_readfirstlane<Semantics::FPSan>();
+    test_readfirstlane<Semantics::Triton>();
 }
 
 // ---- ds_bpermute (gather: result[lane] = src[addr[lane]/4]) -----------------
@@ -170,7 +170,7 @@ __global__ void k_ds_bpermute_xor(Out* out, int off)
     Value<float, S, kCC> v{lane_input_float(lane)};
     // Each lane requests the value from (lane ^ off).
     auto r = fpsan::amdgcn_ds_bpermute((lane ^ off) * 4, v);
-    if constexpr(S == Semantics::Float)
+    if constexpr(S == Semantics::Native)
         out[lane] = static_cast<float>(r);
     else
         out[lane] = r.fpsan_payload();
@@ -182,7 +182,7 @@ void test_ds_bpermute_xor(int off)
     int ndev = 0;
     if(hipGetDeviceCount(&ndev) != hipSuccess || ndev == 0)
         GTEST_SKIP() << "no HIP device";
-    using Out = std::conditional_t<S == Semantics::Float, float, std::uint32_t>;
+    using Out = std::conditional_t<S == Semantics::Native, float, std::uint32_t>;
     Out* d_out;
     HIP_CHECK(hipMalloc(&d_out, LANES * sizeof(Out)));
     k_ds_bpermute_xor<S><<<1, LANES>>>(d_out, off);
@@ -204,7 +204,7 @@ void test_ds_bpermute_xor(int off)
         const float src = static_cast<float>(src_lane * 7 + 1) - 100.f;
         V           src_v{src};
         Out         expected;
-        if constexpr(S == Semantics::Float)
+        if constexpr(S == Semantics::Native)
             expected = static_cast<float>(src_v);
         else
             expected = src_v.fpsan_payload();
@@ -215,40 +215,40 @@ void test_ds_bpermute_xor(int off)
 
 TEST(Xlane, DsBpermuteXorFloat1)
 {
-    test_ds_bpermute_xor<Semantics::Float>(1);
+    test_ds_bpermute_xor<Semantics::Native>(1);
 }
 TEST(Xlane, DsBpermuteXorFloat16)
 {
-    test_ds_bpermute_xor<Semantics::Float>(16);
+    test_ds_bpermute_xor<Semantics::Native>(16);
 }
 TEST(Xlane, DsBpermuteXorFpsan1)
 {
-    test_ds_bpermute_xor<Semantics::FPSan>(1);
+    test_ds_bpermute_xor<Semantics::Triton>(1);
 }
 TEST(Xlane, DsBpermuteXorFpsan16)
 {
-    test_ds_bpermute_xor<Semantics::FPSan>(16);
+    test_ds_bpermute_xor<Semantics::Triton>(16);
 }
 #if FPSAN_TEST_FORCE_WAVE_SIZE == 64
 // RDNA3 DS permute lane selection is modulo 32 even in wave64, so cover the
 // largest same-half XOR here. Cross-half exchange is covered by permlane64.
 TEST(Xlane, DsBpermuteXorFloat31)
 {
-    test_ds_bpermute_xor<Semantics::Float>(31);
+    test_ds_bpermute_xor<Semantics::Native>(31);
 }
 TEST(Xlane, DsBpermuteXorFpsan31)
 {
-    test_ds_bpermute_xor<Semantics::FPSan>(31);
+    test_ds_bpermute_xor<Semantics::Triton>(31);
 }
 // off=32 is the important negative boundary: DS applies the low 5 address
 // bits, so this is an identity within each 32-lane half, not a cross-half move.
 TEST(Xlane, DsBpermuteXorFloat32Modulo)
 {
-    test_ds_bpermute_xor<Semantics::Float>(32);
+    test_ds_bpermute_xor<Semantics::Native>(32);
 }
 TEST(Xlane, DsBpermuteXorFpsan32Modulo)
 {
-    test_ds_bpermute_xor<Semantics::FPSan>(32);
+    test_ds_bpermute_xor<Semantics::Triton>(32);
 }
 #endif
 
@@ -263,7 +263,7 @@ __global__ void k_ds_permute_xor(Out* out, int off)
     const int            lane = threadIdx.x;
     Value<float, S, kCC> v{lane_input_float(lane)};
     auto                 r = fpsan::amdgcn_ds_permute((lane ^ off) * 4, v);
-    if constexpr(S == Semantics::Float)
+    if constexpr(S == Semantics::Native)
         out[lane] = static_cast<float>(r);
     else
         out[lane] = r.fpsan_payload();
@@ -275,7 +275,7 @@ void test_ds_permute_xor(int off)
     int ndev = 0;
     if(hipGetDeviceCount(&ndev) != hipSuccess || ndev == 0)
         GTEST_SKIP() << "no HIP device";
-    using Out = std::conditional_t<S == Semantics::Float, float, std::uint32_t>;
+    using Out = std::conditional_t<S == Semantics::Native, float, std::uint32_t>;
     Out* d_out;
     HIP_CHECK(hipMalloc(&d_out, LANES * sizeof(Out)));
     k_ds_permute_xor<S><<<1, LANES>>>(d_out, off);
@@ -298,7 +298,7 @@ void test_ds_permute_xor(int off)
         const float src = static_cast<float>(src_lane * 7 + 1) - 100.f;
         V           src_v{src};
         Out         expected;
-        if constexpr(S == Semantics::Float)
+        if constexpr(S == Semantics::Native)
             expected = static_cast<float>(src_v);
         else
             expected = src_v.fpsan_payload();
@@ -309,40 +309,40 @@ void test_ds_permute_xor(int off)
 
 TEST(Xlane, DsPermuteXorFloat1)
 {
-    test_ds_permute_xor<Semantics::Float>(1);
+    test_ds_permute_xor<Semantics::Native>(1);
 }
 TEST(Xlane, DsPermuteXorFloat16)
 {
-    test_ds_permute_xor<Semantics::Float>(16);
+    test_ds_permute_xor<Semantics::Native>(16);
 }
 TEST(Xlane, DsPermuteXorFpsan1)
 {
-    test_ds_permute_xor<Semantics::FPSan>(1);
+    test_ds_permute_xor<Semantics::Triton>(1);
 }
 TEST(Xlane, DsPermuteXorFpsan16)
 {
-    test_ds_permute_xor<Semantics::FPSan>(16);
+    test_ds_permute_xor<Semantics::Triton>(16);
 }
 #if FPSAN_TEST_FORCE_WAVE_SIZE == 64
 // RDNA3 DS permute lane selection is modulo 32 even in wave64, so cover the
 // largest same-half XOR here. Cross-half exchange is covered by permlane64.
 TEST(Xlane, DsPermuteXorFloat31)
 {
-    test_ds_permute_xor<Semantics::Float>(31);
+    test_ds_permute_xor<Semantics::Native>(31);
 }
 TEST(Xlane, DsPermuteXorFpsan31)
 {
-    test_ds_permute_xor<Semantics::FPSan>(31);
+    test_ds_permute_xor<Semantics::Triton>(31);
 }
 // off=32 is the important negative boundary: DS applies the low 5 address
 // bits, so this is an identity within each 32-lane half, not a cross-half move.
 TEST(Xlane, DsPermuteXorFloat32Modulo)
 {
-    test_ds_permute_xor<Semantics::Float>(32);
+    test_ds_permute_xor<Semantics::Native>(32);
 }
 TEST(Xlane, DsPermuteXorFpsan32Modulo)
 {
-    test_ds_permute_xor<Semantics::FPSan>(32);
+    test_ds_permute_xor<Semantics::Triton>(32);
 }
 #endif
 
@@ -365,7 +365,7 @@ __global__ void k_ds_swizzle(Out* out, int pattern_select)
         r = fpsan::amdgcn_ds_swizzle<0x041F>(v); // some permutation
     else
         r = fpsan::amdgcn_ds_swizzle<0x8000>(v); // BroadcastMode lane 0
-    if constexpr(S == Semantics::Float)
+    if constexpr(S == Semantics::Native)
         out[lane] = static_cast<float>(r);
     else
         out[lane] = r.fpsan_payload();
@@ -382,16 +382,16 @@ TEST(Xlane, DsSwizzleFloatVsFpsanLaneMapping)
         std::uint32_t* d_p;
         HIP_CHECK(hipMalloc(&d_f, LANES * sizeof(float)));
         HIP_CHECK(hipMalloc(&d_p, LANES * sizeof(std::uint32_t)));
-        k_ds_swizzle<Semantics::Float><<<1, LANES>>>(d_f, sel);
-        k_ds_swizzle<Semantics::FPSan><<<1, LANES>>>(d_p, sel);
+        k_ds_swizzle<Semantics::Native><<<1, LANES>>>(d_f, sel);
+        k_ds_swizzle<Semantics::Triton><<<1, LANES>>>(d_p, sel);
         HIP_CHECK(hipDeviceSynchronize());
         std::vector<float>         got_f(LANES);
         std::vector<std::uint32_t> got_p(LANES);
         HIP_CHECK(hipMemcpy(got_f.data(), d_f, LANES * sizeof(float), hipMemcpyDeviceToHost));
         HIP_CHECK(
             hipMemcpy(got_p.data(), d_p, LANES * sizeof(std::uint32_t), hipMemcpyDeviceToHost));
-        using VF = Value<float, Semantics::Float, kCC>;
-        using VP = Value<float, Semantics::FPSan, kCC>;
+        using VF = Value<float, Semantics::Native, kCC>;
+        using VP = Value<float, Semantics::Triton, kCC>;
         // For each output lane, reverse-engineer which source lane the Float
         // wrapper picked, then verify the FPSan wrapper picked the SAME lane.
         for(int i = 0; i < LANES; ++i)
@@ -445,7 +445,7 @@ __global__ void k_ds_swizzle_pat(Out* out)
     const int            lane = threadIdx.x;
     Value<float, S, kCC> v{lane_input_float(lane)};
     auto                 r = fpsan::amdgcn_ds_swizzle<PAT>(v);
-    if constexpr(S == Semantics::Float)
+    if constexpr(S == Semantics::Native)
         out[lane] = static_cast<float>(r);
     else
         out[lane] = r.fpsan_payload();
@@ -460,15 +460,15 @@ static void check_ds_swizzle_oracle(const char* tag)
     POut* d_p;
     HIP_CHECK(hipMalloc(&d_f, LANES * sizeof(FOut)));
     HIP_CHECK(hipMalloc(&d_p, LANES * sizeof(POut)));
-    k_ds_swizzle_pat<PAT, Semantics::Float><<<1, LANES>>>(d_f);
-    k_ds_swizzle_pat<PAT, Semantics::FPSan><<<1, LANES>>>(d_p);
+    k_ds_swizzle_pat<PAT, Semantics::Native><<<1, LANES>>>(d_f);
+    k_ds_swizzle_pat<PAT, Semantics::Triton><<<1, LANES>>>(d_p);
     HIP_CHECK(hipDeviceSynchronize());
     std::vector<FOut> gf(LANES);
     std::vector<POut> gp(LANES);
     HIP_CHECK(hipMemcpy(gf.data(), d_f, LANES * sizeof(FOut), hipMemcpyDeviceToHost));
     HIP_CHECK(hipMemcpy(gp.data(), d_p, LANES * sizeof(POut), hipMemcpyDeviceToHost));
-    using VF = Value<float, Semantics::Float, kCC>;
-    using VP = Value<float, Semantics::FPSan, kCC>;
+    using VF = Value<float, Semantics::Native, kCC>;
+    using VP = Value<float, Semantics::Triton, kCC>;
     for(int i = 0; i < LANES; ++i)
     {
         const int   s   = ds_swizzle_src(i, PAT);
@@ -506,7 +506,7 @@ __global__ void k_mov_dpp_identity(Out* out)
     const int            lane = threadIdx.x;
     Value<float, S, kCC> v{lane_input_float(lane)};
     auto                 r = fpsan::amdgcn_mov_dpp<0xE4, 0xF, 0xF, false>(v);
-    if constexpr(S == Semantics::Float)
+    if constexpr(S == Semantics::Native)
         out[lane] = static_cast<float>(r);
     else
         out[lane] = r.fpsan_payload();
@@ -518,7 +518,7 @@ void test_mov_dpp_identity()
     int ndev = 0;
     if(hipGetDeviceCount(&ndev) != hipSuccess || ndev == 0)
         GTEST_SKIP() << "no HIP device";
-    using Out = std::conditional_t<S == Semantics::Float, float, std::uint32_t>;
+    using Out = std::conditional_t<S == Semantics::Native, float, std::uint32_t>;
     Out* d_out;
     HIP_CHECK(hipMalloc(&d_out, LANES * sizeof(Out)));
     k_mov_dpp_identity<S><<<1, LANES>>>(d_out);
@@ -531,7 +531,7 @@ void test_mov_dpp_identity()
         const float src = static_cast<float>(i * 7 + 1) - 100.f;
         V           src_v{src};
         Out         expected;
-        if constexpr(S == Semantics::Float)
+        if constexpr(S == Semantics::Native)
             expected = static_cast<float>(src_v);
         else
             expected = src_v.fpsan_payload();
@@ -542,11 +542,11 @@ void test_mov_dpp_identity()
 
 TEST(Xlane, MovDppIdentityFloat)
 {
-    test_mov_dpp_identity<Semantics::Float>();
+    test_mov_dpp_identity<Semantics::Native>();
 }
 TEST(Xlane, MovDppIdentityFpsan)
 {
-    test_mov_dpp_identity<Semantics::FPSan>();
+    test_mov_dpp_identity<Semantics::Triton>();
 }
 
 #if !defined(__HIP_DEVICE_COMPILE__) || __has_builtin(__builtin_amdgcn_mov_dpp8)
@@ -559,7 +559,7 @@ __global__ void k_mov_dpp8_identity(Out* out)
     // Identity 8-lane selector: each 3-bit field i holds value i, packed ->
     // 0xFAC688 (NOT 0x76543210 — fields are 3 bits wide for 8 lanes/row, not 4).
     auto r = fpsan::amdgcn_mov_dpp8<0xFAC688u>(v);
-    if constexpr(S == Semantics::Float)
+    if constexpr(S == Semantics::Native)
         out[lane] = static_cast<float>(r);
     else
         out[lane] = r.fpsan_payload();
@@ -571,7 +571,7 @@ void test_mov_dpp8_identity()
     int ndev = 0;
     if(hipGetDeviceCount(&ndev) != hipSuccess || ndev == 0)
         GTEST_SKIP() << "no HIP device";
-    using Out = std::conditional_t<S == Semantics::Float, float, std::uint32_t>;
+    using Out = std::conditional_t<S == Semantics::Native, float, std::uint32_t>;
     Out* d_out;
     HIP_CHECK(hipMalloc(&d_out, LANES * sizeof(Out)));
     k_mov_dpp8_identity<S><<<1, LANES>>>(d_out);
@@ -584,7 +584,7 @@ void test_mov_dpp8_identity()
         const float src = static_cast<float>(i * 7 + 1) - 100.f;
         V           src_v{src};
         Out         expected;
-        if constexpr(S == Semantics::Float)
+        if constexpr(S == Semantics::Native)
             expected = static_cast<float>(src_v);
         else
             expected = src_v.fpsan_payload();
@@ -597,13 +597,13 @@ TEST(Xlane, MovDpp8IdentityFloat)
 {
     if(device_is_gfx950())
         GTEST_SKIP() << "mov_dpp8 is not a gfx950 op";
-    test_mov_dpp8_identity<Semantics::Float>();
+    test_mov_dpp8_identity<Semantics::Native>();
 }
 TEST(Xlane, MovDpp8IdentityFpsan)
 {
     if(device_is_gfx950())
         GTEST_SKIP() << "mov_dpp8 is not a gfx950 op";
-    test_mov_dpp8_identity<Semantics::FPSan>();
+    test_mov_dpp8_identity<Semantics::Triton>();
 }
 
 #endif // __has_builtin(__builtin_amdgcn_mov_dpp8)
@@ -616,7 +616,7 @@ __global__ void k_permlane64(const float* in, Out* out)
     const int            lane = threadIdx.x;
     Value<float, S, kCC> v{in[lane]};
     auto                 r = fpsan::amdgcn_permlane64(v);
-    if constexpr(S == Semantics::Float)
+    if constexpr(S == Semantics::Native)
         out[lane] = static_cast<float>(r);
     else
         out[lane] = r.fpsan_payload();
@@ -630,7 +630,7 @@ void test_permlane64()
         GTEST_SKIP() << "no HIP device";
     if(device_is_gfx950())
         GTEST_SKIP() << "permlane64 is not a gfx950 op";
-    using Out = std::conditional_t<S == Semantics::Float, float, std::uint32_t>;
+    using Out = std::conditional_t<S == Semantics::Native, float, std::uint32_t>;
     std::vector<float> in(LANES);
     for(int i = 0; i < LANES; ++i)
         in[i] = static_cast<float>(i);
@@ -659,7 +659,7 @@ void test_permlane64()
         const int src = (LANES == 64) ? (i ^ 32) : i;
         V         src_v{in[src]};
         Out       expected;
-        if constexpr(S == Semantics::Float)
+        if constexpr(S == Semantics::Native)
             expected = static_cast<float>(src_v);
         else
             expected = src_v.fpsan_payload();
@@ -671,11 +671,11 @@ void test_permlane64()
 
 TEST(Xlane, Permlane64Float)
 {
-    test_permlane64<Semantics::Float>();
+    test_permlane64<Semantics::Native>();
 }
 TEST(Xlane, Permlane64Fpsan)
 {
-    test_permlane64<Semantics::FPSan>();
+    test_permlane64<Semantics::Triton>();
 }
 #endif // __has_builtin(__builtin_amdgcn_permlane64)
 
@@ -708,7 +708,7 @@ __global__ void k_permlane_family(Out* out, int sel0, int sel1)
         r = fpsan::amdgcn_permlane_up(v, sel0, sel1);
     else
         r = fpsan::amdgcn_permlane_xor(v, sel0, sel1);
-    if constexpr(S == Semantics::Float)
+    if constexpr(S == Semantics::Native)
         out[lane] = static_cast<float>(r);
     else
         out[lane] = r.fpsan_payload();
@@ -726,14 +726,14 @@ void test_permlane_family(int sel0, int sel1)
     std::uint32_t* d_p;
     HIP_CHECK(hipMalloc(&d_f, LANES * sizeof(float)));
     HIP_CHECK(hipMalloc(&d_p, LANES * sizeof(std::uint32_t)));
-    k_permlane_family<Op, Semantics::Float><<<1, LANES>>>(d_f, sel0, sel1);
-    k_permlane_family<Op, Semantics::FPSan><<<1, LANES>>>(d_p, sel0, sel1);
+    k_permlane_family<Op, Semantics::Native><<<1, LANES>>>(d_f, sel0, sel1);
+    k_permlane_family<Op, Semantics::Triton><<<1, LANES>>>(d_p, sel0, sel1);
     HIP_CHECK(hipDeviceSynchronize());
     std::vector<float>         got_f(LANES);
     std::vector<std::uint32_t> got_p(LANES);
     HIP_CHECK(hipMemcpy(got_f.data(), d_f, LANES * sizeof(float), hipMemcpyDeviceToHost));
     HIP_CHECK(hipMemcpy(got_p.data(), d_p, LANES * sizeof(std::uint32_t), hipMemcpyDeviceToHost));
-    using VP = Value<float, Semantics::FPSan, kCC>;
+    using VP = Value<float, Semantics::Triton, kCC>;
     for(int i = 0; i < LANES; ++i)
         EXPECT_EQ(got_p[i], VP{got_f[i]}.fpsan_payload()) << "lane " << i;
     (void)hipFree(d_f);
@@ -776,7 +776,7 @@ __global__ void k_ds_bpermute_fi_xor(Out* out, int off)
     const int            lane = threadIdx.x;
     Value<float, S, kCC> v{lane_input_float(lane)};
     auto                 r = fpsan::amdgcn_ds_bpermute_fi((lane ^ off) * 4, v);
-    if constexpr(S == Semantics::Float)
+    if constexpr(S == Semantics::Native)
         out[lane] = static_cast<float>(r);
     else
         out[lane] = r.fpsan_payload();
@@ -790,7 +790,7 @@ void test_ds_bpermute_fi_xor(int off)
         GTEST_SKIP() << "no HIP device";
     if(!device_is_gfx12())
         GTEST_SKIP() << "ds_bpermute_fi_b32 requires gfx12-insts";
-    using Out = std::conditional_t<S == Semantics::Float, float, std::uint32_t>;
+    using Out = std::conditional_t<S == Semantics::Native, float, std::uint32_t>;
     Out* d_out;
     HIP_CHECK(hipMalloc(&d_out, LANES * sizeof(Out)));
     k_ds_bpermute_fi_xor<S><<<1, LANES>>>(d_out, off);
@@ -803,7 +803,7 @@ void test_ds_bpermute_fi_xor(int off)
         const float src = static_cast<float>((i ^ off) * 7 + 1) - 100.f;
         V           src_v{src};
         Out         expected;
-        if constexpr(S == Semantics::Float)
+        if constexpr(S == Semantics::Native)
             expected = static_cast<float>(src_v);
         else
             expected = src_v.fpsan_payload();
@@ -814,11 +814,11 @@ void test_ds_bpermute_fi_xor(int off)
 
 TEST(Xlane, DsBpermuteFiXorFloat1)
 {
-    test_ds_bpermute_fi_xor<Semantics::Float>(1);
+    test_ds_bpermute_fi_xor<Semantics::Native>(1);
 }
 TEST(Xlane, DsBpermuteFiXorFpsan1)
 {
-    test_ds_bpermute_fi_xor<Semantics::FPSan>(1);
+    test_ds_bpermute_fi_xor<Semantics::Triton>(1);
 }
 #endif // __has_builtin(__builtin_amdgcn_ds_bpermute_fi_b32)
 
@@ -841,7 +841,7 @@ __global__ void k_permlane16(Out* out, unsigned sel0, unsigned sel1)
     Value<float, S, kCC> old{-999.f};
     auto r = CROSS ? fpsan::amdgcn_permlanex16<false, false>(old, src, (int)sel0, (int)sel1)
                    : fpsan::amdgcn_permlane16<false, false>(old, src, (int)sel0, (int)sel1);
-    if constexpr(S == Semantics::Float)
+    if constexpr(S == Semantics::Native)
         out[lane] = static_cast<float>(r);
     else
         out[lane] = r.fpsan_payload();
@@ -854,15 +854,15 @@ static void check_permlane16(unsigned sel0, unsigned sel1, const char* tag)
     std::uint32_t* d_p;
     HIP_CHECK(hipMalloc(&d_f, LANES * sizeof(float)));
     HIP_CHECK(hipMalloc(&d_p, LANES * sizeof(std::uint32_t)));
-    k_permlane16<Semantics::Float, CROSS><<<1, LANES>>>(d_f, sel0, sel1);
-    k_permlane16<Semantics::FPSan, CROSS><<<1, LANES>>>(d_p, sel0, sel1);
+    k_permlane16<Semantics::Native, CROSS><<<1, LANES>>>(d_f, sel0, sel1);
+    k_permlane16<Semantics::Triton, CROSS><<<1, LANES>>>(d_p, sel0, sel1);
     HIP_CHECK(hipDeviceSynchronize());
     std::vector<float>         gf(LANES);
     std::vector<std::uint32_t> gp(LANES);
     HIP_CHECK(hipMemcpy(gf.data(), d_f, LANES * sizeof(float), hipMemcpyDeviceToHost));
     HIP_CHECK(hipMemcpy(gp.data(), d_p, LANES * sizeof(std::uint32_t), hipMemcpyDeviceToHost));
-    using VF = Value<float, Semantics::Float, kCC>;
-    using VP = Value<float, Semantics::FPSan, kCC>;
+    using VF = Value<float, Semantics::Native, kCC>;
+    using VP = Value<float, Semantics::Triton, kCC>;
     for(int i = 0; i < LANES; ++i)
     {
         const int   base = CROSS ? ((i & ~15) ^ 16) : (i & ~15);
@@ -905,7 +905,7 @@ __global__ void k_permlane16_swap(Out* outx, Out* outy)
     Value<float, S, kCC> x{lane_input_float(lane)};
     Value<float, S, kCC> y{lane_input_float(lane) + 1000.f};
     fpsan::amdgcn_permlane16_swap<false, false>(x, y);
-    if constexpr(S == Semantics::Float)
+    if constexpr(S == Semantics::Native)
     {
         outx[lane] = static_cast<float>(x);
         outy[lane] = static_cast<float>(y);
@@ -930,8 +930,8 @@ TEST(Xlane, Permlane16SwapCrossMode)
     HIP_CHECK(hipMalloc(&dfy, LANES * sizeof(float)));
     HIP_CHECK(hipMalloc(&dpx, LANES * sizeof(std::uint32_t)));
     HIP_CHECK(hipMalloc(&dpy, LANES * sizeof(std::uint32_t)));
-    k_permlane16_swap<Semantics::Float><<<1, LANES>>>(dfx, dfy);
-    k_permlane16_swap<Semantics::FPSan><<<1, LANES>>>(dpx, dpy);
+    k_permlane16_swap<Semantics::Native><<<1, LANES>>>(dfx, dfy);
+    k_permlane16_swap<Semantics::Triton><<<1, LANES>>>(dpx, dpy);
     HIP_CHECK(hipDeviceSynchronize());
     std::vector<float>         fx(LANES), fy(LANES);
     std::vector<std::uint32_t> px(LANES), py(LANES);
@@ -939,7 +939,7 @@ TEST(Xlane, Permlane16SwapCrossMode)
     HIP_CHECK(hipMemcpy(fy.data(), dfy, LANES * sizeof(float), hipMemcpyDeviceToHost));
     HIP_CHECK(hipMemcpy(px.data(), dpx, LANES * sizeof(std::uint32_t), hipMemcpyDeviceToHost));
     HIP_CHECK(hipMemcpy(py.data(), dpy, LANES * sizeof(std::uint32_t), hipMemcpyDeviceToHost));
-    using VP = Value<float, Semantics::FPSan, kCC>;
+    using VP = Value<float, Semantics::Triton, kCC>;
     for(int i = 0; i < LANES; ++i)
     {
         EXPECT_EQ(px[i], VP{fx[i]}.fpsan_payload()) << "x lane " << i;
@@ -961,7 +961,7 @@ __global__ void k_permlane32_swap(Out* outx, Out* outy)
     Value<float, S, kCC> x{lane_input_float(lane)};
     Value<float, S, kCC> y{lane_input_float(lane) + 2000.f};
     fpsan::amdgcn_permlane32_swap<false, false>(x, y);
-    if constexpr(S == Semantics::Float)
+    if constexpr(S == Semantics::Native)
     {
         outx[lane] = static_cast<float>(x);
         outy[lane] = static_cast<float>(y);
@@ -986,8 +986,8 @@ TEST(Xlane, Permlane32SwapCrossMode)
     HIP_CHECK(hipMalloc(&dfy, LANES * sizeof(float)));
     HIP_CHECK(hipMalloc(&dpx, LANES * sizeof(std::uint32_t)));
     HIP_CHECK(hipMalloc(&dpy, LANES * sizeof(std::uint32_t)));
-    k_permlane32_swap<Semantics::Float><<<1, LANES>>>(dfx, dfy);
-    k_permlane32_swap<Semantics::FPSan><<<1, LANES>>>(dpx, dpy);
+    k_permlane32_swap<Semantics::Native><<<1, LANES>>>(dfx, dfy);
+    k_permlane32_swap<Semantics::Triton><<<1, LANES>>>(dpx, dpy);
     HIP_CHECK(hipDeviceSynchronize());
     std::vector<float>         fx(LANES), fy(LANES);
     std::vector<std::uint32_t> px(LANES), py(LANES);
@@ -995,7 +995,7 @@ TEST(Xlane, Permlane32SwapCrossMode)
     HIP_CHECK(hipMemcpy(fy.data(), dfy, LANES * sizeof(float), hipMemcpyDeviceToHost));
     HIP_CHECK(hipMemcpy(px.data(), dpx, LANES * sizeof(std::uint32_t), hipMemcpyDeviceToHost));
     HIP_CHECK(hipMemcpy(py.data(), dpy, LANES * sizeof(std::uint32_t), hipMemcpyDeviceToHost));
-    using VP = Value<float, Semantics::FPSan, kCC>;
+    using VP = Value<float, Semantics::Triton, kCC>;
     for(int i = 0; i < LANES; ++i)
     {
         EXPECT_EQ(px[i], VP{fx[i]}.fpsan_payload()) << "x lane " << i;

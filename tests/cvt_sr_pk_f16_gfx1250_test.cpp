@@ -36,8 +36,8 @@ using fpsan::Semantics;
 using fpsan::Value;
 
 static constexpr Conversions kCC = Conversions::Explicit;
-using FVF                        = Value<float, Semantics::Float, kCC>;
-using VF                         = Value<float, Semantics::FPSan, kCC>;
+using FVF                        = Value<float, Semantics::Native, kCC>;
+using VF                         = Value<float, Semantics::Triton, kCC>;
 
 #if !defined(__HIP_DEVICE_COMPILE__) || __has_builtin(__builtin_amdgcn_cvt_sr_pk_f16_f32)
 
@@ -45,8 +45,8 @@ using VF                         = Value<float, Semantics::FPSan, kCC>;
 __global__ void k_f16_exact(const float* a, const float* b, float* out)
 {
     int  l = threadIdx.x;
-    auto r
-        = fpsan::amdgcn_cvt_sr_pk_f16_f32<Semantics::Float, kCC>(FVF{a[l]}, FVF{b[l]}, 0xABCDu + l);
+    auto r = fpsan::amdgcn_cvt_sr_pk_f16_f32<Semantics::Native, kCC>(
+        FVF{a[l]}, FVF{b[l]}, 0xABCDu + l);
     out[2 * l]     = static_cast<float>(static_cast<_Float16>(r.get(0)));
     out[2 * l + 1] = static_cast<float>(static_cast<_Float16>(r.get(1)));
 }
@@ -79,7 +79,7 @@ TEST(CvtSrPkF16, FloatExactInputs)
 __global__ void k_f16_sr(float x, const unsigned* seeds, float* out)
 {
     int  l = threadIdx.x;
-    auto r = fpsan::amdgcn_cvt_sr_pk_f16_f32<Semantics::Float, kCC>(FVF{x}, FVF{x}, seeds[l]);
+    auto r = fpsan::amdgcn_cvt_sr_pk_f16_f32<Semantics::Native, kCC>(FVF{x}, FVF{x}, seeds[l]);
     out[l] = static_cast<float>(static_cast<_Float16>(r.get(0)));
 }
 
@@ -116,7 +116,7 @@ TEST(CvtSrPkF16, FloatStochasticBracket)
 __global__ void k_f16_fpsan(const float* a, const float* b, unsigned* out)
 {
     int  l = threadIdx.x;
-    auto r = fpsan::amdgcn_cvt_sr_pk_f16_f32<Semantics::FPSan, kCC>(VF{a[l]}, VF{b[l]}, 0x55u + l);
+    auto r = fpsan::amdgcn_cvt_sr_pk_f16_f32<Semantics::Triton, kCC>(VF{a[l]}, VF{b[l]}, 0x55u + l);
     out[2 * l]     = r.get(0).fpsan_payload();
     out[2 * l + 1] = r.get(1).fpsan_payload();
 }
@@ -153,7 +153,7 @@ TEST(CvtSrPkF16, FpsanPayloadTruncate)
 __global__ void k_bf16_exact(const float* a, const float* b, float* out)
 {
     int  l = threadIdx.x;
-    auto r = fpsan::amdgcn_cvt_sr_pk_bf16_f32<Semantics::Float, kCC>(
+    auto r = fpsan::amdgcn_cvt_sr_pk_bf16_f32<Semantics::Native, kCC>(
         FVF{a[l]}, FVF{b[l]}, 0xABCDu + l);
     out[2 * l]     = static_cast<float>(static_cast<__bf16>(r.get(0)));
     out[2 * l + 1] = static_cast<float>(static_cast<__bf16>(r.get(1)));
@@ -184,7 +184,7 @@ TEST(CvtSrPkBf16, FloatExactInputs)
 __global__ void k_bf16_sr(float x, const unsigned* seeds, float* out)
 {
     int  l = threadIdx.x;
-    auto r = fpsan::amdgcn_cvt_sr_pk_bf16_f32<Semantics::Float, kCC>(FVF{x}, FVF{x}, seeds[l]);
+    auto r = fpsan::amdgcn_cvt_sr_pk_bf16_f32<Semantics::Native, kCC>(FVF{x}, FVF{x}, seeds[l]);
     out[l] = static_cast<float>(static_cast<__bf16>(r.get(0)));
 }
 
@@ -220,7 +220,8 @@ TEST(CvtSrPkBf16, FloatStochasticBracket)
 __global__ void k_bf16_fpsan(const float* a, const float* b, unsigned* out)
 {
     int  l = threadIdx.x;
-    auto r = fpsan::amdgcn_cvt_sr_pk_bf16_f32<Semantics::FPSan, kCC>(VF{a[l]}, VF{b[l]}, 0x55u + l);
+    auto r
+        = fpsan::amdgcn_cvt_sr_pk_bf16_f32<Semantics::Triton, kCC>(VF{a[l]}, VF{b[l]}, 0x55u + l);
     out[2 * l]     = r.get(0).fpsan_payload();
     out[2 * l + 1] = r.get(1).fpsan_payload();
 }

@@ -7,7 +7,7 @@
 // Same two-property structure as the other gfx1250 WMMA suites:
 //
 //  (1) Layout + dataflow vs real hardware. The software MMA run with real-float
-//      arithmetic (Semantics::Float dataflow) must match the real builtin
+//      arithmetic (Semantics::Native dataflow) must match the real builtin
 //      bit-for-bit on EXACT-integer inputs. This validates the K=4 fragment
 //      layout (Wmma16x16x4Layout, v2f per lane) + cross-lane gather against the
 //      hardware ABI.
@@ -73,23 +73,23 @@ __device__ void load_frags(const float*               A,
 
 __global__ void k_builtin(const float* A, const float* B, const float* C, float* D)
 {
-    int                                      lane = threadIdx.x;
-    Value<v2f_native, Semantics::Float, kCC> a;
-    Value<v2f_native, Semantics::Float, kCC> b;
-    Value<v8f_native, Semantics::Float, kCC> c;
-    load_frags<Semantics::Float>(A, B, C, lane, a, b, c);
-    auto d = fpsan::amdgcn_wmma_f32_16x16x4_f32<Semantics::Float, kCC>(a, b, c);
+    int                                       lane = threadIdx.x;
+    Value<v2f_native, Semantics::Native, kCC> a;
+    Value<v2f_native, Semantics::Native, kCC> b;
+    Value<v8f_native, Semantics::Native, kCC> c;
+    load_frags<Semantics::Native>(A, B, C, lane, a, b, c);
+    auto d = fpsan::amdgcn_wmma_f32_16x16x4_f32<Semantics::Native, kCC>(a, b, c);
     for(int e = 0; e < 8; ++e)
         D[(e + 8 * (lane >> 4)) * N + (lane & 15)] = d.get(e).to_float();
 }
 
 __global__ void k_float_dataflow(const float* A, const float* B, const float* C, float* D)
 {
-    int                                      lane = threadIdx.x;
-    Value<v2f_native, Semantics::Float, kCC> a;
-    Value<v2f_native, Semantics::Float, kCC> b;
-    Value<v8f_native, Semantics::Float, kCC> c;
-    load_frags<Semantics::Float>(A, B, C, lane, a, b, c);
+    int                                       lane = threadIdx.x;
+    Value<v2f_native, Semantics::Native, kCC> a;
+    Value<v2f_native, Semantics::Native, kCC> b;
+    Value<v8f_native, Semantics::Native, kCC> c;
+    load_frags<Semantics::Native>(A, B, C, lane, a, b, c);
     auto d = fpsan::detail::wmma_16x16x4_dataflow(a, b, c);
     for(int e = 0; e < 8; ++e)
         D[(e + 8 * (lane >> 4)) * N + (lane & 15)] = d.get(e).to_float();
@@ -97,12 +97,12 @@ __global__ void k_float_dataflow(const float* A, const float* B, const float* C,
 
 __global__ void k_fpsan(const float* A, const float* B, const float* C, std::uint32_t* Dpay)
 {
-    int                                      lane = threadIdx.x;
-    Value<v2f_native, Semantics::FPSan, kCC> a;
-    Value<v2f_native, Semantics::FPSan, kCC> b;
-    Value<v8f_native, Semantics::FPSan, kCC> c;
-    load_frags<Semantics::FPSan>(A, B, C, lane, a, b, c);
-    auto d = fpsan::amdgcn_wmma_f32_16x16x4_f32<Semantics::FPSan, kCC>(a, b, c);
+    int                                       lane = threadIdx.x;
+    Value<v2f_native, Semantics::Triton, kCC> a;
+    Value<v2f_native, Semantics::Triton, kCC> b;
+    Value<v8f_native, Semantics::Triton, kCC> c;
+    load_frags<Semantics::Triton>(A, B, C, lane, a, b, c);
+    auto d = fpsan::amdgcn_wmma_f32_16x16x4_f32<Semantics::Triton, kCC>(a, b, c);
     for(int e = 0; e < 8; ++e)
         Dpay[(e + 8 * (lane >> 4)) * N + (lane & 15)] = d.get(e).fpsan_payload();
 }
@@ -164,7 +164,7 @@ TEST(WmmaF32F32_4, FpsanMatchesScalarReference)
         GTEST_SKIP() << "no HIP device";
     Mats m = make_inputs();
 
-    using VF = Value<float, Semantics::FPSan, kCC>;
+    using VF = Value<float, Semantics::Triton, kCC>;
     std::vector<std::uint32_t> ref(M * N);
     for(int mm = 0; mm < M; ++mm)
         for(int nn = 0; nn < N; ++nn)

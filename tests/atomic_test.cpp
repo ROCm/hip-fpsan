@@ -131,12 +131,12 @@ TEST(Atomic, FaddFloatExact)
         GTEST_SKIP() << "no HIP device";
     auto   in  = make_inputs();
     float* dIn = to_dev(in);
-    using V    = Value<float, Semantics::Float, kCC>;
+    using V    = Value<float, Semantics::Native, kCC>;
     V* dSlot;
     HIP_CHECK(hipMalloc(&dSlot, sizeof(V)));
     V init{0.f};
     HIP_CHECK(hipMemcpy(dSlot, &init, sizeof(V), hipMemcpyHostToDevice));
-    k_atomic_fadd<Semantics::Float><<<1, LANES>>>(dSlot, dIn);
+    k_atomic_fadd<Semantics::Native><<<1, LANES>>>(dSlot, dIn);
     HIP_CHECK(hipDeviceSynchronize());
     V got{0.f};
     HIP_CHECK(hipMemcpy(&got, dSlot, sizeof(V), hipMemcpyDeviceToHost));
@@ -155,12 +155,12 @@ TEST(Atomic, FaddFpsanMatchesScalarRingSum)
         GTEST_SKIP() << "no HIP device";
     auto   in  = make_inputs();
     float* dIn = to_dev(in);
-    using V    = Value<float, Semantics::FPSan, kCC>;
+    using V    = Value<float, Semantics::Triton, kCC>;
     V* dSlot;
     HIP_CHECK(hipMalloc(&dSlot, sizeof(V)));
     V init{0.f};
     HIP_CHECK(hipMemcpy(dSlot, &init, sizeof(V), hipMemcpyHostToDevice));
-    k_atomic_fadd<Semantics::FPSan><<<1, LANES>>>(dSlot, dIn);
+    k_atomic_fadd<Semantics::Triton><<<1, LANES>>>(dSlot, dIn);
     HIP_CHECK(hipDeviceSynchronize());
     V got{0.f};
     HIP_CHECK(hipMemcpy(&got, dSlot, sizeof(V), hipMemcpyDeviceToHost));
@@ -180,13 +180,13 @@ TEST(Atomic, FminFloatMatchesScalarMin)
         GTEST_SKIP() << "no HIP device";
     auto   in  = make_inputs();
     float* dIn = to_dev(in);
-    using V    = Value<float, Semantics::Float, kCC>;
+    using V    = Value<float, Semantics::Native, kCC>;
     V* dSlot;
     HIP_CHECK(hipMalloc(&dSlot, sizeof(V)));
     // Seed with +INFINITY so the first observed value sets the min.
     V init{1e30f};
     HIP_CHECK(hipMemcpy(dSlot, &init, sizeof(V), hipMemcpyHostToDevice));
-    k_atomic_fmin<Semantics::Float><<<1, LANES>>>(dSlot, dIn);
+    k_atomic_fmin<Semantics::Native><<<1, LANES>>>(dSlot, dIn);
     HIP_CHECK(hipDeviceSynchronize());
     V got{0.f};
     HIP_CHECK(hipMemcpy(&got, dSlot, sizeof(V), hipMemcpyDeviceToHost));
@@ -203,12 +203,12 @@ TEST(Atomic, FmaxFloatMatchesScalarMax)
         GTEST_SKIP() << "no HIP device";
     auto   in  = make_inputs();
     float* dIn = to_dev(in);
-    using V    = Value<float, Semantics::Float, kCC>;
+    using V    = Value<float, Semantics::Native, kCC>;
     V* dSlot;
     HIP_CHECK(hipMalloc(&dSlot, sizeof(V)));
     V init{-1e30f};
     HIP_CHECK(hipMemcpy(dSlot, &init, sizeof(V), hipMemcpyHostToDevice));
-    k_atomic_fmax<Semantics::Float><<<1, LANES>>>(dSlot, dIn);
+    k_atomic_fmax<Semantics::Native><<<1, LANES>>>(dSlot, dIn);
     HIP_CHECK(hipDeviceSynchronize());
     V got{0.f};
     HIP_CHECK(hipMemcpy(&got, dSlot, sizeof(V), hipMemcpyDeviceToHost));
@@ -225,13 +225,13 @@ TEST(Atomic, FminFpsanMatchesScalarPayloadMin)
         GTEST_SKIP() << "no HIP device";
     auto   in  = make_inputs();
     float* dIn = to_dev(in);
-    using V    = Value<float, Semantics::FPSan, kCC>;
+    using V    = Value<float, Semantics::Triton, kCC>;
     V* dSlot;
     HIP_CHECK(hipMalloc(&dSlot, sizeof(V)));
     // Seed with a payload that is signed-greater than any input's payload.
     V init{1e30f};
     HIP_CHECK(hipMemcpy(dSlot, &init, sizeof(V), hipMemcpyHostToDevice));
-    k_atomic_fmin<Semantics::FPSan><<<1, LANES>>>(dSlot, dIn);
+    k_atomic_fmin<Semantics::Triton><<<1, LANES>>>(dSlot, dIn);
     HIP_CHECK(hipDeviceSynchronize());
     V got{0.f};
     HIP_CHECK(hipMemcpy(&got, dSlot, sizeof(V), hipMemcpyDeviceToHost));
@@ -248,7 +248,7 @@ TEST(Atomic, FminFpsanMatchesScalarPayloadMin)
 // convention). With a single thread, we can pin down the expected old exactly.
 __global__ void k_atomic_fadd_returns_old_float(float* slot, float* old1, float* old2)
 {
-    using V      = Value<float, Semantics::Float, kCC>;
+    using V      = Value<float, Semantics::Native, kCC>;
     auto* v_slot = reinterpret_cast<V*>(slot);
     // First call returns 0 (initial value), second returns 5 (after adding 5).
     *old1 = static_cast<float>(fpsan::amdgcn_atomic_fadd_f32(v_slot, V{5.f}));
@@ -287,12 +287,12 @@ TEST(Atomic, FmaxFpsanMatchesScalarPayloadMax)
         GTEST_SKIP() << "no HIP device";
     auto   in  = make_inputs();
     float* dIn = to_dev(in);
-    using V    = Value<float, Semantics::FPSan, kCC>;
+    using V    = Value<float, Semantics::Triton, kCC>;
     V* dSlot;
     HIP_CHECK(hipMalloc(&dSlot, sizeof(V)));
     V init{-1e30f};
     HIP_CHECK(hipMemcpy(dSlot, &init, sizeof(V), hipMemcpyHostToDevice));
-    k_atomic_fmax<Semantics::FPSan><<<1, LANES>>>(dSlot, dIn);
+    k_atomic_fmax<Semantics::Triton><<<1, LANES>>>(dSlot, dIn);
     HIP_CHECK(hipDeviceSynchronize());
     V got{0.f};
     HIP_CHECK(hipMemcpy(&got, dSlot, sizeof(V), hipMemcpyDeviceToHost));
@@ -314,12 +314,12 @@ TEST(Atomic, Fadd64FloatExact)
         GTEST_SKIP() << "no HIP device";
     auto    in  = make_inputs64();
     double* dIn = to_dev(in);
-    using V     = Value<double, Semantics::Float, kCC>;
+    using V     = Value<double, Semantics::Native, kCC>;
     V* dSlot;
     HIP_CHECK(hipMalloc(&dSlot, sizeof(V)));
     V init{0.0};
     HIP_CHECK(hipMemcpy(dSlot, &init, sizeof(V), hipMemcpyHostToDevice));
-    k_atomic_fadd64<Semantics::Float><<<1, LANES>>>(dSlot, dIn);
+    k_atomic_fadd64<Semantics::Native><<<1, LANES>>>(dSlot, dIn);
     HIP_CHECK(hipDeviceSynchronize());
     V got{0.0};
     HIP_CHECK(hipMemcpy(&got, dSlot, sizeof(V), hipMemcpyDeviceToHost));
@@ -338,12 +338,12 @@ TEST(Atomic, Fadd64FpsanMatchesScalarRingSum)
         GTEST_SKIP() << "no HIP device";
     auto    in  = make_inputs64();
     double* dIn = to_dev(in);
-    using V     = Value<double, Semantics::FPSan, kCC>;
+    using V     = Value<double, Semantics::Triton, kCC>;
     V* dSlot;
     HIP_CHECK(hipMalloc(&dSlot, sizeof(V)));
     V init{0.0};
     HIP_CHECK(hipMemcpy(dSlot, &init, sizeof(V), hipMemcpyHostToDevice));
-    k_atomic_fadd64<Semantics::FPSan><<<1, LANES>>>(dSlot, dIn);
+    k_atomic_fadd64<Semantics::Triton><<<1, LANES>>>(dSlot, dIn);
     HIP_CHECK(hipDeviceSynchronize());
     V got{0.0};
     HIP_CHECK(hipMemcpy(&got, dSlot, sizeof(V), hipMemcpyDeviceToHost));
@@ -362,12 +362,12 @@ TEST(Atomic, Fmin64FloatMatchesScalarMin)
         GTEST_SKIP() << "no HIP device";
     auto    in  = make_inputs64();
     double* dIn = to_dev(in);
-    using V     = Value<double, Semantics::Float, kCC>;
+    using V     = Value<double, Semantics::Native, kCC>;
     V* dSlot;
     HIP_CHECK(hipMalloc(&dSlot, sizeof(V)));
     V init{1e300};
     HIP_CHECK(hipMemcpy(dSlot, &init, sizeof(V), hipMemcpyHostToDevice));
-    k_atomic_fmin64<Semantics::Float><<<1, LANES>>>(dSlot, dIn);
+    k_atomic_fmin64<Semantics::Native><<<1, LANES>>>(dSlot, dIn);
     HIP_CHECK(hipDeviceSynchronize());
     V got{0.0};
     HIP_CHECK(hipMemcpy(&got, dSlot, sizeof(V), hipMemcpyDeviceToHost));
@@ -384,12 +384,12 @@ TEST(Atomic, Fmax64FloatMatchesScalarMax)
         GTEST_SKIP() << "no HIP device";
     auto    in  = make_inputs64();
     double* dIn = to_dev(in);
-    using V     = Value<double, Semantics::Float, kCC>;
+    using V     = Value<double, Semantics::Native, kCC>;
     V* dSlot;
     HIP_CHECK(hipMalloc(&dSlot, sizeof(V)));
     V init{-1e300};
     HIP_CHECK(hipMemcpy(dSlot, &init, sizeof(V), hipMemcpyHostToDevice));
-    k_atomic_fmax64<Semantics::Float><<<1, LANES>>>(dSlot, dIn);
+    k_atomic_fmax64<Semantics::Native><<<1, LANES>>>(dSlot, dIn);
     HIP_CHECK(hipDeviceSynchronize());
     V got{0.0};
     HIP_CHECK(hipMemcpy(&got, dSlot, sizeof(V), hipMemcpyDeviceToHost));
@@ -406,12 +406,12 @@ TEST(Atomic, Fmin64FpsanMatchesScalarPayloadMin)
         GTEST_SKIP() << "no HIP device";
     auto    in  = make_inputs64();
     double* dIn = to_dev(in);
-    using V     = Value<double, Semantics::FPSan, kCC>;
+    using V     = Value<double, Semantics::Triton, kCC>;
     V* dSlot;
     HIP_CHECK(hipMalloc(&dSlot, sizeof(V)));
     V init{1e300};
     HIP_CHECK(hipMemcpy(dSlot, &init, sizeof(V), hipMemcpyHostToDevice));
-    k_atomic_fmin64<Semantics::FPSan><<<1, LANES>>>(dSlot, dIn);
+    k_atomic_fmin64<Semantics::Triton><<<1, LANES>>>(dSlot, dIn);
     HIP_CHECK(hipDeviceSynchronize());
     V got{0.0};
     HIP_CHECK(hipMemcpy(&got, dSlot, sizeof(V), hipMemcpyDeviceToHost));
@@ -430,12 +430,12 @@ TEST(Atomic, Fmax64FpsanMatchesScalarPayloadMax)
         GTEST_SKIP() << "no HIP device";
     auto    in  = make_inputs64();
     double* dIn = to_dev(in);
-    using V     = Value<double, Semantics::FPSan, kCC>;
+    using V     = Value<double, Semantics::Triton, kCC>;
     V* dSlot;
     HIP_CHECK(hipMalloc(&dSlot, sizeof(V)));
     V init{-1e300};
     HIP_CHECK(hipMemcpy(dSlot, &init, sizeof(V), hipMemcpyHostToDevice));
-    k_atomic_fmax64<Semantics::FPSan><<<1, LANES>>>(dSlot, dIn);
+    k_atomic_fmax64<Semantics::Triton><<<1, LANES>>>(dSlot, dIn);
     HIP_CHECK(hipDeviceSynchronize());
     V got{0.0};
     HIP_CHECK(hipMemcpy(&got, dSlot, sizeof(V), hipMemcpyDeviceToHost));
@@ -483,7 +483,7 @@ void run_pk_add(void (*k)(Value<VEC, S, kCC>*, const float*))
         v.set(1, Value<Elem, S, kCC>{static_cast<Elem>(in[2 * i + 1])});
         acc = acc + v;
     }
-    if constexpr(S == Semantics::Float)
+    if constexpr(S == Semantics::Native)
     {
         EXPECT_EQ(static_cast<float>(got.get(0).to_float()),
                   static_cast<float>(acc.get(0).to_float()));
@@ -501,17 +501,17 @@ void run_pk_add(void (*k)(Value<VEC, S, kCC>*, const float*))
 
 TEST(Atomic, PkAddF16Float)
 {
-    run_pk_add<v2h_t, _Float16, Semantics::Float>(k_atomic_pk_f16<Semantics::Float>);
+    run_pk_add<v2h_t, _Float16, Semantics::Native>(k_atomic_pk_f16<Semantics::Native>);
 }
 TEST(Atomic, PkAddF16Fpsan)
 {
-    run_pk_add<v2h_t, _Float16, Semantics::FPSan>(k_atomic_pk_f16<Semantics::FPSan>);
+    run_pk_add<v2h_t, _Float16, Semantics::Triton>(k_atomic_pk_f16<Semantics::Triton>);
 }
 TEST(Atomic, PkAddBf16Float)
 {
-    run_pk_add<v2bf_t, __bf16, Semantics::Float>(k_atomic_pk_bf16<Semantics::Float>);
+    run_pk_add<v2bf_t, __bf16, Semantics::Native>(k_atomic_pk_bf16<Semantics::Native>);
 }
 TEST(Atomic, PkAddBf16Fpsan)
 {
-    run_pk_add<v2bf_t, __bf16, Semantics::FPSan>(k_atomic_pk_bf16<Semantics::FPSan>);
+    run_pk_add<v2bf_t, __bf16, Semantics::Triton>(k_atomic_pk_bf16<Semantics::Triton>);
 }

@@ -55,7 +55,7 @@ namespace fpsan
     FPSAN_DEVICE Value<float, S, C> amdgcn_atomic_fadd_f32(Value<float, S, C>* addr,
                                                            Value<float, S, C>  v)
     {
-        if constexpr(S == Semantics::Float)
+        if constexpr(S == Semantics::Native)
         {
             float old = atomicAdd(reinterpret_cast<float*>(addr), v.to_float());
             return Value<float, S, C>(old);
@@ -120,7 +120,7 @@ namespace fpsan
     FPSAN_DEVICE Value<float, S, C> amdgcn_atomic_fmin_f32(Value<float, S, C>* addr,
                                                            Value<float, S, C>  v)
     {
-        if constexpr(S == Semantics::Float)
+        if constexpr(S == Semantics::Native)
         {
             float old = detail::atomic_fmm<true, float, unsigned>(reinterpret_cast<float*>(addr),
                                                                   v.to_float());
@@ -137,7 +137,7 @@ namespace fpsan
     FPSAN_DEVICE Value<float, S, C> amdgcn_atomic_fmax_f32(Value<float, S, C>* addr,
                                                            Value<float, S, C>  v)
     {
-        if constexpr(S == Semantics::Float)
+        if constexpr(S == Semantics::Native)
         {
             float old = detail::atomic_fmm<false, float, unsigned>(reinterpret_cast<float*>(addr),
                                                                    v.to_float());
@@ -158,7 +158,7 @@ namespace fpsan
     FPSAN_DEVICE Value<double, S, C> amdgcn_atomic_fadd_f64(Value<double, S, C>* addr,
                                                             Value<double, S, C>  v)
     {
-        if constexpr(S == Semantics::Float)
+        if constexpr(S == Semantics::Native)
         {
             double old = atomicAdd(reinterpret_cast<double*>(addr), v.to_float());
             return Value<double, S, C>(old);
@@ -179,7 +179,7 @@ namespace fpsan
     FPSAN_DEVICE Value<double, S, C> amdgcn_atomic_fmin_f64(Value<double, S, C>* addr,
                                                             Value<double, S, C>  v)
     {
-        if constexpr(S == Semantics::Float)
+        if constexpr(S == Semantics::Native)
         {
             double old = detail::atomic_fmm<true, double, unsigned long long>(
                 reinterpret_cast<double*>(addr), v.to_float());
@@ -197,7 +197,7 @@ namespace fpsan
     FPSAN_DEVICE Value<double, S, C> amdgcn_atomic_fmax_f64(Value<double, S, C>* addr,
                                                             Value<double, S, C>  v)
     {
-        if constexpr(S == Semantics::Float)
+        if constexpr(S == Semantics::Native)
         {
             double old = detail::atomic_fmm<false, double, unsigned long long>(
                 reinterpret_cast<double*>(addr), v.to_float());

@@ -14,7 +14,7 @@ companion program is [`examples/authoring_example.cpp`](../examples/authoring_ex
 ```cpp
 #include <fpsan/fpsan.hpp>
 using namespace fpsan;
-using Scalar = Value<float, Semantics::FPSan, Conversions::Implicit>;
+using Scalar = Value<float, Semantics::Triton, Conversions::Implicit>;
 ```
 
 The three template parameters are:
@@ -22,7 +22,7 @@ The three template parameters are:
 | parameter | meaning |
 |-----------|---------|
 | `float_type` | the underlying real type: `float`, `double`, `_Float16`, `__bf16`, `fpsan::fp8_e4m3`/`fp8_e5m2`, or a Clang/GCC ext-vector of any of these |
-| `semantics` | `Semantics::Float` = ordinary IEEE arithmetic; `Semantics::FPSan` = FPSan payload algebra |
+| `semantics` | `Semantics::Native` = ordinary IEEE arithmetic; `Semantics::Triton` = FPSan payload algebra |
 | `conversions` | `Conversions::Implicit` = implicit casts like a POD; `Conversions::Explicit` = every conversion/1-arg ctor is `explicit` |
 
 ## 2. Write ordinary-looking code
@@ -57,7 +57,7 @@ template <class S> S sum_reverse(const std::vector<float>& v) { /* ... */ }
 ```
 
 With `float`, `sum_forward != sum_reverse` for a catastrophic input
-(`{1e8, 1, 2, 3, -1e8, ...}`). With `Value<float, fpsan::Semantics::FPSan, fpsan::Conversions::Implicit>`, the two
+(`{1e8, 1, 2, 3, -1e8, ...}`). With `Value<float, fpsan::Semantics::Triton, fpsan::Conversions::Implicit>`, the two
 payloads are **equal** — addition is exactly associative in the payload ring.
 
 ## 4. Inspecting values

@@ -12,9 +12,9 @@
 // FPSAN_TEST_GFX11_WAVE64 plus -mwavefrontsize64 for the wave64-only builtins.
 //
 // The two tested properties mirror the gfx12 WMMA harness:
-//   (1) Semantics::Float software dataflow matches the real hardware builtin
+//   (1) Semantics::Native software dataflow matches the real hardware builtin
 //       within the small observed gfx11 WMMA numeric tolerance.
-//   (2) Semantics::FPSan matches an independent scalar host FPSan reference
+//   (2) Semantics::Triton matches an independent scalar host FPSan reference
 //       exactly, payload-for-payload.
 
 #include "fpsan/amdgcn_matrix.hpp"
@@ -165,7 +165,7 @@ __device__ void store_result(Value<typename Harness<Traits>::CVec, S, kCC> d, Ou
         const int idx = gfx11_out_index<Traits>(r);
         const int m   = gfx11_out_m<Traits>(lane, r);
         const int n   = gfx11_out_n<Traits>(lane);
-        if constexpr(S == Semantics::Float)
+        if constexpr(S == Semantics::Native)
             D[m * N + n] = d.get(idx).to_float();
         else
             D[m * N + n] = d.get(idx).fpsan_payload();
@@ -178,13 +178,13 @@ __global__ void k_builtin(const typename Harness<Traits>::AElem* A,
                           const typename Harness<Traits>::CElem* C,
                           typename Harness<Traits>::CElem*       D)
 {
-    int                                                          lane = threadIdx.x;
-    Value<typename Harness<Traits>::AVec, Semantics::Float, kCC> a;
-    Value<typename Harness<Traits>::BVec, Semantics::Float, kCC> b;
-    Value<typename Harness<Traits>::CVec, Semantics::Float, kCC> c;
-    load_frags<Traits, Semantics::Float>(A, B, C, lane, a, b, c);
-    auto d = Traits::template call<Semantics::Float, kCC>(a, b, c);
-    store_result<Traits, Semantics::Float>(d, D);
+    int                                                           lane = threadIdx.x;
+    Value<typename Harness<Traits>::AVec, Semantics::Native, kCC> a;
+    Value<typename Harness<Traits>::BVec, Semantics::Native, kCC> b;
+    Value<typename Harness<Traits>::CVec, Semantics::Native, kCC> c;
+    load_frags<Traits, Semantics::Native>(A, B, C, lane, a, b, c);
+    auto d = Traits::template call<Semantics::Native, kCC>(a, b, c);
+    store_result<Traits, Semantics::Native>(d, D);
 }
 
 template <class Traits>
@@ -193,13 +193,13 @@ __global__ void k_fpsan(const typename Harness<Traits>::AElem* A,
                         const typename Harness<Traits>::CElem* C,
                         typename Harness<Traits>::CBits*       Dpay)
 {
-    int                                                          lane = threadIdx.x;
-    Value<typename Harness<Traits>::AVec, Semantics::FPSan, kCC> a;
-    Value<typename Harness<Traits>::BVec, Semantics::FPSan, kCC> b;
-    Value<typename Harness<Traits>::CVec, Semantics::FPSan, kCC> c;
-    load_frags<Traits, Semantics::FPSan>(A, B, C, lane, a, b, c);
-    auto d = Traits::template call<Semantics::FPSan, kCC>(a, b, c);
-    store_result<Traits, Semantics::FPSan>(d, Dpay);
+    int                                                           lane = threadIdx.x;
+    Value<typename Harness<Traits>::AVec, Semantics::Triton, kCC> a;
+    Value<typename Harness<Traits>::BVec, Semantics::Triton, kCC> b;
+    Value<typename Harness<Traits>::CVec, Semantics::Triton, kCC> c;
+    load_frags<Traits, Semantics::Triton>(A, B, C, lane, a, b, c);
+    auto d = Traits::template call<Semantics::Triton, kCC>(a, b, c);
+    store_result<Traits, Semantics::Triton>(d, Dpay);
 }
 
 template <class Traits>
@@ -220,10 +220,10 @@ __global__ void k_tied_preserve_float(typename Harness<Traits>::CElem* out)
     for(int i = 0; i < H::c_lanes; ++i)
         cn[i] = preserve_seed<CE>(lane, i);
 
-    Value<typename H::AVec, Semantics::Float, kCC> a(an);
-    Value<typename H::BVec, Semantics::Float, kCC> b(bn);
-    Value<typename H::CVec, Semantics::Float, kCC> c(cn);
-    auto d = Traits::template call<Semantics::Float, kCC>(a, b, c);
+    Value<typename H::AVec, Semantics::Native, kCC> a(an);
+    Value<typename H::BVec, Semantics::Native, kCC> b(bn);
+    Value<typename H::CVec, Semantics::Native, kCC> c(cn);
+    auto d = Traits::template call<Semantics::Native, kCC>(a, b, c);
     for(int i = 0; i < H::c_lanes; ++i)
         out[lane * H::c_lanes + i] = d.get(i).to_float();
 }
@@ -246,10 +246,10 @@ __global__ void k_tied_preserve_fpsan(typename Harness<Traits>::CBits* out)
     for(int i = 0; i < H::c_lanes; ++i)
         cn[i] = preserve_seed<CE>(lane, i);
 
-    Value<typename H::AVec, Semantics::FPSan, kCC> a(an);
-    Value<typename H::BVec, Semantics::FPSan, kCC> b(bn);
-    Value<typename H::CVec, Semantics::FPSan, kCC> c(cn);
-    auto d = Traits::template call<Semantics::FPSan, kCC>(a, b, c);
+    Value<typename H::AVec, Semantics::Triton, kCC> a(an);
+    Value<typename H::BVec, Semantics::Triton, kCC> b(bn);
+    Value<typename H::CVec, Semantics::Triton, kCC> c(cn);
+    auto d = Traits::template call<Semantics::Triton, kCC>(a, b, c);
     for(int i = 0; i < H::c_lanes; ++i)
         out[lane * H::c_lanes + i] = d.get(i).fpsan_payload();
 }
@@ -347,9 +347,9 @@ void run_fpsan_matches_scalar_reference()
     using CBits    = typename Harness<Traits>::CBits;
     Mats<Traits> m = make_inputs<Traits>();
 
-    using VA = Value<AE, Semantics::FPSan, kCC>;
-    using VB = Value<BE, Semantics::FPSan, kCC>;
-    using VC = Value<CE, Semantics::FPSan, kCC>;
+    using VA = Value<AE, Semantics::Triton, kCC>;
+    using VB = Value<BE, Semantics::Triton, kCC>;
+    using VC = Value<CE, Semantics::Triton, kCC>;
     std::vector<CBits> ref(M * N);
     for(int mm = 0; mm < M; ++mm)
         for(int nn = 0; nn < N; ++nn)
@@ -413,7 +413,7 @@ void run_tied_preserves_unselected()
             const auto flat = static_cast<std::size_t>(lane) * H::c_lanes + idx;
             EXPECT_EQ(bits_of(got_float[flat]), bits_of(seed))
                 << "Float preserve mismatch lane=" << lane << " idx=" << idx;
-            using VF = Value<CE, Semantics::FPSan, kCC>;
+            using VF = Value<CE, Semantics::Triton, kCC>;
             EXPECT_EQ(got_fpsan[flat], VF(seed).fpsan_payload())
                 << "FPSan preserve mismatch lane=" << lane << " idx=" << idx;
         }

@@ -22,25 +22,25 @@ using Scalar = float;
 
 // Step 1 — drop-in. Identical arithmetic; just proves the wrapper compiles
 // and behaves exactly like float everywhere it is used.
-using Scalar = Value<float, Semantics::Float, Conversions::Implicit>;
+using Scalar = Value<float, Semantics::Native, Conversions::Implicit>;
 
 // Step 2 — turn ON explicit conversions. No numeric change, but now every
 // accidental implicit float<->Scalar conversion becomes a COMPILE ERROR, so you
 // can find and make deliberate every place values cross the boundary.
-using Scalar = Value<float, Semantics::Float, Conversions::Explicit>;
+using Scalar = Value<float, Semantics::Native, Conversions::Explicit>;
 
 // Step 3 — turn ON FPSan semantics.
-using Scalar = Value<float, Semantics::FPSan, Conversions::Explicit>;
+using Scalar = Value<float, Semantics::Triton, Conversions::Explicit>;
 ```
 
-(`Semantics::FPSan` with `Conversions::Implicit` is also valid; turning explicit
+(`Semantics::Triton` with `Conversions::Implicit` is also valid; turning explicit
 conversions on first is just a safety step so that, once FPSan math is active,
 no value silently slips in or out through an implicit cast — which would quietly
 escape the checking.)
 
 ## Stage 1 — drop-in
 
-Replace the typedef and rebuild. `Value<float, fpsan::Semantics::Float, fpsan::Conversions::Implicit>` is a bit-exact
+Replace the typedef and rebuild. `Value<float, fpsan::Semantics::Native, fpsan::Conversions::Implicit>` is a bit-exact
 stand-in for `float`: it has the same operators, implicit conversions, and
 `std::numeric_limits`, and a generic kernel produces **identical bits**. If
 something fails to compile here, it usually means the code relied on `float`
@@ -56,13 +56,13 @@ Set `conversions` to `Conversions::Explicit`. Now:
 - `x + 2.0f` fails — the scalar must be wrapped, or use `x + Scalar(2.0f)`.
 
 Each error marks a real boundary between "plain float" and "tracked" values.
-Make each one explicit. Numerically nothing changes (still `Semantics::Float`),
+Make each one explicit. Numerically nothing changes (still `Semantics::Native`),
 so you can do this file-by-file and keep a working build. The example kernel is
 written conversion-clean, so it already compiles at this stage.
 
 ## Stage 3 — turn on FPSan
 
-Set `semantics` to `Semantics::FPSan`. Arithmetic is now the integer payload algebra.
+Set `semantics` to `Semantics::Triton`. Arithmetic is now the integer payload algebra.
 Numbers become meaningless in isolation, so your *tests* change shape: instead
 of comparing against expected numeric values, compare two
 supposed-to-be-equivalent computations (e.g. an optimized kernel vs a reference,

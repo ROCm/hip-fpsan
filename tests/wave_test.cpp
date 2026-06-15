@@ -126,9 +126,9 @@ WAVE_TRAITS(WaveFmaxF64, double, amdgcn_wave_reduce_fmax_f64, fpsan::max(a, b), 
 template <class T, int Strategy>
 __global__ void k_wave_float(const typename T::FT* in, typename T::FT* out)
 {
-    const int                                    lane = threadIdx.x;
-    Value<typename T::FT, Semantics::Float, kCC> v{in[lane]};
-    auto r = T::template call<Strategy, Semantics::Float>(v);
+    const int                                     lane = threadIdx.x;
+    Value<typename T::FT, Semantics::Native, kCC> v{in[lane]};
+    auto r = T::template call<Strategy, Semantics::Native>(v);
     if(lane == 0)
         *out = static_cast<typename T::FT>(r);
 }
@@ -136,9 +136,9 @@ __global__ void k_wave_float(const typename T::FT* in, typename T::FT* out)
 template <class T, int Strategy>
 __global__ void k_wave_fpsan(const typename T::FT* in, typename T::Bits* out)
 {
-    const int                                    lane = threadIdx.x;
-    Value<typename T::FT, Semantics::FPSan, kCC> v{in[lane]};
-    auto r = T::template call<Strategy, Semantics::FPSan>(v);
+    const int                                     lane = threadIdx.x;
+    Value<typename T::FT, Semantics::Triton, kCC> v{in[lane]};
+    auto r = T::template call<Strategy, Semantics::Triton>(v);
     if(lane == 0)
         *out = r.fpsan_payload();
 }
@@ -200,11 +200,11 @@ void run_float_matches_host_butterfly()
             GTEST_SKIP() << "no HIP device";
         using FT = typename T::FT;
         auto in  = make_lane_inputs<FT>(W);
-        using F  = Value<FT, Semantics::Float, kCC>;
+        using F  = Value<FT, Semantics::Native, kCC>;
         std::vector<F> lane_vals(W);
         for(int i = 0; i < W; ++i)
             lane_vals[i] = F{in[i]};
-        F ref = T::template host_butterfly<Semantics::Float>(lane_vals.data(), W);
+        F ref = T::template host_butterfly<Semantics::Native>(lane_vals.data(), W);
 
         FT *dIn = to_dev(in), *dOut;
         HIP_CHECK(hipMalloc(&dOut, sizeof(FT)));
@@ -227,11 +227,11 @@ void run_fpsan_matches_host_butterfly()
     using FT   = typename T::FT;
     using Bits = typename T::Bits;
     auto in    = make_lane_inputs<FT>(W);
-    using F    = Value<FT, Semantics::FPSan, kCC>;
+    using F    = Value<FT, Semantics::Triton, kCC>;
     std::vector<F> lane_vals(W);
     for(int i = 0; i < W; ++i)
         lane_vals[i] = F{in[i]};
-    F ref = T::template host_butterfly<Semantics::FPSan>(lane_vals.data(), W);
+    F ref = T::template host_butterfly<Semantics::Triton>(lane_vals.data(), W);
 
     FT*   dIn = to_dev(in);
     Bits* dOut;
@@ -264,11 +264,11 @@ void run_fpsan_matches_seq_fold()
         using FT   = typename T::FT;
         using Bits = typename T::Bits;
         auto in    = make_lane_inputs<FT>(W);
-        using F    = Value<FT, Semantics::FPSan, kCC>;
+        using F    = Value<FT, Semantics::Triton, kCC>;
         std::vector<F> lane_vals(W);
         for(int i = 0; i < W; ++i)
             lane_vals[i] = F{in[i]};
-        F ref = T::template host_seq_fold<Semantics::FPSan>(lane_vals.data(), W);
+        F ref = T::template host_seq_fold<Semantics::Triton>(lane_vals.data(), W);
 
         FT*   dIn = to_dev(in);
         Bits* dOut;

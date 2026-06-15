@@ -22,7 +22,7 @@ namespace fpsan
     template <class FT, Semantics S, Conversions C>
     std::ostream& operator<<(std::ostream& os, const Value<FT, S, C>& v)
     {
-        if constexpr(S == Semantics::FPSan)
+        if constexpr(S == Semantics::Triton)
             os << "fpsan(payload=" << +v.fpsan_payload()
                << ", unembed=" << static_cast<double>(v.to_float()) << ")";
         else

@@ -31,7 +31,7 @@ using fpsan::detail::kFp6E2M3;
 using fpsan::detail::narrow_to_f32;
 
 static constexpr Conversions kCC = Conversions::Explicit;
-using VF                         = Value<float, Semantics::FPSan, kCC>;
+using VF                         = Value<float, Semantics::Triton, kCC>;
 using v6u                        = unsigned __attribute__((ext_vector_type(6)));
 
 namespace
@@ -75,8 +75,8 @@ __global__ void k_f32_unpack_fp6(const unsigned* in6, float* out, float scale)
     v6u s;
     for(int i = 0; i < 6; ++i)
         s[i] = in6[i];
-    auto r = fpsan::amdgcn_cvt_scalef32_pk32_f32_fp6<Semantics::Float, kCC>(
-        s, Value<float, Semantics::Float, kCC>{scale});
+    auto r = fpsan::amdgcn_cvt_scalef32_pk32_f32_fp6<Semantics::Native, kCC>(
+        s, Value<float, Semantics::Native, kCC>{scale});
     for(int i = 0; i < 32; ++i)
         out[i] = r.get(i).to_float();
 }
@@ -85,8 +85,8 @@ __global__ void k_f32_unpack_bf6(const unsigned* in6, float* out, float scale)
     v6u s;
     for(int i = 0; i < 6; ++i)
         s[i] = in6[i];
-    auto r = fpsan::amdgcn_cvt_scalef32_pk32_f32_bf6<Semantics::Float, kCC>(
-        s, Value<float, Semantics::Float, kCC>{scale});
+    auto r = fpsan::amdgcn_cvt_scalef32_pk32_f32_bf6<Semantics::Native, kCC>(
+        s, Value<float, Semantics::Native, kCC>{scale});
     for(int i = 0; i < 32; ++i)
         out[i] = r.get(i).to_float();
 }
@@ -135,10 +135,10 @@ __global__ void k_f32_pack_fp6(const float* in, unsigned* out, float scale)
         lo[i] = in[i];
         hi[i] = in[16 + i];
     }
-    v6u r = fpsan::amdgcn_cvt_scalef32_2xpk16_fp6_f32<Semantics::Float, kCC>(
-        Value<fpsan::v16f_native_cvt, Semantics::Float, kCC>{lo},
-        Value<fpsan::v16f_native_cvt, Semantics::Float, kCC>{hi},
-        Value<float, Semantics::Float, kCC>{scale});
+    v6u r = fpsan::amdgcn_cvt_scalef32_2xpk16_fp6_f32<Semantics::Native, kCC>(
+        Value<fpsan::v16f_native_cvt, Semantics::Native, kCC>{lo},
+        Value<fpsan::v16f_native_cvt, Semantics::Native, kCC>{hi},
+        Value<float, Semantics::Native, kCC>{scale});
     for(int i = 0; i < 6; ++i)
         out[i] = r[i];
 }
@@ -180,7 +180,7 @@ __global__ void k_fpsan_unpack(const unsigned* in6, unsigned* out, float scale)
     v6u s;
     for(int i = 0; i < 6; ++i)
         s[i] = in6[i];
-    auto r = fpsan::amdgcn_cvt_scalef32_pk32_f32_fp6<Semantics::FPSan, kCC>(s, VF{scale});
+    auto r = fpsan::amdgcn_cvt_scalef32_pk32_f32_fp6<Semantics::Triton, kCC>(s, VF{scale});
     for(int i = 0; i < 32; ++i)
         out[i] = r.get(i).fpsan_payload();
 }
@@ -225,9 +225,9 @@ __global__ void k_fpsan_pack(const float* in, unsigned* out, float scale)
         lo[i] = in[i];
         hi[i] = in[16 + i];
     }
-    v6u r = fpsan::amdgcn_cvt_scalef32_2xpk16_fp6_f32<Semantics::FPSan, kCC>(
-        Value<fpsan::v16f_native_cvt, Semantics::FPSan, kCC>{lo},
-        Value<fpsan::v16f_native_cvt, Semantics::FPSan, kCC>{hi},
+    v6u r = fpsan::amdgcn_cvt_scalef32_2xpk16_fp6_f32<Semantics::Triton, kCC>(
+        Value<fpsan::v16f_native_cvt, Semantics::Triton, kCC>{lo},
+        Value<fpsan::v16f_native_cvt, Semantics::Triton, kCC>{hi},
         VF{scale});
     for(int i = 0; i < 6; ++i)
         out[i] = r[i];

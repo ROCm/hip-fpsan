@@ -46,7 +46,7 @@ using fpsan::detail::kFp8E4M3;
 using fpsan::detail::kFp8E5M2;
 
 static constexpr Conversions kCC = Conversions::Explicit;
-using VF                         = Value<float, Semantics::FPSan, kCC>;
+using VF                         = Value<float, Semantics::Triton, kCC>;
 
 namespace
 {
@@ -132,32 +132,32 @@ namespace
 // One real kernel + TEST per wrapper (scale == 1), checking the packed bits
 // against the host OCP encode and the contiguous layout.
 
-#define PK8_BYTES_GOLDEN(CASE, WRAP, FMT, LANE)                                                  \
-    __global__ void CASE##_k(const float* in, unsigned* out)                                     \
-    {                                                                                            \
-        using V = LANE __attribute__((ext_vector_type(8)));                                      \
-        V v;                                                                                     \
-        for(int i = 0; i < 8; ++i)                                                               \
-            v[i] = static_cast<LANE>(in[i]);                                                     \
-        Value<V, Semantics::Float, kCC> vv{v};                                                   \
-        fpsan::v2u32_native             r                                                        \
-            = fpsan::WRAP<Semantics::Float, kCC>(vv, Value<float, Semantics::Float, kCC>{1.0f}); \
-        out[0] = r[0];                                                                           \
-        out[1] = r[1];                                                                           \
-    }                                                                                            \
-    TEST(CvtScalef32Pk8, CASE)                                                                   \
-    {                                                                                            \
-        if(!have_device())                                                                       \
-            GTEST_SKIP() << "no HIP device";                                                     \
-        auto      in  = exact8();                                                                \
-        float*    dIn = to_dev(in);                                                              \
-        unsigned* dO;                                                                            \
-        HIP_CHECK(hipMalloc(&dO, 2 * sizeof(unsigned)));                                         \
-        CASE##_k<<<1, 1>>>(dIn, dO);                                                             \
-        HIP_CHECK(hipDeviceSynchronize());                                                       \
-        check_bytes8(from_dev(dO, 2), in, FMT);                                                  \
-        (void)hipFree(dIn);                                                                      \
-        (void)hipFree(dO);                                                                       \
+#define PK8_BYTES_GOLDEN(CASE, WRAP, FMT, LANE)                                                    \
+    __global__ void CASE##_k(const float* in, unsigned* out)                                       \
+    {                                                                                              \
+        using V = LANE __attribute__((ext_vector_type(8)));                                        \
+        V v;                                                                                       \
+        for(int i = 0; i < 8; ++i)                                                                 \
+            v[i] = static_cast<LANE>(in[i]);                                                       \
+        Value<V, Semantics::Native, kCC> vv{v};                                                    \
+        fpsan::v2u32_native              r                                                         \
+            = fpsan::WRAP<Semantics::Native, kCC>(vv, Value<float, Semantics::Native, kCC>{1.0f}); \
+        out[0] = r[0];                                                                             \
+        out[1] = r[1];                                                                             \
+    }                                                                                              \
+    TEST(CvtScalef32Pk8, CASE)                                                                     \
+    {                                                                                              \
+        if(!have_device())                                                                         \
+            GTEST_SKIP() << "no HIP device";                                                       \
+        auto      in  = exact8();                                                                  \
+        float*    dIn = to_dev(in);                                                                \
+        unsigned* dO;                                                                              \
+        HIP_CHECK(hipMalloc(&dO, 2 * sizeof(unsigned)));                                           \
+        CASE##_k<<<1, 1>>>(dIn, dO);                                                               \
+        HIP_CHECK(hipDeviceSynchronize());                                                         \
+        check_bytes8(from_dev(dO, 2), in, FMT);                                                    \
+        (void)hipFree(dIn);                                                                        \
+        (void)hipFree(dO);                                                                         \
     }
 
 PK8_BYTES_GOLDEN(Fp8FromF32, amdgcn_cvt_scalef32_pk8_fp8_f32, kFp8E4M3, float)
@@ -168,30 +168,30 @@ PK8_BYTES_GOLDEN(Fp8FromBf16, amdgcn_cvt_scalef32_pk8_fp8_bf16, kFp8E4M3, __bf16
 PK8_BYTES_GOLDEN(Bf8FromBf16, amdgcn_cvt_scalef32_pk8_bf8_bf16, kFp8E5M2, __bf16)
 #undef PK8_BYTES_GOLDEN
 
-#define PK8_NIB_GOLDEN(CASE, WRAP, LANE)                                                         \
-    __global__ void CASE##_k(const float* in, unsigned* out)                                     \
-    {                                                                                            \
-        using V = LANE __attribute__((ext_vector_type(8)));                                      \
-        V v;                                                                                     \
-        for(int i = 0; i < 8; ++i)                                                               \
-            v[i] = static_cast<LANE>(in[i]);                                                     \
-        Value<V, Semantics::Float, kCC> vv{v};                                                   \
-        out[0]                                                                                   \
-            = fpsan::WRAP<Semantics::Float, kCC>(vv, Value<float, Semantics::Float, kCC>{1.0f}); \
-    }                                                                                            \
-    TEST(CvtScalef32Pk8, CASE)                                                                   \
-    {                                                                                            \
-        if(!have_device())                                                                       \
-            GTEST_SKIP() << "no HIP device";                                                     \
-        auto      in  = exact8();                                                                \
-        float*    dIn = to_dev(in);                                                              \
-        unsigned* dO;                                                                            \
-        HIP_CHECK(hipMalloc(&dO, sizeof(unsigned)));                                             \
-        CASE##_k<<<1, 1>>>(dIn, dO);                                                             \
-        HIP_CHECK(hipDeviceSynchronize());                                                       \
-        check_nibbles8(from_dev(dO, 1), in, kFp4E2M1);                                           \
-        (void)hipFree(dIn);                                                                      \
-        (void)hipFree(dO);                                                                       \
+#define PK8_NIB_GOLDEN(CASE, WRAP, LANE)                                                           \
+    __global__ void CASE##_k(const float* in, unsigned* out)                                       \
+    {                                                                                              \
+        using V = LANE __attribute__((ext_vector_type(8)));                                        \
+        V v;                                                                                       \
+        for(int i = 0; i < 8; ++i)                                                                 \
+            v[i] = static_cast<LANE>(in[i]);                                                       \
+        Value<V, Semantics::Native, kCC> vv{v};                                                    \
+        out[0]                                                                                     \
+            = fpsan::WRAP<Semantics::Native, kCC>(vv, Value<float, Semantics::Native, kCC>{1.0f}); \
+    }                                                                                              \
+    TEST(CvtScalef32Pk8, CASE)                                                                     \
+    {                                                                                              \
+        if(!have_device())                                                                         \
+            GTEST_SKIP() << "no HIP device";                                                       \
+        auto      in  = exact8();                                                                  \
+        float*    dIn = to_dev(in);                                                                \
+        unsigned* dO;                                                                              \
+        HIP_CHECK(hipMalloc(&dO, sizeof(unsigned)));                                               \
+        CASE##_k<<<1, 1>>>(dIn, dO);                                                               \
+        HIP_CHECK(hipDeviceSynchronize());                                                         \
+        check_nibbles8(from_dev(dO, 1), in, kFp4E2M1);                                             \
+        (void)hipFree(dIn);                                                                        \
+        (void)hipFree(dO);                                                                         \
     }
 
 PK8_NIB_GOLDEN(Fp4FromF32, amdgcn_cvt_scalef32_pk8_fp4_f32, float)
@@ -199,33 +199,33 @@ PK8_NIB_GOLDEN(Fp4FromF16, amdgcn_cvt_scalef32_pk8_fp4_f16, _Float16)
 PK8_NIB_GOLDEN(Fp4FromBf16, amdgcn_cvt_scalef32_pk8_fp4_bf16, __bf16)
 #undef PK8_NIB_GOLDEN
 
-#define PK16_CODES_GOLDEN(CASE, WRAP, FMT, LANE)                                                 \
-    __global__ void CASE##_k(const float* in, unsigned* out)                                     \
-    {                                                                                            \
-        using V = LANE __attribute__((ext_vector_type(16)));                                     \
-        V v;                                                                                     \
-        for(int i = 0; i < 16; ++i)                                                              \
-            v[i] = static_cast<LANE>(in[i]);                                                     \
-        Value<V, Semantics::Float, kCC> vv{v};                                                   \
-        fpsan::v3u32_native             r                                                        \
-            = fpsan::WRAP<Semantics::Float, kCC>(vv, Value<float, Semantics::Float, kCC>{1.0f}); \
-        out[0] = r[0];                                                                           \
-        out[1] = r[1];                                                                           \
-        out[2] = r[2];                                                                           \
-    }                                                                                            \
-    TEST(CvtScalef32Pk16, CASE)                                                                  \
-    {                                                                                            \
-        if(!have_device())                                                                       \
-            GTEST_SKIP() << "no HIP device";                                                     \
-        auto      in  = exact16();                                                               \
-        float*    dIn = to_dev(in);                                                              \
-        unsigned* dO;                                                                            \
-        HIP_CHECK(hipMalloc(&dO, 3 * sizeof(unsigned)));                                         \
-        CASE##_k<<<1, 1>>>(dIn, dO);                                                             \
-        HIP_CHECK(hipDeviceSynchronize());                                                       \
-        check_codes16(from_dev(dO, 3), in, FMT);                                                 \
-        (void)hipFree(dIn);                                                                      \
-        (void)hipFree(dO);                                                                       \
+#define PK16_CODES_GOLDEN(CASE, WRAP, FMT, LANE)                                                   \
+    __global__ void CASE##_k(const float* in, unsigned* out)                                       \
+    {                                                                                              \
+        using V = LANE __attribute__((ext_vector_type(16)));                                       \
+        V v;                                                                                       \
+        for(int i = 0; i < 16; ++i)                                                                \
+            v[i] = static_cast<LANE>(in[i]);                                                       \
+        Value<V, Semantics::Native, kCC> vv{v};                                                    \
+        fpsan::v3u32_native              r                                                         \
+            = fpsan::WRAP<Semantics::Native, kCC>(vv, Value<float, Semantics::Native, kCC>{1.0f}); \
+        out[0] = r[0];                                                                             \
+        out[1] = r[1];                                                                             \
+        out[2] = r[2];                                                                             \
+    }                                                                                              \
+    TEST(CvtScalef32Pk16, CASE)                                                                    \
+    {                                                                                              \
+        if(!have_device())                                                                         \
+            GTEST_SKIP() << "no HIP device";                                                       \
+        auto      in  = exact16();                                                                 \
+        float*    dIn = to_dev(in);                                                                \
+        unsigned* dO;                                                                              \
+        HIP_CHECK(hipMalloc(&dO, 3 * sizeof(unsigned)));                                           \
+        CASE##_k<<<1, 1>>>(dIn, dO);                                                               \
+        HIP_CHECK(hipDeviceSynchronize());                                                         \
+        check_codes16(from_dev(dO, 3), in, FMT);                                                   \
+        (void)hipFree(dIn);                                                                        \
+        (void)hipFree(dO);                                                                         \
     }
 
 PK16_CODES_GOLDEN(Fp6FromF32, amdgcn_cvt_scalef32_pk16_fp6_f32, kFp6E2M3, float)
@@ -238,32 +238,32 @@ PK16_CODES_GOLDEN(Bf6FromBf16, amdgcn_cvt_scalef32_pk16_bf6_bf16, kBf6E3M2, __bf
 
 // ---- SR variants: at exactly-representable inputs stochastic rounding is exact,
 // so the packed bits equal the same host OCP encode regardless of seed.
-#define SR_PK8_BYTES_GOLDEN(CASE, WRAP, FMT, LANE)                                   \
-    __global__ void CASE##_srb_k(const float* in, unsigned* out)                     \
-    {                                                                                \
-        using V = LANE __attribute__((ext_vector_type(8)));                          \
-        V v;                                                                         \
-        for(int i = 0; i < 8; ++i)                                                   \
-            v[i] = static_cast<LANE>(in[i]);                                         \
-        Value<V, Semantics::Float, kCC> vv{v};                                       \
-        fpsan::v2u32_native             r = fpsan::WRAP<Semantics::Float, kCC>(      \
-            vv, 0x1234abcdu, Value<float, Semantics::Float, kCC>{1.0f}); \
-        out[0] = r[0];                                                               \
-        out[1] = r[1];                                                               \
-    }                                                                                \
-    TEST(CvtScalef32SrPk8, CASE)                                                     \
-    {                                                                                \
-        if(!have_device())                                                           \
-            GTEST_SKIP() << "no HIP device";                                         \
-        auto      in  = exact8();                                                    \
-        float*    dIn = to_dev(in);                                                  \
-        unsigned* dO;                                                                \
-        HIP_CHECK(hipMalloc(&dO, 2 * sizeof(unsigned)));                             \
-        CASE##_srb_k<<<1, 1>>>(dIn, dO);                                             \
-        HIP_CHECK(hipDeviceSynchronize());                                           \
-        check_bytes8(from_dev(dO, 2), in, FMT);                                      \
-        (void)hipFree(dIn);                                                          \
-        (void)hipFree(dO);                                                           \
+#define SR_PK8_BYTES_GOLDEN(CASE, WRAP, FMT, LANE)                                     \
+    __global__ void CASE##_srb_k(const float* in, unsigned* out)                       \
+    {                                                                                  \
+        using V = LANE __attribute__((ext_vector_type(8)));                            \
+        V v;                                                                           \
+        for(int i = 0; i < 8; ++i)                                                     \
+            v[i] = static_cast<LANE>(in[i]);                                           \
+        Value<V, Semantics::Native, kCC> vv{v};                                        \
+        fpsan::v2u32_native              r = fpsan::WRAP<Semantics::Native, kCC>(      \
+            vv, 0x1234abcdu, Value<float, Semantics::Native, kCC>{1.0f}); \
+        out[0] = r[0];                                                                 \
+        out[1] = r[1];                                                                 \
+    }                                                                                  \
+    TEST(CvtScalef32SrPk8, CASE)                                                       \
+    {                                                                                  \
+        if(!have_device())                                                             \
+            GTEST_SKIP() << "no HIP device";                                           \
+        auto      in  = exact8();                                                      \
+        float*    dIn = to_dev(in);                                                    \
+        unsigned* dO;                                                                  \
+        HIP_CHECK(hipMalloc(&dO, 2 * sizeof(unsigned)));                               \
+        CASE##_srb_k<<<1, 1>>>(dIn, dO);                                               \
+        HIP_CHECK(hipDeviceSynchronize());                                             \
+        check_bytes8(from_dev(dO, 2), in, FMT);                                        \
+        (void)hipFree(dIn);                                                            \
+        (void)hipFree(dO);                                                             \
     }
 
 SR_PK8_BYTES_GOLDEN(Fp8FromF32, amdgcn_cvt_scalef32_sr_pk8_fp8_f32, kFp8E4M3, float)
@@ -274,30 +274,30 @@ SR_PK8_BYTES_GOLDEN(Fp8FromBf16, amdgcn_cvt_scalef32_sr_pk8_fp8_bf16, kFp8E4M3, 
 SR_PK8_BYTES_GOLDEN(Bf8FromBf16, amdgcn_cvt_scalef32_sr_pk8_bf8_bf16, kFp8E5M2, __bf16)
 #undef SR_PK8_BYTES_GOLDEN
 
-#define SR_PK8_NIB_GOLDEN(CASE, WRAP, LANE)                        \
-    __global__ void CASE##_srn_k(const float* in, unsigned* out)   \
-    {                                                              \
-        using V = LANE __attribute__((ext_vector_type(8)));        \
-        V v;                                                       \
-        for(int i = 0; i < 8; ++i)                                 \
-            v[i] = static_cast<LANE>(in[i]);                       \
-        Value<V, Semantics::Float, kCC> vv{v};                     \
-        out[0] = fpsan::WRAP<Semantics::Float, kCC>(               \
-            vv, 0x55u, Value<float, Semantics::Float, kCC>{1.0f}); \
-    }                                                              \
-    TEST(CvtScalef32SrPk8, CASE)                                   \
-    {                                                              \
-        if(!have_device())                                         \
-            GTEST_SKIP() << "no HIP device";                       \
-        auto      in  = exact8();                                  \
-        float*    dIn = to_dev(in);                                \
-        unsigned* dO;                                              \
-        HIP_CHECK(hipMalloc(&dO, sizeof(unsigned)));               \
-        CASE##_srn_k<<<1, 1>>>(dIn, dO);                           \
-        HIP_CHECK(hipDeviceSynchronize());                         \
-        check_nibbles8(from_dev(dO, 1), in, kFp4E2M1);             \
-        (void)hipFree(dIn);                                        \
-        (void)hipFree(dO);                                         \
+#define SR_PK8_NIB_GOLDEN(CASE, WRAP, LANE)                         \
+    __global__ void CASE##_srn_k(const float* in, unsigned* out)    \
+    {                                                               \
+        using V = LANE __attribute__((ext_vector_type(8)));         \
+        V v;                                                        \
+        for(int i = 0; i < 8; ++i)                                  \
+            v[i] = static_cast<LANE>(in[i]);                        \
+        Value<V, Semantics::Native, kCC> vv{v};                     \
+        out[0] = fpsan::WRAP<Semantics::Native, kCC>(               \
+            vv, 0x55u, Value<float, Semantics::Native, kCC>{1.0f}); \
+    }                                                               \
+    TEST(CvtScalef32SrPk8, CASE)                                    \
+    {                                                               \
+        if(!have_device())                                          \
+            GTEST_SKIP() << "no HIP device";                        \
+        auto      in  = exact8();                                   \
+        float*    dIn = to_dev(in);                                 \
+        unsigned* dO;                                               \
+        HIP_CHECK(hipMalloc(&dO, sizeof(unsigned)));                \
+        CASE##_srn_k<<<1, 1>>>(dIn, dO);                            \
+        HIP_CHECK(hipDeviceSynchronize());                          \
+        check_nibbles8(from_dev(dO, 1), in, kFp4E2M1);              \
+        (void)hipFree(dIn);                                         \
+        (void)hipFree(dO);                                          \
     }
 
 SR_PK8_NIB_GOLDEN(Fp4FromF32, amdgcn_cvt_scalef32_sr_pk8_fp4_f32, float)
@@ -305,33 +305,33 @@ SR_PK8_NIB_GOLDEN(Fp4FromF16, amdgcn_cvt_scalef32_sr_pk8_fp4_f16, _Float16)
 SR_PK8_NIB_GOLDEN(Fp4FromBf16, amdgcn_cvt_scalef32_sr_pk8_fp4_bf16, __bf16)
 #undef SR_PK8_NIB_GOLDEN
 
-#define SR_PK16_CODES_GOLDEN(CASE, WRAP, FMT, LANE)                             \
-    __global__ void CASE##_sr16_k(const float* in, unsigned* out)               \
-    {                                                                           \
-        using V = LANE __attribute__((ext_vector_type(16)));                    \
-        V v;                                                                    \
-        for(int i = 0; i < 16; ++i)                                             \
-            v[i] = static_cast<LANE>(in[i]);                                    \
-        Value<V, Semantics::Float, kCC> vv{v};                                  \
-        fpsan::v3u32_native             r = fpsan::WRAP<Semantics::Float, kCC>( \
-            vv, 0x99u, Value<float, Semantics::Float, kCC>{1.0f});  \
-        out[0] = r[0];                                                          \
-        out[1] = r[1];                                                          \
-        out[2] = r[2];                                                          \
-    }                                                                           \
-    TEST(CvtScalef32SrPk16, CASE)                                               \
-    {                                                                           \
-        if(!have_device())                                                      \
-            GTEST_SKIP() << "no HIP device";                                    \
-        auto      in  = exact16();                                              \
-        float*    dIn = to_dev(in);                                             \
-        unsigned* dO;                                                           \
-        HIP_CHECK(hipMalloc(&dO, 3 * sizeof(unsigned)));                        \
-        CASE##_sr16_k<<<1, 1>>>(dIn, dO);                                       \
-        HIP_CHECK(hipDeviceSynchronize());                                      \
-        check_codes16(from_dev(dO, 3), in, FMT);                                \
-        (void)hipFree(dIn);                                                     \
-        (void)hipFree(dO);                                                      \
+#define SR_PK16_CODES_GOLDEN(CASE, WRAP, FMT, LANE)                               \
+    __global__ void CASE##_sr16_k(const float* in, unsigned* out)                 \
+    {                                                                             \
+        using V = LANE __attribute__((ext_vector_type(16)));                      \
+        V v;                                                                      \
+        for(int i = 0; i < 16; ++i)                                               \
+            v[i] = static_cast<LANE>(in[i]);                                      \
+        Value<V, Semantics::Native, kCC> vv{v};                                   \
+        fpsan::v3u32_native              r = fpsan::WRAP<Semantics::Native, kCC>( \
+            vv, 0x99u, Value<float, Semantics::Native, kCC>{1.0f});  \
+        out[0] = r[0];                                                            \
+        out[1] = r[1];                                                            \
+        out[2] = r[2];                                                            \
+    }                                                                             \
+    TEST(CvtScalef32SrPk16, CASE)                                                 \
+    {                                                                             \
+        if(!have_device())                                                        \
+            GTEST_SKIP() << "no HIP device";                                      \
+        auto      in  = exact16();                                                \
+        float*    dIn = to_dev(in);                                               \
+        unsigned* dO;                                                             \
+        HIP_CHECK(hipMalloc(&dO, 3 * sizeof(unsigned)));                          \
+        CASE##_sr16_k<<<1, 1>>>(dIn, dO);                                         \
+        HIP_CHECK(hipDeviceSynchronize());                                        \
+        check_codes16(from_dev(dO, 3), in, FMT);                                  \
+        (void)hipFree(dIn);                                                       \
+        (void)hipFree(dO);                                                        \
     }
 
 SR_PK16_CODES_GOLDEN(Fp6FromF32, amdgcn_cvt_scalef32_sr_pk16_fp6_f32, kFp6E2M3, float)
@@ -351,9 +351,9 @@ __global__ void k_pk8_scale(const float* in, float scale, unsigned* out)
     V v;
     for(int i = 0; i < 8; ++i)
         v[i] = in[i];
-    Value<V, Semantics::Float, kCC> vv{v};
-    fpsan::v2u32_native r = fpsan::amdgcn_cvt_scalef32_pk8_fp8_f32<Semantics::Float, kCC>(
-        vv, Value<float, Semantics::Float, kCC>{scale});
+    Value<V, Semantics::Native, kCC> vv{v};
+    fpsan::v2u32_native r = fpsan::amdgcn_cvt_scalef32_pk8_fp8_f32<Semantics::Native, kCC>(
+        vv, Value<float, Semantics::Native, kCC>{scale});
     out[0] = r[0];
     out[1] = r[1];
 }
@@ -383,9 +383,9 @@ __global__ void k_fpsan_pk8_fp8(const float* in, unsigned* out)
     V v;
     for(int i = 0; i < 8; ++i)
         v[i] = in[i];
-    Value<V, Semantics::FPSan, kCC> vv{v};
-    fpsan::v2u32_native             r
-        = fpsan::amdgcn_cvt_scalef32_pk8_fp8_f32<Semantics::FPSan, kCC>(vv, VF{2.0f});
+    Value<V, Semantics::Triton, kCC> vv{v};
+    fpsan::v2u32_native              r
+        = fpsan::amdgcn_cvt_scalef32_pk8_fp8_f32<Semantics::Triton, kCC>(vv, VF{2.0f});
     out[0] = r[0];
     out[1] = r[1];
 }
@@ -418,9 +418,9 @@ __global__ void k_fpsan_pk16_fp6(const float* in, unsigned* out)
     V v;
     for(int i = 0; i < 16; ++i)
         v[i] = in[i];
-    Value<V, Semantics::FPSan, kCC> vv{v};
-    fpsan::v3u32_native             r
-        = fpsan::amdgcn_cvt_scalef32_pk16_fp6_f32<Semantics::FPSan, kCC>(vv, VF{1.0f});
+    Value<V, Semantics::Triton, kCC> vv{v};
+    fpsan::v3u32_native              r
+        = fpsan::amdgcn_cvt_scalef32_pk16_fp6_f32<Semantics::Triton, kCC>(vv, VF{1.0f});
     out[0] = r[0];
     out[1] = r[1];
     out[2] = r[2];
@@ -454,8 +454,8 @@ __global__ void k_fpsan_sr_pk8_fp4(const float* in, unsigned seed, unsigned* out
     V v;
     for(int i = 0; i < 8; ++i)
         v[i] = in[i];
-    Value<V, Semantics::FPSan, kCC> vv{v};
-    out[0] = fpsan::amdgcn_cvt_scalef32_sr_pk8_fp4_f32<Semantics::FPSan, kCC>(vv, seed, VF{1.0f});
+    Value<V, Semantics::Triton, kCC> vv{v};
+    out[0] = fpsan::amdgcn_cvt_scalef32_sr_pk8_fp4_f32<Semantics::Triton, kCC>(vv, seed, VF{1.0f});
 }
 
 TEST(CvtScalef32SrPk8, FpsanFp4MatchesDeterministic)

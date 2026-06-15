@@ -4,7 +4,7 @@
 // fpsan/detail/fp8.hpp
 // ----------------------------------------------------------------------------
 // OCP FP8 scalar types (fp8_e4m3, fp8_e5m2) and the generic <-> f32 conversion
-// used by Semantics::Float casts and by the Float-mode oracles in tests.
+// used by Semantics::Native casts and by the Float-mode oracles in tests.
 //
 // The conversion routines (narrow_to_f32, f32_to_narrow) are a clean C++ port
 // of iree/runtime/src/iree/base/internal/math.h (Apache-2.0): a single generic

@@ -564,12 +564,12 @@ namespace fpsan
 #define FPSAN_DEFINE_SMFMAC_F16_GFX950(NAME, M_, N_, K_, AVec_, BVec_, CFragVec_, BUILTIN)   \
     template <int         CBSZ = 0,                                                          \
               int         ABID = 0,                                                          \
-              Semantics   S    = Semantics::Float,                                           \
+              Semantics   S    = Semantics::Native,                                          \
               Conversions Cv   = Conversions::Explicit>                                      \
     FPSAN_DEVICE Value<CFragVec_, S, Cv> NAME(                                               \
         Value<AVec_, S, Cv> a, Value<BVec_, S, Cv> b, Value<CFragVec_, S, Cv> c, int idx)    \
     {                                                                                        \
-        if constexpr(S == Semantics::Float)                                                  \
+        if constexpr(S == Semantics::Native)                                                 \
         {                                                                                    \
             auto d = BUILTIN(a.to_float(), b.to_float(), c.to_float(), idx, CBSZ, ABID);     \
             return Value<CFragVec_, S, Cv>(d);                                               \
@@ -693,12 +693,12 @@ namespace fpsan
 #define FPSAN_DEFINE_SMFMAC_FP8(NAME, AVec_, BVec_, CFragVec_, AABI_, BABI_, SOFT_, BUILTIN) \
     template <int         CBSZ = 0,                                                          \
               int         ABID = 0,                                                          \
-              Semantics   S    = Semantics::Float,                                           \
+              Semantics   S    = Semantics::Native,                                          \
               Conversions Cv   = Conversions::Explicit>                                      \
     FPSAN_DEVICE Value<CFragVec_, S, Cv> NAME(                                               \
         Value<AVec_, S, Cv> a, Value<BVec_, S, Cv> b, Value<CFragVec_, S, Cv> c, int idx)    \
     {                                                                                        \
-        if constexpr(S == Semantics::Float)                                                  \
+        if constexpr(S == Semantics::Native)                                                 \
         {                                                                                    \
             const AABI_ ai = __builtin_bit_cast(AABI_, a.to_float());                        \
             const BABI_ bi = __builtin_bit_cast(BABI_, b.to_float());                        \
@@ -863,12 +863,12 @@ namespace fpsan
 #define FPSAN_DEFINE_SMFMAC_FP8_BIG(NAME, AVec_, BVec_, CFragVec_, AABI_, BABI_, SOFT_, BUILTIN) \
     template <int         CBSZ = 0,                                                              \
               int         ABID = 0,                                                              \
-              Semantics   S    = Semantics::Float,                                               \
+              Semantics   S    = Semantics::Native,                                              \
               Conversions Cv   = Conversions::Explicit>                                          \
     FPSAN_DEVICE Value<CFragVec_, S, Cv> NAME(                                                   \
         Value<AVec_, S, Cv> a, Value<BVec_, S, Cv> b, Value<CFragVec_, S, Cv> c, int idx)        \
     {                                                                                            \
-        if constexpr(S == Semantics::Float)                                                      \
+        if constexpr(S == Semantics::Native)                                                     \
         {                                                                                        \
             const AABI_ ai = __builtin_bit_cast(AABI_, a.to_float());                            \
             const BABI_ bi = __builtin_bit_cast(BABI_, b.to_float());                            \

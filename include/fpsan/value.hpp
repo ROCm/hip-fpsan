@@ -8,8 +8,8 @@
 //   float_type   underlying real type: a supported scalar (float, double,
 //                _Float16, __bf16) OR a Clang/GCC vector of one of those, e.g.
 //                `float __attribute__((ext_vector_type(8)))`.
-//   semantics    Semantics::Float : native arithmetic of float_type (drop-in)
-//                Semantics::FPSan : Triton-style FPSan integer-payload
+//   semantics    Semantics::Native : native arithmetic of float_type (drop-in)
+//                Semantics::Triton : Triton-style FPSan integer-payload
 //                arithmetic
 //   conversions  Conversions::Implicit / Conversions::Explicit
 //
@@ -33,8 +33,13 @@ namespace fpsan
 
     enum class Semantics
     {
-        Float,
-        FPSan
+        Native, // the native float; no sanitization
+        Triton, // Triton-style scrambling payload in the free ring Z/2^w
+
+        // Deprecated former spellings, kept as value-preserving aliases so old
+        // code still compiles (with a warning). Prefer the names above.
+        Float [[deprecated("Semantics::Float was renamed to Semantics::Native")]] = Native,
+        FPSan [[deprecated("Semantics::FPSan was renamed to Semantics::Triton")]] = Triton,
     };
     enum class Conversions
     {
@@ -70,7 +75,7 @@ namespace fpsan
 
         // In FPSan mode the object IS the integer payload; otherwise it is the float.
         using storage_type
-            = std::conditional_t<semantics == Semantics::FPSan, bits_type, float_type>;
+            = std::conditional_t<semantics == Semantics::Triton, bits_type, float_type>;
 
         // Per-lane mixing configuration (function of the element type only).
         static constexpr detail::MixConfig config = detail::make_mix_config<element_type>();
@@ -119,7 +124,7 @@ namespace fpsan
         // ---- named accessors -----------------------------------------------------
         FPSAN_HOST_DEVICE constexpr float_type to_float() const
         {
-            if constexpr(semantics == Semantics::FPSan)
+            if constexpr(semantics == Semantics::Triton)
                 return unembed(storage_);
             else
                 return storage_;
@@ -128,16 +133,16 @@ namespace fpsan
         // The FPSan integer payload (scalar uint, or uint-vector). FPSan mode only.
         FPSAN_HOST_DEVICE constexpr bits_type fpsan_payload() const
         {
-            static_assert(semantics == Semantics::FPSan,
+            static_assert(semantics == Semantics::Triton,
                           "fpsan_payload() is only defined when semantics == "
-                          "Semantics::FPSan");
+                          "Semantics::Triton");
             return storage_;
         }
         FPSAN_HOST_DEVICE static constexpr Value from_fpsan_payload(bits_type p)
         {
-            static_assert(semantics == Semantics::FPSan,
+            static_assert(semantics == Semantics::Triton,
                           "from_fpsan_payload() is only defined when semantics == "
-                          "Semantics::FPSan");
+                          "Semantics::Triton");
             return Value(static_cast<storage_type>(p), raw_tag{});
         }
 
@@ -147,14 +152,14 @@ namespace fpsan
         // mode.
         FPSAN_HOST_DEVICE constexpr bits_type to_storage_bits() const
         {
-            if constexpr(semantics == Semantics::FPSan)
+            if constexpr(semantics == Semantics::Triton)
                 return storage_;
             else
                 return __builtin_bit_cast(bits_type, storage_);
         }
         FPSAN_HOST_DEVICE static constexpr Value from_storage_bits(bits_type b)
         {
-            if constexpr(semantics == Semantics::FPSan)
+            if constexpr(semantics == Semantics::Triton)
                 return raw(static_cast<storage_type>(b));
             else
                 return raw(__builtin_bit_cast(float_type, b));
@@ -167,7 +172,7 @@ namespace fpsan
         {
             static_assert(is_vector, "get(i) is only defined for vector Values");
             using Scalar = Value<element_type, semantics_, conversions_>;
-            if constexpr(semantics == Semantics::FPSan)
+            if constexpr(semantics == Semantics::Triton)
                 return Scalar::from_fpsan_payload(storage_[i]);
             else
                 return Scalar(storage_[i]);
@@ -176,7 +181,7 @@ namespace fpsan
                                              Value<element_type, semantics_, conversions_> v)
         {
             static_assert(is_vector, "set(i,v) is only defined for vector Values");
-            if constexpr(semantics == Semantics::FPSan)
+            if constexpr(semantics == Semantics::Triton)
                 storage_[i] = v.fpsan_payload();
             else
                 storage_[i] = v.to_float();
@@ -206,7 +211,7 @@ namespace fpsan
         }
         FPSAN_HOST_DEVICE constexpr Value operator-() const
         {
-            if constexpr(semantics == Semantics::FPSan)
+            if constexpr(semantics == Semantics::Triton)
                 return raw(static_cast<storage_type>(detail::ring_neg(config, storage_)));
             else
                 return raw(static_cast<storage_type>(-storage_));
@@ -276,7 +281,7 @@ namespace fpsan
         // the float itself otherwise. Shared by both converting constructors.
         FPSAN_HOST_DEVICE static constexpr storage_type from_float(float_type v)
         {
-            if constexpr(semantics == Semantics::FPSan)
+            if constexpr(semantics == Semantics::Triton)
                 return static_cast<storage_type>(embed(v));
             else
                 return static_cast<storage_type>(v);
@@ -301,7 +306,7 @@ namespace fpsan
 
         FPSAN_HOST_DEVICE constexpr Value combine_add(Value o) const
         {
-            if constexpr(semantics == Semantics::FPSan)
+            if constexpr(semantics == Semantics::Triton)
                 return raw(
                     static_cast<storage_type>(detail::ring_add(config, storage_, o.storage_)));
             else
@@ -309,7 +314,7 @@ namespace fpsan
         }
         FPSAN_HOST_DEVICE constexpr Value combine_sub(Value o) const
         {
-            if constexpr(semantics == Semantics::FPSan)
+            if constexpr(semantics == Semantics::Triton)
                 return raw(
                     static_cast<storage_type>(detail::ring_sub(config, storage_, o.storage_)));
             else
@@ -317,7 +322,7 @@ namespace fpsan
         }
         FPSAN_HOST_DEVICE constexpr Value combine_mul(Value o) const
         {
-            if constexpr(semantics == Semantics::FPSan)
+            if constexpr(semantics == Semantics::Triton)
                 return raw(
                     static_cast<storage_type>(detail::ring_mul(config, storage_, o.storage_)));
             else
@@ -325,7 +330,7 @@ namespace fpsan
         }
         FPSAN_HOST_DEVICE constexpr Value combine_div(Value o) const
         {
-            if constexpr(semantics == Semantics::FPSan)
+            if constexpr(semantics == Semantics::Triton)
                 return raw(
                     static_cast<storage_type>(detail::ring_div(config, storage_, o.storage_)));
             else
@@ -338,7 +343,7 @@ namespace fpsan
         }
         FPSAN_HOST_DEVICE constexpr cmp_t less(Value o) const
         {
-            if constexpr(semantics == Semantics::FPSan)
+            if constexpr(semantics == Semantics::Triton)
                 return __builtin_bit_cast(signed_bits_type, storage_)
                        < __builtin_bit_cast(signed_bits_type, o.storage_);
             else

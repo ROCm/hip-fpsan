@@ -8,6 +8,6 @@
 #include "fpsan/fpsan.hpp"
 int main()
 {
-    fpsan::Value<int, fpsan::Semantics::Float, fpsan::Conversions::Explicit> a(0);
+    fpsan::Value<int, fpsan::Semantics::Native, fpsan::Conversions::Explicit> a(0);
     (void)a;
 }

@@ -46,11 +46,11 @@ namespace fpsan
 // the only thing FPSan is asked to certify).
 #define FPSAN_DEFINE_WAVE_REDUCE(name, type, COMBINE_EXPR, BUILTIN)                    \
     template <int         Strategy = 0,                                                \
-              Semantics   S        = Semantics::Float,                                 \
+              Semantics   S        = Semantics::Native,                                \
               Conversions C        = Conversions::Explicit>                            \
     FPSAN_DEVICE Value<type, S, C> name(Value<type, S, C> v)                           \
     {                                                                                  \
-        if constexpr(S == Semantics::Float)                                            \
+        if constexpr(S == Semantics::Native)                                           \
         {                                                                              \
             return Value<type, S, C>(BUILTIN(v.to_float(), Strategy));                 \
         }                                                                              \

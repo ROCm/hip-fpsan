@@ -154,8 +154,8 @@ TEST(GlobalLoadTr, F16_MatchesBuiltinAndFpsanMovesSameBits)
     if(!have_device())
         GTEST_SKIP() << "no HIP device";
     auto raw = run(k_loadtr_raw_f16);
-    auto flt = run(k_loadtr_wrap_f16<Semantics::Float>);
-    auto fps = run(k_loadtr_wrap_f16<Semantics::FPSan>);
+    auto flt = run(k_loadtr_wrap_f16<Semantics::Native>);
+    auto fps = run(k_loadtr_wrap_f16<Semantics::Triton>);
     for(size_t i = 0; i < raw.size(); ++i)
     {
         EXPECT_EQ(flt[i], raw[i]) << "Float wrapper != builtin at " << i;
@@ -168,8 +168,8 @@ TEST(GlobalLoadTr, BF16_MatchesBuiltinAndFpsanMovesSameBits)
     if(!have_device())
         GTEST_SKIP() << "no HIP device";
     auto raw = run(k_loadtr_raw_bf16);
-    auto flt = run(k_loadtr_wrap_bf16<Semantics::Float>);
-    auto fps = run(k_loadtr_wrap_bf16<Semantics::FPSan>);
+    auto flt = run(k_loadtr_wrap_bf16<Semantics::Native>);
+    auto fps = run(k_loadtr_wrap_bf16<Semantics::Triton>);
     for(size_t i = 0; i < raw.size(); ++i)
     {
         EXPECT_EQ(flt[i], raw[i]) << "Float wrapper != builtin at " << i;

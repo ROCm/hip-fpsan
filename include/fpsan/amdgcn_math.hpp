@@ -47,22 +47,22 @@ namespace fpsan
 
 // Define one unary FPSan wrapper for an AMD intrinsic. Float mode calls the
 // builtin; FPSan mode delegates to the named fpsan:: tagged op.
-#define FPSAN_DEFINE_AMDGCN_UNARY(name, type, FPSAN_OP, BUILTIN)                     \
-    template <Semantics S = Semantics::Float, Conversions C = Conversions::Explicit> \
-    FPSAN_DEVICE Value<type, S, C> name(Value<type, S, C> v)                         \
-    {                                                                                \
-        if constexpr(S == Semantics::Float)                                          \
-            return Value<type, S, C>(BUILTIN(v.to_float()));                         \
-        else                                                                         \
-            return fpsan::FPSAN_OP(v);                                               \
+#define FPSAN_DEFINE_AMDGCN_UNARY(name, type, FPSAN_OP, BUILTIN)                      \
+    template <Semantics S = Semantics::Native, Conversions C = Conversions::Explicit> \
+    FPSAN_DEVICE Value<type, S, C> name(Value<type, S, C> v)                          \
+    {                                                                                 \
+        if constexpr(S == Semantics::Native)                                          \
+            return Value<type, S, C>(BUILTIN(v.to_float()));                          \
+        else                                                                          \
+            return fpsan::FPSAN_OP(v);                                                \
     }
 
 #define FPSAN_DEFINE_AMDGCN_TERNARY(name, type, FPSAN_OP, BUILTIN)                       \
-    template <Semantics S = Semantics::Float, Conversions C = Conversions::Explicit>     \
+    template <Semantics S = Semantics::Native, Conversions C = Conversions::Explicit>    \
     FPSAN_DEVICE Value<type, S, C> name(                                                 \
         Value<type, S, C> a, Value<type, S, C> b, Value<type, S, C> c)                   \
     {                                                                                    \
-        if constexpr(S == Semantics::Float)                                              \
+        if constexpr(S == Semantics::Native)                                             \
             return Value<type, S, C>(BUILTIN(a.to_float(), b.to_float(), c.to_float())); \
         else                                                                             \
             return fpsan::FPSAN_OP(a, b, c);                                             \
@@ -169,12 +169,12 @@ namespace fpsan
 // fdot2: a, b are v2h; acc is f32. `Clamp` is the builtin's clamp flag.
 #if !defined(__HIP_DEVICE_COMPILE__) || __has_builtin(__builtin_amdgcn_fdot2)
     template <bool        Clamp = false,
-              Semantics   S     = Semantics::Float,
+              Semantics   S     = Semantics::Native,
               Conversions C     = Conversions::Explicit>
     FPSAN_DEVICE Value<float, S, C>
         amdgcn_fdot2(Value<v2h_native, S, C> a, Value<v2h_native, S, C> b, Value<float, S, C> c)
     {
-        if constexpr(S == Semantics::Float)
+        if constexpr(S == Semantics::Native)
         {
             return Value<float, S, C>(
                 __builtin_amdgcn_fdot2(a.to_float(), b.to_float(), c.to_float(), Clamp));
@@ -191,12 +191,12 @@ namespace fpsan
 
 // fdot2_f16_f16: a, b are v2h; acc is _Float16.
 #if !defined(__HIP_DEVICE_COMPILE__) || __has_builtin(__builtin_amdgcn_fdot2_f16_f16)
-    template <Semantics S = Semantics::Float, Conversions C = Conversions::Explicit>
+    template <Semantics S = Semantics::Native, Conversions C = Conversions::Explicit>
     FPSAN_DEVICE Value<_Float16, S, C> amdgcn_fdot2_f16_f16(Value<v2h_native, S, C> a,
                                                             Value<v2h_native, S, C> b,
                                                             Value<_Float16, S, C>   c)
     {
-        if constexpr(S == Semantics::Float)
+        if constexpr(S == Semantics::Native)
         {
             return Value<_Float16, S, C>(
                 __builtin_amdgcn_fdot2_f16_f16(a.to_float(), b.to_float(), c.to_float()));
@@ -215,12 +215,12 @@ namespace fpsan
 // BF16-valued builtin through short/v2short ABI types, so Float mode bit-casts
 // at the boundary and the public wrapper stays typed as __bf16.
 #if !defined(__HIP_DEVICE_COMPILE__) || __has_builtin(__builtin_amdgcn_fdot2_bf16_bf16)
-    template <Semantics S = Semantics::Float, Conversions C = Conversions::Explicit>
+    template <Semantics S = Semantics::Native, Conversions C = Conversions::Explicit>
     FPSAN_DEVICE Value<__bf16, S, C> amdgcn_fdot2_bf16_bf16(Value<v2bf_native, S, C> a,
                                                             Value<v2bf_native, S, C> b,
                                                             Value<__bf16, S, C>      c)
     {
-        if constexpr(S == Semantics::Float)
+        if constexpr(S == Semantics::Native)
         {
             const v2i16_native ai = __builtin_bit_cast(v2i16_native, a.to_float());
             const v2i16_native bi = __builtin_bit_cast(v2i16_native, b.to_float());
@@ -242,13 +242,13 @@ namespace fpsan
 // builtin's signature predates Clang's __bf16 type); acc is f32.
 #if !defined(__HIP_DEVICE_COMPILE__) || __has_builtin(__builtin_amdgcn_fdot2_f32_bf16)
     template <bool        Clamp = false,
-              Semantics   S     = Semantics::Float,
+              Semantics   S     = Semantics::Native,
               Conversions C     = Conversions::Explicit>
     FPSAN_DEVICE Value<float, S, C> amdgcn_fdot2_f32_bf16(Value<v2bf_native, S, C> a,
                                                           Value<v2bf_native, S, C> b,
                                                           Value<float, S, C>       c)
     {
-        if constexpr(S == Semantics::Float)
+        if constexpr(S == Semantics::Native)
         {
             v2i16_native ai = __builtin_bit_cast(v2i16_native, a.to_float());
             v2i16_native bi = __builtin_bit_cast(v2i16_native, b.to_float());
@@ -276,11 +276,11 @@ namespace fpsan
 // on archs that don't have the dot11-insts feature (e.g. gfx950).
 // =============================================================================
 #define FPSAN_DEFINE_AMDGCN_DOT4_FP8(NAME, AVec, BVec, BUILTIN)                          \
-    template <Semantics S = Semantics::Float, Conversions C = Conversions::Explicit>     \
+    template <Semantics S = Semantics::Native, Conversions C = Conversions::Explicit>    \
     FPSAN_DEVICE Value<float, S, C> NAME(                                                \
         Value<AVec, S, C> a, Value<BVec, S, C> b, Value<float, S, C> c)                  \
     {                                                                                    \
-        if constexpr(S == Semantics::Float)                                              \
+        if constexpr(S == Semantics::Native)                                             \
         {                                                                                \
             const unsigned ai = __builtin_bit_cast(unsigned, a.to_float());              \
             const unsigned bi = __builtin_bit_cast(unsigned, b.to_float());              \
@@ -346,14 +346,14 @@ namespace fpsan
 // semantics for an exact power-of-two rescale, so a downstream FPSan
 // implementation has an unambiguous reference to match.
 // =============================================================================
-#define FPSAN_DEFINE_AMDGCN_LDEXP(NAME, FT, BUILTIN)                                 \
-    template <Semantics S = Semantics::Float, Conversions C = Conversions::Explicit> \
-    FPSAN_DEVICE Value<FT, S, C> NAME(Value<FT, S, C> v, int n)                      \
-    {                                                                                \
-        if constexpr(S == Semantics::Float)                                          \
-            return Value<FT, S, C>(BUILTIN(v.to_float(), n));                        \
-        else                                                                         \
-            return v * Value<FT, S, C>(static_cast<FT>(__builtin_ldexp(1.0, n)));    \
+#define FPSAN_DEFINE_AMDGCN_LDEXP(NAME, FT, BUILTIN)                                  \
+    template <Semantics S = Semantics::Native, Conversions C = Conversions::Explicit> \
+    FPSAN_DEVICE Value<FT, S, C> NAME(Value<FT, S, C> v, int n)                       \
+    {                                                                                 \
+        if constexpr(S == Semantics::Native)                                          \
+            return Value<FT, S, C>(BUILTIN(v.to_float(), n));                         \
+        else                                                                          \
+            return v * Value<FT, S, C>(static_cast<FT>(__builtin_ldexp(1.0, n)));     \
     }
     FPSAN_DEFINE_AMDGCN_LDEXP(amdgcn_ldexpf, float, __builtin_amdgcn_ldexpf)
     FPSAN_DEFINE_AMDGCN_LDEXP(amdgcn_ldexp, double, __builtin_amdgcn_ldexp)

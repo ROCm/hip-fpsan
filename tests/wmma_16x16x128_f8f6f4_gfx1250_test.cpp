@@ -300,7 +300,7 @@ TEST(WmmaF8f6f4_128, Fp6Fp8_mixed)
 // payload-ring reference. The per-slot payload of a sub-byte code is the signed
 // resize of its Width-bit field (the ExtSI / subbyte_widen model, same as the
 // fp4/fp6 cvt-unpack path); products and the C term accumulate in the ring.
-using VF = Value<float, Semantics::FPSan, kCC>;
+using VF = Value<float, Semantics::Triton, kCC>;
 
 static std::uint32_t sign_resize(std::uint32_t code, int width)
 {
@@ -324,13 +324,14 @@ __global__ void k_f8f6f4_fpsan(const std::uint32_t* Apack,
     v8f_native cn;
     for(int e = 0; e < 8; ++e)
         cn[e] = C[(e + 8 * (lane >> 4)) * N + (lane & 15)];
-    Value<v8f_native, Semantics::FPSan, kCC> c(cn);
-    Value<v8f_native, Semantics::FPSan, kCC> d;
+    Value<v8f_native, Semantics::Triton, kCC> c(cn);
+    Value<v8f_native, Semantics::Triton, kCC> d;
     if constexpr(MIXED)
-        d = fpsan::amdgcn_wmma_f32_16x16x128_f8f6f4_mixed<AFMT, BFMT, Semantics::FPSan, kCC>(
+        d = fpsan::amdgcn_wmma_f32_16x16x128_f8f6f4_mixed<AFMT, BFMT, Semantics::Triton, kCC>(
             a, b, c);
     else
-        d = fpsan::amdgcn_wmma_f32_16x16x128_f8f6f4_sub<AFMT, BFMT, Semantics::FPSan, kCC>(a, b, c);
+        d = fpsan::amdgcn_wmma_f32_16x16x128_f8f6f4_sub<AFMT, BFMT, Semantics::Triton, kCC>(
+            a, b, c);
     for(int e = 0; e < 8; ++e)
         Dpay[(e + 8 * (lane >> 4)) * N + (lane & 15)] = d.get(e).fpsan_payload();
 }
