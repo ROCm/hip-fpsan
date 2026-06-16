@@ -1,12 +1,12 @@
-# Algebraic FPSan semantics
+# Algebraic FPSan
 
-This is the practical guide to the algebraic FPSan semantics in `hip-fpsan`.
-It is for readers who want to know what the semantics are, when to use them, and
-what behavior to expect from tests.
+This is the basic entryway to algebraic FPSan in `hip-fpsan`. It is for readers
+who want to know what the variants are, when to use them, and what behavior to
+expect from tests.
 
 For more detail, see:
 
-- [Algebraic semantics in detail](algebraic-semantics.md): precise operational
+- [Algebraic FPSan semantics](algebraic-semantics.md): precise operational
   semantics for math-comfortable software engineers.
 - [Reducing floats mod p](reducing-floats-mod-p.pdf): the mathematical write-up
   of the construction.

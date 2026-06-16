@@ -16,8 +16,8 @@ ideas is this library — see the [README](../README.md) and the headers under
 [`include/fpsan/`](../include/fpsan).
 
 For the value-residue alternatives to Triton FPSan, see
-[Algebraic FPSan semantics](algebraic-fpsan.md). For the operational details of
-those semantics, see [Algebraic semantics in detail](algebraic-semantics.md).
+[Algebraic FPSan](algebraic-fpsan.md). For the operational details of
+those semantics, see [Algebraic FPSan semantics](algebraic-semantics.md).
 
 ## The problem FPSan solves
 

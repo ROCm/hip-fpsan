@@ -42,31 +42,31 @@
 \maketitle
 
 \begin{abstract}
-FPSan-style instrumentation replaces each floating-point value by a same-width
-fingerprint.  For a source format of width \(w\), Triton's FPSan, which this
-repository implements as \texttt{Semantics::Triton}, uses a tuned
-set-theoretic scramble of source-format bit patterns into the ring
-\(\Z/2^w\Z\).
-That scramble is extremely useful, but it is not a homomorphism from the
-original numeric values, so identities such as \(2+2=4\) or \(x+x=2x\) need not
-hold.
+FPSan is a dynamic testing technique for numerical programs: replace each
+floating-point value by a same-width fingerprint, run the program in a finite
+abstract arithmetic, and compare the resulting fingerprints.  The original
+Triton FPSan introduced this idea using a tuned bijection from source-format bit
+patterns into \(\Z/2^w\Z\), where \(w\) is the source width.  That scramble is
+useful, but it is not a homomorphism from the represented numeric values, so
+identities such as \(2+2=4\) or \(x+x=2x\) need not hold.
 
-The algebraic semantics in \texttt{hip-fpsan} replace the scramble by an actual
-homomorphism on the finite values.  The observation is simple: every finite
-binary floating-point value is a dyadic rational, hence an element of
+This paper studies algebraic FPSan: a homomorphic alternative to Triton's FPSan
+scramble on finite binary floating-point values.  The observation is simple:
+every finite binary float is a dyadic rational, hence an element of
 \(\Z[1/2]\).  For every odd prime \(p\), reduction modulo \(p\) gives a ring
 homomorphism
 \[
   \Z[1/2] \longrightarrow \F_p.
 \]
-The Field-family semantics are built from this map.  The
-\texttt{SophieGermain\allowbreak{}Ring} and
-\texttt{Pythagorean\allowbreak{}Ring} semantics replace the field by carefully
-chosen composite residue rings, giving up fieldness in exchange for exact
-exponential/logarithmic and trigonometric identities.
+This gives a finite-field residue semantics for FPSan that preserves exact
+rational identities while keeping the same-width fingerprint invariant.  We then
+study the constraints on the prime \(p\), multiplicative casts between widths,
+composite residue rings for selected exponential, logarithmic, and trigonometric
+laws, multi-prime recovery by the Chinese remainder theorem (CRT), and
+extensions to algebraic-number formats.
 \end{abstract}
 
-\section{What FPSan is trying to test}
+\section{Introduction}
 
 Suppose a numerical kernel is rewritten for performance.  A reduction may be
 reassociated, an expression may be factored, an FMA may replace a multiply and an
@@ -75,11 +75,14 @@ floating-point results bit-for-bit is too strict: a value-preserving algebraic
 rewrite can change rounding.  Tolerance tests, on the other hand, are often too
 weak and too problem-specific.
 
-FPSan answers a different question.  It asks whether two computations have the
-same exact algebraic fingerprint under a chosen abstract semantics.  These
-rewritten semantics are intentionally deterministic, compact, and invariant
-under the ring laws.  They are not a reference implementation of the source
-floating-point arithmetic.
+Triton's FPSan introduced a useful third option.  Instead of asking whether two
+rounded floating-point executions are bitwise equal, FPSan asks whether the two
+computations have the same fingerprint under a chosen abstract arithmetic.  Each
+source value is replaced by a fingerprint, and each source operation is replaced
+by a deterministic operation on fingerprints.  The resulting semantics are
+designed to be compact and invariant under formal laws such as associativity and
+distributivity.  They are not a reference implementation of floating-point
+rounding.
 
 The invariant throughout this document is width preservation.  If the original
 floating-point type has \(w\) bits, then every FPSan semantics discussed here,
@@ -89,16 +92,13 @@ in exactly \(w\) bits.
 The central design choice is the leaf map: how a source floating-point value is
 sent into the rewritten arithmetic.
 
-\section{Triton's scramble and the transported-arithmetic caveat}
-
-Triton's FPSan uses a bijection
+For a source format of width \(w\), Triton's FPSan uses a bijection
 \[
   E:\{\text{source-format bit patterns of width }w\}\longrightarrow \Z/2^w\Z
 \]
 with special tuning.  The construction itself is mostly indifferent to the
-details of IEEE-754: what matters is that the sanitizer receives fixed-width
-bit patterns, and later, for the algebraic variants, that finite binary
-floating-point values are dyadic rationals.  Writing \(0\) and \(1\) for the
+details of a particular floating-point standard: what matters is that the
+sanitizer receives fixed-width bit patterns.  Writing \(0\) and \(1\) for the
 bit patterns of those values, and writing \(-x\) for source-format sign
 negation of a bit pattern \(x\), Triton's tuning gives \(E(0)=0\), \(E(1)=1\),
 and \(E(-x)=-E(x)\) in the target ring.  After applying \(E\), arithmetic is
@@ -124,9 +124,13 @@ So Triton FPSan sees reassociation and distributivity, but it does not see
 ordinary value facts such as \(2+2=4\), \(x+x=2x\), or \(x/x=1\) for every
 nonzero \(x\).
 
-The algebraic modes in this repository pursue the opposite leaf-map choice:
-keep the fingerprint compact, but make the leaf map a genuine homomorphism of
-the exact finite values.
+The contribution of algebraic FPSan is that the opposite leaf-map choice is
+possible.  We can keep compact same-width fingerprints, but choose the leaf map
+to be a genuine homomorphism on exact finite values.  The price is that a single
+same-width reduction is no longer injective.  The benefit is that its collisions
+are ordinary modular collisions in a characteristic-zero calculation reduced
+modulo a prime, not artifacts of an unrelated transported arithmetic.  The next
+section gives the algebraic observation that makes this possible.
 
 \section{Finite binary floats live in \texorpdfstring{\(\Z[1/2]\)}{Z[1/2]}}
 
@@ -207,6 +211,67 @@ chosen modulus.  The suffix-2 variants exist so that a suspected collision can
 be checked against a different set of primes or composite moduli:
 \texttt{Field2}, \texttt{FieldFast2}, \texttt{SophieGermainRing2}, and
 \texttt{PythagoreanRing2} have entirely different nonzero collision sets.
+
+\section{Several primes and characteristic-zero recovery}
+
+The non-injectivity of a single reduction should not be confused with loss of
+the characteristic-zero arithmetic.  If \(p_1,\ldots,p_r\) are distinct odd
+primes and \(P=\prod_i p_i\), then the combined map
+\[
+  \Z[1/2]\longrightarrow \prod_i \F_{p_i}
+\]
+is, by the CRT, the same as reduction modulo \(P\), with \(2\) still invertible.
+Thus several algebraic FPSan runs can be interpreted as a single wider residue
+computation.  If an exact dyadic result is known to be \(a/2^k\) with
+\(|a|<P/2\), then the residues determine \(a\) uniquely by the symmetric CRT
+representative, and hence determine the dyadic value itself.
+
+This is a fundamental distinction from Triton's FPSan.  Triton's leaf map is
+invertible, but after that the arithmetic is the arithmetic of the scrambled
+ring \(\Z/2^w\Z\).  There is no compatible family of reductions whose CRT lift
+is the original characteristic-zero calculation.  Algebraic FPSan goes the other
+way: one prime is not injective, but different primes are all shadows of the
+same calculation in \(\Z[1/2]\).
+
+As a concrete bound, consider OCP FP8 E5M2.\footnote{OCP 8-bit Floating Point
+Specification (OFP8), Revision 1.0:
+\url{https://www.opencompute.org/documents/ocp-8-bit-floating-point-specification-ofp8-revision-1-0-2023-12-01-pdf-1}.}
+It has exponent bias \(15\) and two mantissa bits.  Every finite value is
+\(A/2^{16}\), and the maximum finite magnitude is
+\[
+  1.75\cdot 2^{15}=7\cdot 2^{13},
+\]
+so
+\[
+  |A|\le 7\cdot 2^{29}=3\,758\,096\,384.
+\]
+To reconstruct an arbitrary finite FP8 E5M2 value by signed CRT it is enough
+to have \(P>2\cdot 7\cdot 2^{29}=7\,516\,192\,768\).  If each residue is still
+required to fit in an 8-bit fingerprint with two sentinels, then \(p\le 254\).
+The four largest possible primes give
+\[
+  251\cdot 241\cdot 239\cdot 233
+  =3\,368\,562\,317,
+\]
+which is not enough; no four-prime set can do better.  Five primes suffice, for
+example
+\[
+  251\cdot 241\cdot 239\cdot 233\cdot 229
+  =771\,400\,770\,593.
+\]
+Thus five 8-bit prime reductions are cardinality-minimal for reconstructing any
+finite rounded FP8 E5M2 value.  If one also insists on the Field-family
+root congruence \(p\equiv 11\pmod {12}\), five primes still suffice, for example
+\[
+  251,\,239,\,227,\,191,\,179.
+\]
+
+The present library does not implement multi-prime reconstruction; its goal is
+compact same-width fingerprinting.  The point is conceptual: algebraic FPSan
+collisions are ordinary modular collisions, and ordinary CRT arithmetic can, in
+principle, remove them within any known magnitude bound.  Rounding is a separate
+semantic choice: the algebraic fingerprints track the exact dyadic expression
+between whatever rounded values the instrumented program presents as leaves.
 
 \section{How the Field primes are chosen}
 
@@ -340,7 +405,7 @@ standalone prime and is not part of this tower.  Write \(p_i\) for the Field
 prime at a tower width and \(m_i=p_i-1\).  For each format class \(\alpha\) at
 that width, choose a primitive root \(g_{i,\alpha}\) of
 \(\F_{p_i}^\times\).  There is usually only one such class; the important
-exceptions are the two fp8 families, \(e4m3\) and \(e5m2\), and the two 16-bit
+exceptions are the two FP8 families, E4M3 and E5M2, and the two 16-bit
 families, f16 and bf16.  The implementation uses \(g_i\) for one class and
 \(g_i^3\) for the other.  Since the Field primes are \(11\pmod {12}\), \(3\) is
 coprime to \(m_i\), so \(g_i^3\) is again a primitive root.  Let
@@ -393,7 +458,7 @@ logarithm-coordinate rule gives the automorphism
 \[
   L_{i,\beta}(C_{i\alpha,i\beta}(x))=L_{i,\alpha}(x).
 \]
-Thus f16 and bf16, or \(e4m3\) and \(e5m2\), are not silently identified even
+Thus f16 and bf16, or E4M3 and E5M2, are not silently identified even
 though they share a bit width and a Field prime.
 
 \begin{proposition}[The Field cast tower]

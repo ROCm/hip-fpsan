@@ -84,7 +84,7 @@ equal**. Compare fingerprint results only against other results with the same
   combine the wrong semantics.
 - For a guide to choosing between `Triton`, `Field`,
   `SophieGermainRing`, and `PythagoreanRing`, see
-  [Algebraic FPSan semantics](algebraic-fpsan.md). For the original Triton
+  [Algebraic FPSan](algebraic-fpsan.md). For the original Triton
   construction, see [Triton FPSan from first principles](triton-fpsan.md).
 
 ## HIP / GPU

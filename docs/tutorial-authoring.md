@@ -84,5 +84,5 @@ target_link_libraries(your_target PRIVATE fpsan::fpsan)
 ```
 
 Next: [porting an existing codebase](tutorial-porting.md). For semantics
-selection, see [Algebraic FPSan semantics](algebraic-fpsan.md) and
+selection, see [Algebraic FPSan](algebraic-fpsan.md) and
 [Triton FPSan from first principles](triton-fpsan.md).

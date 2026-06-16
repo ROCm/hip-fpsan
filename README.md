@@ -1,60 +1,44 @@
 # hip-fpsan
 
-A header-only C++17 library providing **`Value<float_type, semantics,
-conversions>`** — a floating-point scalar type that can switch, by a template
-parameter, between ordinary IEEE-754 arithmetic and Triton-style **FPSan**
-integer-fingerprint arithmetic. It is designed for porting existing numerical code
-(including HIP GPU kernels) into a form where you can check algebraic
-equivalence of computations. "FPSan" here is the floating-point sanitizer from
-the [Triton compiler](https://github.com/triton-lang/triton) — the ideas explained in
-[this blog post](https://cp4space.hatsya.com/2026/05/03/schanuels-conjecture-and-the-semantics-of-fpsan/);
-this library is just a C++/HIP library offering a `Value` type implementing these
-semantics, and overloads of intrinsics for various AMD GPUs allowing to port
-entire programs, including compute kernels using such intrinsics.
+`hip-fpsan` is a header-only C++17/HIP library for running numerical code under
+FPSan-family semantics.
 
-## API
+FPSan was introduced by the [Triton compiler](https://github.com/triton-lang/triton)
+as a way to test floating-point rewrites without requiring bit-identical rounded
+results. An FPSan run replaces each floating-point value by a same-width
+fingerprint, evaluates the program in deterministic finite arithmetic, and
+compares the resulting fingerprints. This is useful when a compiler, library, or
+GPU intrinsic changes expression shape through reassociation, factoring, FMA
+formation, or a different accumulation order.
 
-```cpp
-#include <fpsan/fpsan.hpp>
+This library implements both the original Triton-style FPSan model and algebraic
+FPSan variants:
 
-enum class fpsan::Semantics {
-  Native, Triton,
-  Field, // ...more algebraic variants; see below.
-};
-enum class fpsan::Conversions { Implicit, Explicit };
+- `Semantics::Native`: ordinary native arithmetic, useful for incremental
+  porting and for flushing out implicit conversions.
+- `Semantics::Triton`: Triton FPSan integer-fingerprint arithmetic.
+- `Semantics::Field` and the other algebraic semantics: value-residue
+  fingerprints that preserve more exact finite-value identities in their
+  supported algebraic fragments.
 
-template <class float_type, fpsan::Semantics semantics,
-          fpsan::Conversions conversions>
-class fpsan::Value;
-```
+The main API is a scalar/vector `Value<float_type, semantics, conversions>` type,
+plus FPSan-aware overloads for many AMD GPU device intrinsics so whole HIP
+kernels can be ported.
 
-| parameter | values |
-|-----------|--------|
-| `semantics` | `Semantics::Native` = native arithmetic; `Semantics::Triton` = Triton FPSan integer fingerprints; `Semantics::Field` and friends = algebraic fingerprints |
-| `conversions` | `Conversions::Implicit` = implicit casts to/from numbers (like a POD); `Conversions::Explicit` = every conversion / 1-arg ctor is `explicit` |
+Good starting points:
 
-`float_type` may be `float`, `double`, `_Float16`, `__bf16`,
-`fpsan::fp8_e4m3`, `fpsan::fp8_e5m2`, or a Clang/GCC ext-vector of those
-scalars. Sub-byte MX formats are handled by the packed AMDGPU intrinsic
-wrappers rather than by scalar `Value<fp6>` / `Value<fp4>` types.
-
-The `semantics` and `conversions` parameters enable an **incremental conversion
-path**: start from plain `float` and migrate in small, compiler-checked steps —
-
-```
-float
-  → Value<float, Semantics::Native, Conversions::Implicit>   // bit-exact drop-in for float
-  → Value<float, Semantics::Native, Conversions::Explicit>   // same results; no silent casts
-  → Value<float, Semantics::Triton, Conversions::Explicit>   // algebraic-equivalence checking
-```
-
-`Semantics::Native` keeps native IEEE-754 results; `Conversions::Explicit`
-flushes out implicit conversions; `Semantics::Triton` and the algebraic
-semantics replace arithmetic with comparable fingerprints. For algebraic
-semantics beyond Triton, start with
-[`docs/algebraic-fpsan.md`](docs/algebraic-fpsan.md), then see
-[`docs/algebraic-semantics.md`](docs/algebraic-semantics.md) and
-[`docs/reducing-floats-mod-p.pdf`](docs/reducing-floats-mod-p.pdf).
+- Hands-on guides:
+  - [Authoring code with `Value`](docs/tutorial-authoring.md)
+  - [Incremental porting](docs/tutorial-porting.md)
+- Understanding FPSan:
+  - [Triton FPSan from first principles](docs/triton-fpsan.md)
+  - Algebraic FPSan:
+    - [Algebraic FPSan](docs/algebraic-fpsan.md): general introduction and
+      comparison of FPSan variants.
+    - [Algebraic FPSan semantics](docs/algebraic-semantics.md): operational
+      details for math-comfortable engineers.
+    - [Reducing floats mod p](docs/reducing-floats-mod-p.pdf): mathematical
+      write-up of algebraic FPSan.
 
 ## Quick start
 
@@ -76,6 +60,36 @@ Header-only: add `include` to your include path, or use the CMake target
 
 See the tutorials: [authoring](docs/tutorial-authoring.md) ·
 [incremental porting](docs/tutorial-porting.md).
+
+## API at a glance
+
+```cpp
+#include <fpsan/fpsan.hpp>
+
+using S = fpsan::Value<float, fpsan::Semantics::Triton,
+                       fpsan::Conversions::Explicit>;
+```
+
+`float_type` may be `float`, `double`, `_Float16`, `__bf16`,
+`fpsan::fp8_e4m3`, `fpsan::fp8_e5m2`, or a Clang/GCC ext-vector of those
+scalars. Sub-byte MX formats are handled by packed AMDGPU intrinsic wrappers.
+
+`Conversions::Implicit` makes `Value` behave more like a drop-in scalar.
+`Conversions::Explicit` makes conversions opt-in, which is usually better once
+FPSan checking is enabled.
+
+For an incremental port, move in small steps:
+
+```text
+float
+  -> Value<float, Semantics::Native, Conversions::Implicit>
+  -> Value<float, Semantics::Native, Conversions::Explicit>
+  -> Value<float, Semantics::Triton, Conversions::Explicit>
+```
+
+The final step can use `Semantics::Triton` or one of the
+[algebraic semantics](docs/algebraic-fpsan.md), depending on what identities you
+want the fingerprint arithmetic to preserve.
 
 ## Math functions
 

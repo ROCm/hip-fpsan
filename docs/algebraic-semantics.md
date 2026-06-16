@@ -1,4 +1,4 @@
-# Algebraic semantics in detail
+# Algebraic FPSan semantics
 
 This document gives the precise working model behind
 `Semantics::Field`, `Semantics::FieldFast`,
@@ -8,7 +8,7 @@ finite rings and want to understand what the implementation promises, without
 turning the user guide into a math paper.
 
 For the short decision guide and scorecard, see
-[algebraic-fpsan.md](algebraic-fpsan.md). For a more formal mathematical
+[Algebraic FPSan](algebraic-fpsan.md). For a more formal mathematical
 development, see [reducing-floats-mod-p.pdf](reducing-floats-mod-p.pdf). For
 the Triton construction that algebraic FPSan contrasts with, see
 [triton-fpsan.md](triton-fpsan.md).
