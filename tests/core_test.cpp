@@ -69,13 +69,7 @@ TYPED_TEST_P(CoreTyped, DefaultIsZero)
     using FT = typename TypeParam::ftype;
     using F  = Value<FT, TypeParam::sem, TypeParam::conv>;
     F z{};
-    // Default is the zero value: a Native/Triton float reads back as 0; an
-    // algebraic payload is the residue phi(0) == 0 (to_float() is unavailable
-    // there).
-    if constexpr(F::is_algebraic)
-        EXPECT_EQ(z.fpsan_payload(), typename F::bits_type(0));
-    else
-        EXPECT_EQ(bits_of(static_cast<FT>(z.to_float())), bits_of(FT(0)));
+    EXPECT_EQ(z.to_storage_bits(), typename F::bits_type(0));
 }
 
 TYPED_TEST_P(CoreTyped, RoundTripExact)
@@ -246,10 +240,12 @@ namespace
             B  bb = static_cast<B>(b);
             FT v;
             std::memcpy(&v, &bb, sizeof v);
-            B lib = F(v).fpsan_payload();
-            B gen = static_cast<B>(
-                fpsan_generic::FPSanFloat::embed(fmt, static_cast<uint32_t>(b)).payload());
-            ASSERT_EQ(lib, gen) << "bit pattern 0x" << std::hex << b;
+            const B observed = static_cast<B>(bits_of(v));
+            B       lib      = F(v).fpsan_payload();
+            B       gen      = static_cast<B>(
+                fpsan_generic::FPSanFloat::embed(fmt, static_cast<uint32_t>(observed)).payload());
+            ASSERT_EQ(lib, gen) << "bit pattern 0x" << std::hex << b << " observed as 0x"
+                                << static_cast<uint64_t>(observed);
         }
     }
 } // namespace
