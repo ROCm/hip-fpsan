@@ -130,7 +130,7 @@ namespace
     }
 
     template <class F>
-    std::string repr(const char* py_name, F v)
+    std::string repr(const std::string& py_name, F v)
     {
         std::ostringstream os;
         os << "fpsan." << py_name << "(";
@@ -203,11 +203,11 @@ namespace
     }
 
     template <class F, bool EnableOps = true>
-    nb::object bind_value(nb::module_& m, const char* py_name, const char* dtype)
+    nb::object bind_value(nb::module_& m, const std::string& py_name, const char* dtype)
     {
         using FT = typename F::float_type;
 
-        auto cls = nb::class_<F>(m, py_name)
+        auto cls = nb::class_<F>(m, py_name.c_str())
                        .def(nb::init<>())
                        .def(
                            "__init__",
@@ -256,7 +256,7 @@ namespace
         constexpr bool    enable_ops
             = !(S == Semantics::Native
                 && (std::is_same_v<FT, fpsan::fp8_e4m3> || std::is_same_v<FT, fpsan::fp8_e5m2>));
-        nb::object cls = bind_value<F, enable_ops>(m, py_name.c_str(), dtype);
+        nb::object cls = bind_value<F, enable_ops>(m, py_name, dtype);
         registry().push_back(Entry{dtype, S, C, cls});
         if(is_canonical)
         {
