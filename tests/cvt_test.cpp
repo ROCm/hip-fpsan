@@ -76,7 +76,7 @@ TEST(Cvt, PkrtzFloatMatchesBuiltin)
     HIP_CHECK(hipDeviceSynchronize());
     std::vector<std::uint32_t> got(32);
     HIP_CHECK(hipMemcpy(got.data(), dOut, 32 * sizeof(std::uint32_t), hipMemcpyDeviceToHost));
-    // Float-mode result should equal pack(static_cast<_Float16>(a),
+    // Native-mode result should equal pack(static_cast<_Float16>(a),
     // static_cast<_Float16>(b)) which is what cvt_pkrtz does up to RTZ rounding;
     // since our inputs are quarters in [-10,10], they are representable in
     // _Float16 exactly, so RTZ collapses to identity and the result IS the

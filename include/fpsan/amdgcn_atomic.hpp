@@ -23,7 +23,7 @@
 // covers all three pointer kinds without duplicated code or address-space
 // gymnastics.
 //
-// Float-mode fmin/fmax need a CAS loop because there is no hardware
+// Native-mode fmin/fmax need a CAS loop because there is no hardware
 // integer-typed atomic on a float (and the dedicated atomic_fmin/fmax_f32
 // builtins are buffer-resource forms that need explicit buffer descriptors).
 // The CAS loop is straightforward: read old, compute fmin/fmax in float, CAS
@@ -85,7 +85,7 @@ namespace fpsan
 
     // ---- atomic_fmin_f32 / atomic_fmax_f32 --------------------------------------
     // FPSan mode reduces to hardware SIGNED-INT atomicMin/atomicMax on the
-    // payload. Float mode runs a CAS loop on the float bits.
+    // payload. Native mode runs a CAS loop on the float bits.
     namespace detail
     {
 
@@ -108,7 +108,7 @@ namespace fpsan
             return fmax(a, b);
         }
 
-        // Float-mode fmin/fmax CAS loop on the raw bits, shared by f32 and f64:
+        // Native-mode fmin/fmax CAS loop on the raw bits, shared by f32 and f64:
         // read old, compute the FP min/max, CAS until success. UInt is the
         // same-width unsigned integer the hardware atomicCAS operates on (there is
         // no hardware integer-typed atomic on a float/double directly).
@@ -202,7 +202,7 @@ namespace fpsan
 
     // ---- atomic_fmin_f64 / atomic_fmax_f64 -------------------------------------
     // FPSan order is signed-int order on the (64-bit) payload, so FPSan reduces to
-    // a hardware signed 64-bit atomicMin/atomicMax. Float mode runs a CAS loop on
+    // a hardware signed 64-bit atomicMin/atomicMax. Native mode runs a CAS loop on
     // the 64-bit float bits (no hardware integer-typed atomic on a double).
     template <Semantics S, Conversions C>
     FPSAN_DEVICE Value<double, S, C> amdgcn_atomic_fmin_f64(Value<double, S, C>* addr,

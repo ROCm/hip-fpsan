@@ -47,10 +47,10 @@ algebraic equivalence, not bitwise floating-point equivalence.
 | `FieldFast2` | `Field2` | same prime `p` as `Field2` | second collision set for `FieldFast` |
 | `FieldWithMulCasts` | `Field1` | same prime `p` as `Field` | finite field, multiplicative casts |
 | `FieldWithMulCasts2` | `Field2` | same prime `p` as `Field2` | second collision set with multiplicative casts |
-| `SophieGermainRing` | `Exp1` | `n = p*d`, `p = 2*d + 1` | exp/log channel |
-| `SophieGermainRing2` | `Exp2` | different `p*d` | second collision set for Sophie Germain |
-| `PythagoreanRing` | `Trig1` | `n = p*d`, `p = 4*d + 1` | exp/log plus sin/cos channel |
-| `PythagoreanRing2` | `Trig2` | different `p*d` | second collision set for Pythagorean |
+| `SophieGermainRing` | `SophieGermain1` | `n = p*d`, `p = 2*d + 1` | exp/log channel |
+| `SophieGermainRing2` | `SophieGermain2` | different `p*d` | second collision set for Sophie Germain |
+| `PythagoreanRing` | `Pythagorean1` | `n = p*d`, `p = 4*d + 1` | exp/log plus sin/cos channel |
+| `PythagoreanRing2` | `Pythagorean2` | different `p*d` | second collision set for Pythagorean |
 
 The Field-family variants deliberately share prime tables: `Field`, `FieldFast`,
 and `FieldWithMulCasts` have the same finite fingerprints for input

@@ -359,7 +359,7 @@ TEST(WmmaBF16BF16_32, FpsanMatchesScalarReference)
 // rejects nonzero -- so the C-modifier is the only live numeric WMMA modifier.)
 // These tests exercise non-default modifier values against fully independent
 // host oracles, so they assert real intrinsic correctness on the device:
-//  - Float mode: wrapper (real builtin, modifier applied in silicon) vs a host
+//  - Native mode: wrapper (real builtin, modifier applied in silicon) vs a host
 //    float matmul that applies mod(C) with std::fabs/negate -- bit-for-bit.
 //  - FPSan mode: shipped payload path vs a host FPSan matmul that pre-applies
 //    mod(C) in the payload ring.

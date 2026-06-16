@@ -19,7 +19,7 @@
 //     including the E4M3 high-exponent / NaN region the small-int tests miss.
 //   * PackUnpackRoundTrip: pack a/scale, b/scale into an fp8 word then unpack
 //     with the same scale -> recover (a, b). Exercises the scaled PACK
-//     (divide) and the matching scaled UNPACK (multiply) together. Float mode
+//     (divide) and the matching scaled UNPACK (multiply) together. Native mode
 //     is bit-exact for values exact in fp8; FPSan mode must match the
 //     payload-ring reference (which divides on pack, multiplies on unpack).
 #include "fpsan/amdgcn_cvt.hpp"

@@ -4,7 +4,7 @@
 // tests/mfma_cdna3_test.cpp
 //
 // GPU tests for the CDNA3 / gfx94x MFMA wrappers. Each dense shape gets two
-// checks: Float mode against the real hardware layout, and FPSan mode against
+// checks: Native mode against the real hardware layout, and FPSan mode against
 // an independent scalar payload-ring reference.
 #include "fpsan/amdgcn_mfma.hpp"
 #include "fpsan/fpsan.hpp"

@@ -10,7 +10,7 @@
 // Both read 128 bits (8 x 16-bit) per lane with the WMMA cooperative-transpose
 // lane mapping. They are thin, bit-faithful shims over the hardware transpose,
 // so each test pins exactly that contract without knowing the permutation:
-//   * MatchesBuiltin   : Float-mode wrapper bits == direct builtin bits over
+//   * MatchesBuiltin   : Native-mode wrapper bits == direct builtin bits over
 //                        identically staged memory.
 //   * FpsanMovesSameBits: FPSan-mode wrapper (memory staged with the same bit
 //                        patterns as payloads) returns those same bits

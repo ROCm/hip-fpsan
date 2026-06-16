@@ -113,7 +113,7 @@ TEST(Math, TrigAngleAddition)
 {
     fpsan_test::for_each_fpsan_semantics([](auto sem) {
         constexpr Semantics S = decltype(sem)::value;
-        if constexpr(fpsan_test::flavor_has_trig<float, S>())
+        if constexpr(fpsan_test::flavor_has_sin_cos<float, S>())
         {
             using F = Value<float, S, Conversions::Explicit>;
             using B = typename F::bits_type;

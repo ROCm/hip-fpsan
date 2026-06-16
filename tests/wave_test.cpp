@@ -20,7 +20,7 @@
 //     INDEPENDENT host reference that folds the lane payloads left-to-right --
 //     a different reduction order than the device butterfly. Passing both pins
 //     down order-independence empirically, not just by construction.
-//   - FloatMatchesHostButterfly (associative ops only): Float-mode wrapper
+//   - FloatMatchesHostButterfly (associative ops only): Native-mode wrapper
 //     bit-exactly matches a host butterfly with float arithmetic on exact-int
 //     inputs (the hardware reduce and our tree agree on these values).
 //   - FpsanStrategyInvariant: FPSan output is bit-identical across strategies.
@@ -170,7 +170,7 @@ namespace
     std::vector<FT> make_lane_inputs(int n)
     {
         // Small exact integers so sums/mins/maxes stay exact in f32 and the
-        // Float-mode comparison against the host reference is bit-exact.
+        // Native-mode comparison against the host reference is bit-exact.
         std::vector<FT> v(n);
         std::mt19937    rng = fpsan_test::make_rng();
         for(auto& x : v)

@@ -7,7 +7,7 @@
 // fpsan/amdgcn_cvt.hpp (cvt_f16_fp8/bf8, cvt_pk_f16_fp8/bf8, cvt_pk_fp8/bf8_f16,
 // cvt_sr_fp8/bf8_f16). Registered by CMake only for the gfx1250 tier.
 //
-// Authoritative-correctness policy: Float-mode references are computed HOST-SIDE
+// Authoritative-correctness policy: Native-mode references are computed HOST-SIDE
 // from the OCP fp8 decode/encode (fpsan::fp8_e4m3 / fp8_e5m2, the same generic
 // narrow<->f32 routines that fp8_test.cpp locks down), independent of the device
 // builtin. fp8 (e4m3) and bf8 (e5m2) are exactly representable in f16, so the

@@ -9,14 +9,14 @@
 //                _Float16, __bf16) OR a Clang/GCC vector of one of those, e.g.
 //                `float __attribute__((ext_vector_type(8)))`.
 //   semantics    Semantics::Native : native arithmetic of float_type (drop-in)
-//                Semantics::Triton : Triton-style FPSan integer-payload
-//                arithmetic
+//                Semantics::Triton : Triton-style FPSan integer-payload arithmetic
+//                Semantics::Field and friends : algebraic FPSan finite-ring
+//                arithmetic (see the enum below for the available variants)
 //   conversions  Conversions::Implicit / Conversions::Explicit
 //
-// A vector float_type makes Value a SIMD bundle: the payload algebra is applied
-// lane-wise (the native integer-vector operators do exactly that, since each op
-// masks to the lane width). Comparisons then yield a per-lane mask, mirroring
-// native vector comparisons.
+// A vector float_type makes Value a SIMD bundle: FPSan-family payload operations
+// are applied lane-wise. Comparisons then yield a per-lane mask, mirroring native
+// vector comparisons.
 // ----------------------------------------------------------------------------
 #ifndef FPSAN_VALUE_HPP
 #define FPSAN_VALUE_HPP
@@ -97,7 +97,7 @@ namespace fpsan
 
     namespace detail
     {
-        // Fpsan (non-native) semantics: the Value object IS an integer payload.
+        // FPSan-family (non-native) semantics: the Value object IS an integer payload.
         FPSAN_HOST_DEVICE constexpr bool is_fpsan_semantics(Semantics s)
         {
             return s != Semantics::Native;
@@ -131,13 +131,13 @@ namespace fpsan
             case Semantics::FieldWithMulCasts:
                 return AlgVariant::Field1;
             case Semantics::SophieGermainRing:
-                return AlgVariant::Exp1;
+                return AlgVariant::SophieGermain1;
             case Semantics::SophieGermainRing2:
-                return AlgVariant::Exp2;
+                return AlgVariant::SophieGermain2;
             case Semantics::PythagoreanRing:
-                return AlgVariant::Trig1;
+                return AlgVariant::Pythagorean1;
             case Semantics::PythagoreanRing2:
-                return AlgVariant::Trig2;
+                return AlgVariant::Pythagorean2;
             default:
                 return AlgVariant::Field1; // Field
             }
@@ -263,10 +263,10 @@ namespace fpsan
             return Value(static_cast<storage_type>(p), raw_tag{});
         }
 
-        // Raw bit pattern of the stored representation (the payload in FPSan mode,
-        // the float's bits otherwise) and its inverse. Used for cross-lane data
-        // movement (e.g. __shfl), which must move the storage verbatim regardless of
-        // mode.
+        // Raw bit pattern of the stored representation (the payload in FPSan-family
+        // semantics, the float's bits otherwise) and its inverse. Used for cross-lane
+        // data movement (e.g. __shfl), which must move the storage verbatim
+        // regardless of mode.
         FPSAN_HOST_DEVICE constexpr bits_type to_storage_bits() const
         {
             if constexpr(is_fpsan)
@@ -354,10 +354,10 @@ namespace fpsan
         }
 
         // ---- comparisons ---------------------------------------------------------
-        // == / != compare payloads in FPSan mode (exact) and the floats otherwise.
-        // Ordering in FPSan mode is the *signed integer* order of payloads (Triton's
-        // min/max contract), NOT IEEE float order. Vector Values return per-lane
-        // masks.
+        // == / != compare payloads in FPSan-family semantics (exact) and the floats
+        // otherwise. Ordering in FPSan-family semantics is the *signed integer* order
+        // of payloads (Triton's min/max contract), NOT IEEE float order. Vector
+        // Values return per-lane masks.
         FPSAN_HOST_DEVICE friend constexpr cmp_t operator==(Value a, Value b)
         {
             return a.eq(b);
@@ -396,8 +396,9 @@ namespace fpsan
             return Value(s, raw_tag{});
         }
 
-        // float -> stored representation: the FPSan integer payload in FPSan mode,
-        // the float itself otherwise. Shared by both converting constructors.
+        // float -> stored representation: the FPSan integer payload in FPSan-family
+        // semantics, the float itself otherwise. Shared by both converting
+        // constructors.
         FPSAN_HOST_DEVICE static constexpr storage_type from_float(float_type v)
         {
             if constexpr(is_fpsan)

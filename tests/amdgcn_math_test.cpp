@@ -7,7 +7,7 @@
 // scalar math cases (rcp/rsq/sqrt/sin/cos/log/exp2/fract) are shared across the
 // gfx12 family (RDNA4 and gfx1250), gfx94x, and gfx950. Two properties per
 // scalar wrapper:
-//   - Float mode forwards to the builtin (the wrapper produces the same bits
+//   - Native mode forwards to the builtin (the wrapper produces the same bits
 //     as __builtin_amdgcn_{rcp,rsq,...}f directly).
 //   - FPSan mode matches fpsan::{rcp,rsqrt,...} payload-for-payload (the
 //     wrapper just routes to the tagged op).
@@ -310,7 +310,7 @@ AMDGCN_MATH_FMED3_TEST(amdgcn_fmed3h, _Float16)
 
 // ============================================================================
 // fdot2 family.  Two properties per wrapper:
-//   - Float mode bit-exact matches the underlying builtin.
+//   - Native mode bit-exact matches the underlying builtin.
 //   - FPSan mode matches the expanded `acc + cast(a0)*cast(b0) +
 //     cast(a1)*cast(b1)` expression (payload-for-payload).  We compute the
 //     expanded expression in the same kernel using the FPSan tagged ops, so the
@@ -681,7 +681,7 @@ TEST(AmdgcnMath, fdot2_f32_bf16_FloatAndFpsan)
 // ============================================================================
 // dot4 fp8 / bf8 family (gfx12 dot11-insts): 4-element 8-bit dot product.
 // Each A and B is a v4 of fp8 (e4m3) or bf8 (e5m2) packed as 32 bits per lane.
-// Float-mode: wrapper bit-exact equals direct builtin.  FPSan-mode: wrapper
+// Native-mode: wrapper bit-exact equals direct builtin.  FPSan-mode: wrapper
 // payload equals explicit ring expression `acc + sum cast<f32>(a[k]) *
 // cast<f32>(b[k])`.
 // ============================================================================

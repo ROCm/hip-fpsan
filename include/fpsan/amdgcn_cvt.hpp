@@ -46,7 +46,7 @@ namespace fpsan
     // we bit_cast at the call boundary and keep the int public API.
     using v2s16_native = short __attribute__((ext_vector_type(2)));
 
-    // Pack two f32 values into a v2f16 with round-to-zero. Float mode forwards to
+    // Pack two f32 values into a v2f16 with round-to-zero. Native mode forwards to
     // the builtin; FPSan mode uses two scalar fpsan::cast<_Float16>(...) and
     // assembles them into the v2h fragment (cast does signed-truncate of the
     // payload 32->16, which is the FPSan model of an f32 -> f16 conversion).
@@ -82,7 +82,7 @@ namespace fpsan
     // both result lanes are produced (lane0 <- a, lane1 <- b). FPSan model is two
     // scalar fpsan::cast<{_Float16,__bf16}>(...) (payload signed-truncate 32->16,
     // the f32->f16/bf16 narrowing model); the seed is opaque to that deterministic
-    // answer, exactly like every other SR wrapper here. Float mode forwards to the
+    // answer, exactly like every other SR wrapper here. Native mode forwards to the
     // builtin and the tests assert against the host narrowing at exactly
     // representable inputs (where SR is exact) plus a neighbor-bracket property for
     // non-representable inputs.
@@ -137,7 +137,7 @@ namespace fpsan
     // fp8 (or bf8) bytes. The byte position is selected by a constexpr index.
     // Customers wire them up at the byte level, and the FPSan wrappers preserve
     // that: the int argument is opaque to FPSan (it's a raw register holding
-    // either real fp8 bytes in Float mode or fp8 PAYLOAD bytes in FPSan mode,
+    // either real fp8 bytes in Native mode or fp8 PAYLOAD bytes in FPSan mode,
     // the customer's choice consistent within their kernel).
     // =============================================================================
 
@@ -174,7 +174,7 @@ namespace fpsan
     } // namespace detail
 
 // cvt_f32_fp8 / cvt_f32_bf8: read byte ByteIdx of a packed int as an fp8 value
-// and convert it to f32. Float mode forwards to the builtin; FPSan mode
+// and convert it to f32. Native mode forwards to the builtin; FPSan mode
 // reinterprets the byte as an fp8 payload and uses fpsan::cast<float> (which
 // is signed-extend 8 -> 32).
 #define FPSAN_DEFINE_CVT_F32_FP8(name, FP8, BUILTIN)                                               \
@@ -315,7 +315,7 @@ namespace fpsan
     // gfx1250 adds direct f16<->fp8 paths (RDNA4/CDNA only had f32<->fp8). The
     // fp8 formats are the SAME OCP encodings as the f32 ops -- fp8 = e4m3, bf8 =
     // e5m2 -- so we reuse fp8_e4m3 / fp8_e5m2 and the existing payload-ring cast
-    // (fpsan::cast<FP8> truncates, fpsan::cast<_Float16> resizes). Float mode
+    // (fpsan::cast<FP8> truncates, fpsan::cast<_Float16> resizes). Native mode
     // forwards to the builtin; FPSan mode is the deterministic Triton ext/trunc
     // cast, identical in spirit to the f32 family. Every fp8 value is exactly
     // representable in f16, so the decode direction is lossless. Each block is
@@ -1316,7 +1316,7 @@ namespace fpsan
 #undef FPSAN_DEFINE_CVT_SCALEF32_PK8_FP4
 
     // ---- pk16 -> fp6/bf6: 16 lanes -> v3u32 (16 6-bit codes, contiguous), each
-    // /scale. fp6 vs bf6 differ only in the Float-mode builtin (the FPSan payload
+    // /scale. fp6 vs bf6 differ only in the Native-mode builtin (the FPSan payload
     // narrow is a width-6 truncate either way), exactly like the gfx950 pk32 pack.
 #define FPSAN_DEFINE_CVT_SCALEF32_PK16_FP6(NAME, VEC, BUILTIN)                                \
     template <Semantics S = Semantics::Native, Conversions C = Conversions::Explicit>         \
@@ -1474,7 +1474,7 @@ namespace fpsan
     // is NOT in LLVM APFloat). The hardware reaches it by OVERLOADING the ordinary
     // f32<->fp8 convert opcodes via the CLAMP bit -- exposed in LLVM/Clang as the
     // dedicated *_e5m3 builtins whose signatures are byte-identical to the
-    // non-e5m3 cvt_{f32_fp8,pk_fp8_f32,sr_fp8_f32}. Float mode forwards to the
+    // non-e5m3 cvt_{f32_fp8,pk_fp8_f32,sr_fp8_f32}. Native mode forwards to the
     // builtin; the tests assert against the HOST E5M3 codec (detail::kFp8E5M3),
     // which is the authoritative reference.
     //
@@ -1484,7 +1484,7 @@ namespace fpsan
     // e4m3/e5m2. So the FPSan path is the same width-8 deterministic resize as its
     // siblings (decode = subbyte_widen<8>; encode = low 8 payload bits), keeping
     // mixed e4m3/e5m2/e5m3 FPSan kernels uniform; the format's unsignedness is only
-    // modeled in (authoritative) Float mode.
+    // modeled in (authoritative) Native mode.
     // =============================================================================
 #if !defined(__HIP_DEVICE_COMPILE__) || __has_builtin(__builtin_amdgcn_cvt_f32_fp8_e5m3)
     // Decode: byte ByteIdx of `packed`, interpreted as E5M3, -> f32.
@@ -1558,7 +1558,7 @@ namespace fpsan
     //   pk8  fp4     : u32   (8 nibbles,  nib  i  = code i) -> v8.
     //   pk16 fp6/bf6 : v3u32 (16 codes,   contiguous 6-bit) -> v16.
     //
-    // Float mode forwards to the hardware builtin (authoritative). FPSan mode is a
+    // Native mode forwards to the hardware builtin (authoritative). FPSan mode is a
     // plain payload WIDEN of each narrow code (detail::subbyte_widen<8/6/4>) with
     // NO scale applied: the block scale is a magnitude-only Float-domain effect,
     // and the payload ring tracks precision/width, not the E8M0 multiply
@@ -1651,7 +1651,7 @@ namespace fpsan
 #undef FPSAN_DEFINE_CVT_SCALE_UNPACK_PK8_FP4
 
     // ---- pk16 unpack from fp6/bf6: v3u32 (16 contiguous 6-bit codes) -> v16, each
-    // * scale (width-6). fp6 vs bf6 differ only in the Float-mode builtin; the
+    // * scale (width-6). fp6 vs bf6 differ only in the Native-mode builtin; the
     // FPSan payload widen is a width-6 sign-resize either way.
 #define FPSAN_DEFINE_CVT_SCALE_UNPACK_PK16_FP6(NAME, DstFT, VEC, BUILTIN)                \
     template <int         ScaleSel,                                                      \

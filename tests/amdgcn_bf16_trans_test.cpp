@@ -13,7 +13,7 @@
 // for a hardware rcp/rsq/sin/... approximation (the exact result is defined by
 // the unit's table+interpolation, not by std::sin), and we have no real silicon
 // to sample. So the two assertions we CAN make authoritatively are:
-//   - Float mode: the wrapper is a bit-exact pass-through to the builtin (this
+//   - Native mode: the wrapper is a bit-exact pass-through to the builtin (this
 //     proves our wrapper plumbing; the builtin's accuracy is the hardware's
 //     contract, not ours to redefine).
 //   - FPSan mode: the wrapper's payload equals the matching fpsan:: tagged op,

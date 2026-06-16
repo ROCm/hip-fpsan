@@ -45,7 +45,7 @@ namespace
         return acc;
     }
 
-    // Deterministic pseudo-random inputs (see test_random.hpp). Float-mode Value is
+    // Deterministic pseudo-random inputs (see test_random.hpp). Native-mode Value is
     // a bit-exact passthrough to native ops, so the wrapper-vs-raw comparison holds
     // for any finite values; quarters give broad, exactly-representable coverage.
     std::vector<double> make_input(int n)

@@ -3,34 +3,37 @@
 //
 // fpsan/detail/algebraic.hpp
 // ----------------------------------------------------------------------------
-// The payload algebra for the *algebraic* FPSan semantics (see the study in
-// bjacob/fpsan: algebraic-fpsan.md).  Where Semantics::Triton scrambles the
-// float bits into the free ring Z/2^w (mix.hpp's ring_*), the algebraic
-// semantics carry the genuine residue
+// Finite-ring implementation for the algebraic FPSan semantics. See
+// docs/algebraic-fpsan.md for the user-facing guide and
+// docs/reducing-floats-mod-p.{tex,pdf} for the math write-up. Where
+// Semantics::Triton scrambles the float bits into Z/2^w (mix.hpp's ring_*), the
+// algebraic semantics carry the genuine residue
 //
-//     phi_n(m * 2^e) = (m mod n) * (2^-1)^(-e)   in  Z/nZ
+//     phi_n(m * 2^e) = m * 2^e   in  Z/nZ,
 //
-// of the value's *exact* dyadic rational, for a per-element-width modulus n.
+// interpreting negative e using 2^{-1} mod n, of the value's exact dyadic
+// rational, for a per-element-width odd modulus n.
 //
 // This header is the ONE place the finite-ring constants and operations live.
 // Public Semantics can share one of these algebra-layer variants while choosing
 // different operation policies above it; e.g. Field, FieldFast and
 // FieldWithMulCasts all reuse Field1 primes and embeddings.
-//   * Field1 / Field2 : n = a prime just below 2^w. Z/n is a field.
-//   * Exp1   / Exp2   : n = p*d (Sophie Germain pair, p == 2d+1), p,d prime.
-//                       Carries exp(v) = g^(v mod d) so exp(a+b)=exp(a)exp(b);
-//                       pays zero-divisors (~1/p+1/d) and an order-d exp image.
-//   * Trig1  / Trig2  : n = p*d with p = 4d+1. Keeps the exp/log channel and
-//                       adds an order-d rotor for sin/cos angle-addition.
+//   * Field-family semantics use n = p, a prime just below 2^w.
+//   * SophieGermainRing-family semantics use n = p*d with p = 2d+1, carrying
+//     exp(v) = g^(v mod d) so exp(a+b)=exp(a)exp(b), at the cost of rare
+//     zero-divisors.
+//   * PythagoreanRing-family semantics use n = p*d with p = 4d+1, keeping the
+//     exp/log channel and adding an order-d rotor for sin/cos angle-addition.
 //
-// Per the design: everything keys on the *scalar element* width.  Exp variants
-// only make sense >= 8 bits (sub-byte types are matmul-only), so below 8 bits
-// an Exp variant FALLS BACK to its matching Field prime (two_moduli = false).
+// Per the design: everything keys on the scalar element width. Composite
+// exp/log/trig channels only make sense >= 8 bits; below that this layer falls
+// back to the matching Field prime (two_moduli = false).
 // Vector Values apply all of this LANE-WISE; vector width != element width.
 //
-// Casts between widths are NOT value-faithful here (a per-width modulus makes
-// widening uncomputable from the narrow payload) -- they are a defined
-// convention handled in cast.hpp, exactly as Triton-FPSan's resize is.
+// Cross-width casts are policy, not part of the leaf embedding. A residue modulo
+// one prime does not determine a residue modulo another. cast.hpp therefore
+// chooses either a cheap deterministic convention or, for FieldWithMulCasts, the
+// multiplicative tower implemented by alg_cast1 below.
 // ----------------------------------------------------------------------------
 #ifndef FPSAN_DETAIL_ALGEBRAIC_HPP
 #define FPSAN_DETAIL_ALGEBRAIC_HPP
@@ -47,17 +50,18 @@ namespace fpsan
         using u64  = std::uint64_t;
         using u128 = unsigned __int128;
 
-        // The divergence point: which algebraic variant. (Mapped from the public
-        // Semantics enum in value.hpp; kept separate so this header has no
-        // dependency on value.hpp.)
+        // The divergence point inside this implementation layer. The public
+        // Semantics names are mapped onto these internal variants in value.hpp;
+        // keeping the enum here avoids depending on value.hpp from this detail
+        // header.
         enum class AlgVariant
         {
             Field1,
             Field2,
-            Exp1,
-            Exp2,
-            Trig1,
-            Trig2
+            SophieGermain1,
+            SophieGermain2,
+            Pythagorean1,
+            Pythagorean2
         };
 
         struct AlgModulus
@@ -67,34 +71,35 @@ namespace fpsan
             u64  d          = 0; // exp/log/trig exponent modulus; unused if !two_moduli
             bool two_moduli = false;
             // order-d rotation element of (Z/n)[i] (i^2=-1) for sin/cos: a genuine
-            // rotation in the F_p factor, identity in the F_d factor. Trig only.
-            u64  omega_re = 0;
-            u64  omega_im = 0;
-            bool has_trig = false;
+            // rotation in the F_p factor, identity in the F_d factor. Used only by
+            // the PythagoreanRing-family semantics.
+            u64  omega_re    = 0;
+            u64  omega_im    = 0;
+            bool has_sin_cos = false;
         };
 
         // ---- the constants table (the only per-(variant x width) data) ----------
-        // Field primes leave >= 2 codes free (Inf, NaN sentinels). All are
-        // p == 11 (mod 12), which gives two algebraic structures for free:
+        // Field-family primes leave >= 2 codes free (Inf, NaN sentinels). All are
+        // p == 11 (mod 12), which gives two algebraic structures:
         //   * sqrt as a multiplicative map with 1/2 round-trip coverage (p==3 mod 4)
         //   * cbrt as a PERFECT multiplicative cube root (3 coprime to p-1, p==2 mod 3)
-        // and, across widths, the p_w - 1 form a COPRIME TOWER
-        //   fp4(10) | fp8 | fp16 | fp32,  each step's cofactor coprime to the rest
-        // (fp6 is standalone). That makes every widening AND narrowing cast in the
-        // chain a multiplicative homomorphism, and makes them a commutative diagram:
-        // widening composes, narrowing composes, and narrow(widen(x)) == x exactly
-        // (see alg_cast1). Variant 1 and 2 are two independent towers sharing only
-        // fp4 = 11 (the only 11-mod-12 prime that fits 4 bits). Exp pairs are
-        // Sophie Germain (p = 2d+1); g has order d in (Z/n)^*.  64-bit (double) is
-        // IN the tower: p_64 = (p_32-1)*c + 1 with c coprime to p_32-1, so its casts
-        // are multiplicative like the rest. The fp32<->fp64 cast dlog runs over
-        // p_32-1 ~ 2^32 -- infeasible by the O(m) scan, so alg_dlog_base switches to
-        // Pohlig-Hellman there (p_32-1 is smooth by construction). 128-bit modular
-        // multiply (alg_mulmod) carries the n ~ 2^64 arithmetic.
+        //
+        // The same primes are also chosen so p_w - 1 forms a coprime tower:
+        //   (p_4-1) | (p_8-1) | (p_16-1) | (p_32-1) | (p_64-1),
+        // with each step cofactor coprime to the smaller order; fp6 is standalone.
+        // FieldWithMulCasts uses this in alg_cast1 to make widening and narrowing
+        // multiplicative homomorphisms that form commutative diagrams in log
+        // coordinates. Field and FieldFast share the exact same primes for input
+        // compatibility, but their casts do not pay for those logarithms.
+        //
+        // Variant 1 and 2 are two independent towers sharing only fp4 = 11 (the
+        // only 11-mod-12 prime that fits 4 bits). Sophie Germain pairs use p = 2d+1
+        // with g of order d in (Z/n)^*. 64-bit arithmetic uses the same tower
+        // pattern, and alg_mulmod uses a 128-bit intermediate to carry n near 2^64.
         FPSAN_HOST_DEVICE constexpr u64 alg_field_prime(AlgVariant v, unsigned w)
         {
-            const bool a
-                = (v == AlgVariant::Field1 || v == AlgVariant::Exp1 || v == AlgVariant::Trig1);
+            const bool a = (v == AlgVariant::Field1 || v == AlgVariant::SophieGermain1
+                            || v == AlgVariant::Pythagorean1);
             switch(w)
             {
             case 4:
@@ -115,13 +120,13 @@ namespace fpsan
                 return 0;
             }
         }
-        // A primitive root (generator of F_p^*) for each Field prime, used to build
-        // the multiplicative widening cast (alg_cast1): the cast sends g_narrow to a
-        // generator of the order-(p_narrow-1) subgroup of F_p_wide^*.
+        // A primitive root (generator of F_p^*) for each Field-family prime. The
+        // FieldWithMulCasts cast tower uses it in alg_cast1: the cast sends
+        // g_narrow to a generator of the order-(p_narrow-1) subgroup of F_p_wide^*.
         FPSAN_HOST_DEVICE constexpr u64 alg_field_root(AlgVariant v, unsigned w)
         {
-            const bool a
-                = (v == AlgVariant::Field1 || v == AlgVariant::Exp1 || v == AlgVariant::Trig1);
+            const bool a = (v == AlgVariant::Field1 || v == AlgVariant::SophieGermain1
+                            || v == AlgVariant::Pythagorean1);
             switch(w)
             {
             case 4:
@@ -140,25 +145,26 @@ namespace fpsan
                 return 0;
             }
         }
-        // Trigonometry variants: p = 4d+1 (so p == 1 mod 4 -> the circle group has
-        // order p-1, divisible by d, so a genuine order-d rotation exists). g is the
-        // order-d exp/log generator (d | p-1), omega the order-d rotation element of
-        // (Z/n)[i] -- a rotation in the F_p factor, identity in the F_d factor. d is
-        // ~sqrt(2) smaller than the Exp variants at the same width (more collisions),
-        // the price for sin/cos. See the offline derivation in this commit message.
-        FPSAN_HOST_DEVICE constexpr AlgModulus alg_trig_pair(AlgVariant v, unsigned w)
+        // PythagoreanRing-family moduli: p = 4d+1 (so p == 1 mod 4 -> the circle
+        // group has order p-1, divisible by d, so a genuine order-d rotation exists).
+        // g is the order-d exp/log generator (d | p-1), omega the order-d rotation
+        // element of (Z/n)[i] -- a rotation in the F_p factor, identity in the F_d
+        // factor. d is ~sqrt(2) smaller than in the SophieGermainRing family at the
+        // same width, which is the collision cost paid for sin/cos laws. The
+        // number-theoretic constraints are discussed in docs/reducing-floats-mod-p.tex.
+        FPSAN_HOST_DEVICE constexpr AlgModulus alg_pythagorean_pair(AlgVariant v, unsigned w)
         {
-            const bool t1 = (v == AlgVariant::Trig1);
+            const bool p1 = (v == AlgVariant::Pythagorean1);
             switch(w)
             {
             case 8:
-                return t1 ? AlgModulus{203u, 190u, 7u, true, 134u, 140u, true}
+                return p1 ? AlgModulus{203u, 190u, 7u, true, 134u, 140u, true}
                           : AlgModulus{39u, 16u, 3u, true, 19u, 24u, true};
             case 16:
-                return t1 ? AlgModulus{64643u, 57024u, 127u, true, 36831u, 62992u, true}
+                return p1 ? AlgModulus{64643u, 57024u, 127u, true, 36831u, 62992u, true}
                           : AlgModulus{37733u, 31914u, 97u, true, 20856u, 11252u, true};
             case 32:
-                return t1 ? AlgModulus{4279024103u,
+                return p1 ? AlgModulus{4279024103u,
                                        4277061684u,
                                        32707u,
                                        true,
@@ -175,7 +181,7 @@ namespace fpsan
             case 64:
                 // p = 4d+1, d == 3 (mod 4) so the r^(d+1) log projection lands in <g>;
                 // omega is the order-d rotor in (Z/n)[i] (identity in the F_d factor).
-                return t1 ? AlgModulus{18446733956915472983ull,
+                return p1 ? AlgModulus{18446733956915472983ull,
                                        18446733828066489444ull,
                                        2147483059ull,
                                        true,
@@ -193,33 +199,34 @@ namespace fpsan
                 return {};
             }
         }
-        FPSAN_HOST_DEVICE constexpr AlgModulus alg_exp_pair(AlgVariant v, unsigned w)
+        FPSAN_HOST_DEVICE constexpr AlgModulus alg_sophie_germain_pair(AlgVariant v, unsigned w)
         {
             // Two independent Sophie Germain pairs (p = 2d+1) per width; g has
-            // order d in (Z/n)^*. Exp1 uses the largest pair, Exp2 the next --
-            // distinct moduli so the two variants are genuinely independent runs.
-            const bool e1 = (v == AlgVariant::Exp1);
+            // order d in (Z/n)^*. The first variant uses the largest pair, the
+            // second the next -- distinct moduli so the two variants are genuinely
+            // independent runs.
+            const bool sg1 = (v == AlgVariant::SophieGermain1);
             switch(w)
             {
             case 8:
-                return e1 ? AlgModulus{253u, 188u, 11u, true} : AlgModulus{55u, 26u, 5u, true};
+                return sg1 ? AlgModulus{253u, 188u, 11u, true} : AlgModulus{55u, 26u, 5u, true};
             case 16:
-                return e1 ? AlgModulus{64261u, 63188u, 179u, true}
-                          : AlgModulus{60031u, 58994u, 173u, true};
+                return sg1 ? AlgModulus{64261u, 63188u, 179u, true}
+                           : AlgModulus{60031u, 58994u, 173u, true};
             case 32:
-                return e1 ? AlgModulus{4274287111u, 4274009738u, 46229u, true}
-                          : AlgModulus{4268741401u, 4268464208u, 46199u, true};
+                return sg1 ? AlgModulus{4274287111u, 4274009738u, 46229u, true}
+                           : AlgModulus{4268741401u, 4268464208u, 46199u, true};
             case 64:
                 // p = 2d+1 (Sophie Germain), d == 2 (mod 3) so 3 stays coprime to the
                 // group exponent and cbrt remains a perfect power map. g has order d.
-                return e1 ? AlgModulus{18446739472945029403ull,
-                                       18446739454723028678ull,
-                                       3037000121ull,
-                                       true}
-                          : AlgModulus{18446728393970250571ull,
-                                       18446728375748255318ull,
-                                       3036999209ull,
-                                       true};
+                return sg1 ? AlgModulus{18446739472945029403ull,
+                                        18446739454723028678ull,
+                                        3037000121ull,
+                                        true}
+                           : AlgModulus{18446728393970250571ull,
+                                        18446728375748255318ull,
+                                        3036999209ull,
+                                        true};
             default:
                 return {};
             }
@@ -227,14 +234,17 @@ namespace fpsan
 
         FPSAN_HOST_DEVICE constexpr AlgModulus alg_modulus(AlgVariant v, unsigned w)
         {
-            const bool is_exp  = (v == AlgVariant::Exp1 || v == AlgVariant::Exp2);
-            const bool is_trig = (v == AlgVariant::Trig1 || v == AlgVariant::Trig2);
-            if(is_exp && w >= 8)
-                return alg_exp_pair(v, w);
-            if(is_trig && w >= 8)
-                return alg_trig_pair(v, w);
-            // Field variant, or exp/trig below 8 bits -> field prime, no exp/trig.
-            // g carries a primitive root of the prime (for the multiplicative cast).
+            const bool is_sophie_germain
+                = (v == AlgVariant::SophieGermain1 || v == AlgVariant::SophieGermain2);
+            const bool is_pythagorean
+                = (v == AlgVariant::Pythagorean1 || v == AlgVariant::Pythagorean2);
+            if(is_sophie_germain && w >= 8)
+                return alg_sophie_germain_pair(v, w);
+            if(is_pythagorean && w >= 8)
+                return alg_pythagorean_pair(v, w);
+            // Field-family semantics, or composite-channel requests below 8 bits:
+            // use a field prime with no exp/log/trig channel. g carries a primitive
+            // root of the prime for the FieldWithMulCasts tower.
             return {alg_field_prime(v, w), alg_field_root(v, w), 0u, false};
         }
 
@@ -252,20 +262,21 @@ namespace fpsan
         // ---- the per-Value configuration (analogous to MixConfig) ----------------
         struct AlgConfig
         {
-            u64  n          = 0;
-            u64  inv2       = 0; // 2^{-1} mod n
-            u64  g          = 0;
-            u64  cast_g     = 0; // format-specific primitive root for Field casts
-            u64  d          = 0;
-            u64  inf_code   = 0; // = n
-            u64  nan_code   = 0; // = n + 1
-            bool two_moduli = false;
-            u64  omega_re   = 0; // order-d rotation element of (Z/n)[i], for sin/cos
-            u64  omega_im   = 0;
-            bool has_trig   = false;
+            u64  n           = 0;
+            u64  inv2        = 0; // 2^{-1} mod n
+            u64  g           = 0;
+            u64  cast_g      = 0; // format-specific primitive root for Field casts
+            u64  d           = 0;
+            u64  inf_code    = 0; // = n
+            u64  nan_code    = 0; // = n + 1
+            bool two_moduli  = false;
+            u64  omega_re    = 0; // order-d rotation element of (Z/n)[i], for sin/cos
+            u64  omega_im    = 0;
+            bool has_sin_cos = false;
             // multiplicative root exponents (power maps x^e on units): sqrt and its
             // reciprocal rsqrt always available; cbrt only where 3 is coprime to the
-            // group exponent (has_cbrt: Field/Exp, not Trig).
+            // group exponent. PythagoreanRing-family moduli deliberately do not have
+            // this property, so cbrt falls back to a tag there.
             u64  sqrt_exp  = 0;
             u64  rsqrt_exp = 0;
             u64  cbrt_exp  = 0;
@@ -308,7 +319,7 @@ namespace fpsan
             c.two_moduli       = m.two_moduli;
             c.omega_re         = m.omega_re;
             c.omega_im         = m.omega_im;
-            c.has_trig         = m.has_trig;
+            c.has_sin_cos      = m.has_sin_cos;
             c.inv2             = (m.n + 1) / 2; // inverse of 2 mod odd n
             c.inf_code         = m.n;
             c.nan_code         = m.n + 1;
@@ -317,9 +328,9 @@ namespace fpsan
             c.bias             = T::bias;
             c.mant_mask        = (u64{1} << T::mantissa_bits) - 1;
             c.exp_max          = (u64{1} << T::exponent_bits) - 1;
-            c.has_inf_nan      = true; // IEEE-style types; sub-byte specifics TBD
+            c.has_inf_nan      = true; // scalar Value element types reserve Inf/NaN sentinels
             // Root power maps. lam = exponent of the unit group (Carmichael):
-            // n-1 for a prime field, lcm(p-1, d-1) for the composite Exp/Trig ring.
+            // n-1 for a prime field, lcm(p-1, d-1) for the composite CRT rings.
             const u64 pf = c.two_moduli ? (c.n / c.d) : c.n; // F_p factor
             const u64 lam
                 = c.two_moduli ? (pf - 1) / alg_gcd(pf - 1, c.d - 1) * (c.d - 1) : (c.n - 1);
@@ -388,8 +399,8 @@ namespace fpsan
             return (u64)t;
         }
 
-        // A cheap operation-tagged scramble: the "free generator" for transcendentals
-        // with no usable identity (and for exp in the Field / sub-byte cases).
+        // A cheap operation-tagged scramble: the "free generator" for operations
+        // with no honored identity in the selected algebraic semantics.
         FPSAN_HOST_DEVICE constexpr u64 alg_tag(u64 op_tag, u64 payload, u64 n)
         {
             u64 z = (payload + 1) * 0x9E3779B97F4A7C15ull + op_tag;
@@ -609,9 +620,9 @@ namespace fpsan
             return alg_lanewise1(a, [&](u64 x) { return alg_exp1(c, x); });
         }
 
-        // Op-tagged free generator for transcendentals with no honored identity
-        // (log, sqrt, and -- in this prototype -- exp2/sin/cos): deterministic,
-        // op-distinct, faithful to algebraic independence (Schanuel).
+        // Op-tagged free generator for operations with no honored identity in the
+        // selected algebraic semantics: deterministic and op-distinct, but not an
+        // algebraic law.
         FPSAN_HOST_DEVICE constexpr u64 alg_tagged1(const AlgConfig& c, u64 a, u64 tag)
         {
             return alg_is_fin(c, a) ? alg_tag(tag, a, c.n) : c.nan_code;
@@ -628,7 +639,7 @@ namespace fpsan
         // for every modulus, and rsqrt==1/sqrt is consistent. The round-trip
         // sqrt(x)^2==x holds on the square residues (~1/2 of a prime field), and
         // cbrt(x)^3==x holds for ALL x where has_cbrt (3 coprime to the group
-        // exponent). Where 3 divides it (Trig), cbrt falls back to a tag.
+        // exponent). Where 3 divides it, cbrt falls back to a tag.
         FPSAN_HOST_DEVICE constexpr u64 alg_sqrt1(const AlgConfig& c, u64 x)
         {
             if(alg_is_nan(c, x))
@@ -805,7 +816,7 @@ namespace fpsan
         // same log-coordinate rule also distinguishes same-width formats: f16 and
         // bf16, or e4m3 and e5m2, use different primitive roots in the same F_p.
         // Both directions satisfy cast(x*y)==cast(x)*cast(y) and cast(0)==0. Off the
-        // chain (Exp/Trig composite moduli, fp6, or non-chain pairs) it is the plain
+        // chain (composite CRT rings, fp6, or non-chain pairs) it is the plain
         // reduce-mod convention. Inf/NaN map across.
         FPSAN_HOST_DEVICE constexpr u64 alg_cast1(const AlgConfig& from, const AlgConfig& to, u64 p)
         {
@@ -851,10 +862,11 @@ namespace fpsan
         // of p, since n=p*d), which is closed under mod-n addition and isomorphic
         // to Z/d -- so log(x*y) = log(x)+log(y) holds EXACTLY in Z/n. Concretely
         //   log(r) = (n/d) * dlog_g( (r mod p)^(d+1) )     in [0, n)
-        // where (r mod p)^(d+1) is r's order-d component (the Sophie Germain projection, since
-        // (p-1)/d = 2) and dlog is its discrete log base g. Only the Exp (CRT)
-        // variants have the d-channel; the Field variants fall back to a tagged
-        // tag. Undefined at a true zero (-> Inf pole) and where the value
+        // where (r mod p)^(d+1) is r's order-d component. This works for both
+        // composite families because the chosen d makes d+1 kill the complementary
+        // cofactor and act as the identity on the order-d subgroup. Only the
+        // composite CRT families have the d-channel; Field-family semantics fall
+        // back to a tag. Undefined at a true zero (-> Inf pole) and where the value
         // vanishes in the F_p factor (-> NaN). The brute-force dlog is O(d);
         // a production device path would precompute a d-entry table.
         // Raw discrete log on the order-d channel: the unique k in [0, d) with
@@ -972,12 +984,13 @@ namespace fpsan
         // is a magic number (exactly the role Triton's rcpLog2 plays): each base keeps
         // its own homomorphism and inverse, and NO numeric relation between bases is
         // claimed. Base e is K=1 (alg_exp1/alg_log1); base 2 and base 10 use the
-        // distinct salted constants below. Field / sub-byte fall back to tags.
+        // distinct salted constants below. Semantics with no d-channel fall back to
+        // tags.
         // A pseudo-random unit in [2, d-1] (so != 0 and != 1, the base-e multiplier).
         // The order-d subgroup is cyclic of PRIME order, so all d-1 non-identity
-        // elements are generators -- one per base. d < 3 (only Trig at fp8, d=3) has a
-        // single non-trivial unit, so its bases coincide; for every other modulus the
-        // bases are kept distinct (Field / sub-byte: d==0, caller returns a tag).
+        // elements are generators -- one per base. d < 3 (only PythagoreanRing2 at
+        // fp8, d=3) has a single non-trivial unit, so its bases coincide; for every other modulus the
+        // bases are kept distinct. If d==0, callers return a tag.
         FPSAN_HOST_DEVICE constexpr u64 alg_base_unit(u64 d, u64 magic)
         {
             return (d < 3) ? 0 : 2 + magic % (d - 2);
@@ -1055,11 +1068,11 @@ namespace fpsan
             return alg_lanewise1(r, [&](u64 x) { return alg_log10_1(c, x); });
         }
 
-        // ---- sin / cos via an order-d rotation in (Z/n)[i], i^2 = -1 (Trig only) -
+        // ---- sin / cos via an order-d rotation in (Z/n)[i], i^2 = -1 -----------
         // cos(x)=Re(omega^(x mod d)), sin(x)=Im(omega^(x mod d)). Since omega has
         // order d and the complex multiplication realizes the rotation, the
-        // angle-addition formulas hold exactly in Z/n. Non-Trig variants keep
-        // sin/cos as tags.
+        // angle-addition formulas hold exactly in Z/n. Semantics without this
+        // rotor keep sin/cos as tags.
         struct AlgC
         {
             u64 re = 0, im = 0;
@@ -1089,7 +1102,7 @@ namespace fpsan
         }
         FPSAN_HOST_DEVICE constexpr u64 alg_cos1(const AlgConfig& c, u64 r)
         {
-            if(!c.has_trig)
+            if(!c.has_sin_cos)
                 return alg_tagged1(c, r, 0x636F73ull /*"cos"*/);
             if(!alg_is_fin(c, r))
                 return c.nan_code;
@@ -1097,7 +1110,7 @@ namespace fpsan
         }
         FPSAN_HOST_DEVICE constexpr u64 alg_sin1(const AlgConfig& c, u64 r)
         {
-            if(!c.has_trig)
+            if(!c.has_sin_cos)
                 return alg_tagged1(c, r, 0x73696Eull /*"sin"*/);
             if(!alg_is_fin(c, r))
                 return c.nan_code;

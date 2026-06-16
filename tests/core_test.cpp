@@ -4,7 +4,7 @@
 // tests/core_test.cpp
 //
 // Core Value tests: embedding/round-trip, the fixed points, drop-in
-// Float-mode parity with native arithmetic, FPSan-mode ring laws,
+// Native-mode parity with native arithmetic, FPSan-mode ring laws,
 // mixed-POD operators, and cross-checks against the ground-truth reference
 // fpsan_generic.hpp (which itself mirrors Triton). Exhaustive 16-bit checks
 // live in their own TESTs so ctest -j can parallelize.
@@ -146,7 +146,7 @@ TYPED_TEST_P(CoreTyped, RingLaws)
             for(FT xc : s)
             {
                 F a(xa), b(xb), c(xc);
-                // In FPSan mode these are EXACT (integer ring). In Float mode they are
+                // In FPSan mode these are EXACT (integer ring). In Native mode they are
                 // the native float laws, which can round; so only assert the exact
                 // ones in FPSan mode.
                 if constexpr(TypeParam::sem == Semantics::Triton)

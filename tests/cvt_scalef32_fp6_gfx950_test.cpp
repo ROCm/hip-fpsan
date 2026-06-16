@@ -69,7 +69,7 @@ namespace
 
 #if !defined(__HIP_DEVICE_COMPILE__) || __has_builtin(__builtin_amdgcn_cvt_scalef32_pk32_f32_fp6)
 
-// ============================ Float mode ====================================
+// ============================ Native mode ====================================
 
 __global__ void k_f32_unpack_fp6(const unsigned* in6, float* out, float scale)
 {

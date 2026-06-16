@@ -7,12 +7,12 @@
 // Value/cast. Each fp8 format only has 256 bit patterns, so we exhaustively
 // cover every one of them.
 //
-//  - Float-mode round trip and bit-cast identities (cast<fp8>(cast<f32>(b)) ==
+//  - Native-mode round trip and bit-cast identities (cast<fp8>(cast<f32>(b)) ==
 //  b
 //    for every non-NaN finite bit pattern).
 //  - FPSan-mode payload round trip (Triton sign-extend + truncate on payload).
 //  - FPSan fixed points (0, 1, -1) map to payload 0, 1, 0xFF.
-//  - Float-mode cast matches an independent reference implementation (the
+//  - Native-mode cast matches an independent reference implementation (the
 //    namespace-detail narrow_to_f32 / f32_to_narrow primitives).
 #include "fpsan/fpsan.hpp"
 
@@ -232,8 +232,8 @@ TEST(Fp8, FpsanCastRoundTripAmdE5M2)
     fpsan_cast_roundtrip_all<amd_fp8_e5m2>();
 }
 
-// ---- Float-mode cast matches native conversion -----------------------------
-// In Float mode, fpsan::cast<float>(Value<fp8>) must be
+// ---- Native-mode cast matches native conversion -----------------------------
+// In Native mode, fpsan::cast<float>(Value<fp8>) must be
 // static_cast<float>(fp8), bit-for-bit (the cast is defined to use the type's
 // own conversion).
 

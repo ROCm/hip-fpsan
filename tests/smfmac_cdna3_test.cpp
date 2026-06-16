@@ -3,7 +3,7 @@
 //
 // tests/smfmac_cdna3_test.cpp
 //
-// GPU tests for the CDNA3 / gfx94x SMFMAC wrappers. Float mode is checked
+// GPU tests for the CDNA3 / gfx94x SMFMAC wrappers. Native mode is checked
 // against the real hardware result for a host sparse-matmul reference. FPSan
 // mode is checked against an independent scalar payload-ring reference.
 #include "fpsan/amdgcn_smfmac.hpp"

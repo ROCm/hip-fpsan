@@ -7,12 +7,13 @@
 // (write `using std::exp; ... exp(x);` in generic code, or `fpsan::exp(x)`).
 //
 //   semantics == Semantics::Native : the real std:: function (drop-in).
-//   semantics == Semantics::Triton : Tritons FPSan handler (see detail/math).
+//   semantics == Semantics::Triton : Triton FPSan handler (see detail/math).
+//   algebraic semantics           : finite-ring handler or deterministic tag
+//                                  (see detail/algebraic.hpp).
 //
-// In FPSan mode exp/exp2/sin/cos carry real algebraic identities, while
-// log/log2/sqrt/precise_sqrt/rsqrt/erf/floor/ceil (and rcp/fract/tanh) are
-// deterministic op-distinguishing scrambles (not real math) -- exactly as
-// Triton's sanitizer treats them.
+// A tagged operation is deterministic and operation-distinguishing, but it does
+// not claim an identity such as log(x*y)==log(x)+log(y). The exact set of
+// honored identities depends on the selected Semantics.
 // ----------------------------------------------------------------------------
 #ifndef FPSAN_MATH_HPP
 #define FPSAN_MATH_HPP
@@ -51,9 +52,9 @@ namespace fpsan
             return F(static_cast<FT>(STD_FN(static_cast<detail::compute_t<FT>>(x.to_float())))); \
     }
     // exp and exp2 both get genuine homomorphisms g^(v mod d) on the order-d
-    // channel (Exp/Trig variants): exp(a+b)==exp(a)*exp(b) and likewise for exp2,
-    // which uses a fixed base change (see alg_exp2). For the Field variants both
-    // fall back to a tag.
+    // channel (SophieGermainRing and PythagoreanRing families):
+    // exp(a+b)==exp(a)*exp(b) and likewise for exp2, which uses a fixed base change
+    // (see alg_exp2). Field-family semantics fall back to tags.
     FPSAN_DEFINE_ALGEBRAIC_UNARY(exp,
                                  payload_exp,
                                  detail::alg_exp(F::alg_cfg(), x.fpsan_payload()),
@@ -120,10 +121,10 @@ namespace fpsan
 
     // sqrt / precise_sqrt / rsqrt / cbrt are ALGEBRAIC roots in the faithful
     // algebraic variants: multiplicative power maps, so sqrt(x*y)==sqrt(x)*sqrt(y),
-    // cbrt(x*y)==cbrt(x)*cbrt(y), and rsqrt==1/sqrt hold exactly. FPSan/Triton
+    // cbrt(x*y)==cbrt(x)*cbrt(y), and rsqrt==1/sqrt hold exactly. Triton
     // keeps them as tags, and FieldFast deliberately follows that cheaper
-    // tag path. cbrt is a perfect cube root in the Field/Exp variants, a tag in
-    // Trig (3 divides the group order).
+    // tag path. cbrt is a perfect cube root when 3 is coprime to the relevant
+    // group exponent, and a tag otherwise.
 #define FPSAN_DEFINE_ALGEBRAIC_ROOT(NAME, OPID, ALG_FN, NATIVE)                                    \
     template <class FT, Semantics S, Conversions C>                                                \
     FPSAN_HOST_DEVICE Value<FT, S, C> NAME(Value<FT, S, C> x)                                      \
@@ -149,12 +150,12 @@ namespace fpsan
     }
     FPSAN_DEFINE_ALGEBRAIC_ROOT(sqrt, Sqrt, alg_sqrt, std::sqrt(v))
     // precise_sqrt: same algebraic value as sqrt, but a distinct FPSan tag (mirrors
-    // Triton's correctly-rounded sqrt) and the same std::sqrt in Float mode.
+    // Triton's correctly-rounded sqrt) and the same std::sqrt in Native mode.
     FPSAN_DEFINE_ALGEBRAIC_ROOT(precise_sqrt, PreciseSqrt, alg_sqrt, std::sqrt(v))
     FPSAN_DEFINE_ALGEBRAIC_ROOT(rsqrt, Rsqrt, alg_rsqrt, detail::compute_t<FT>(1) / std::sqrt(v))
 #undef FPSAN_DEFINE_ALGEBRAIC_ROOT
 
-    // cbrt: Triton lowers it to a libdevice extern, so the FPSan mode tags it by
+    // cbrt: Triton lowers it to a libdevice extern, so the Triton path tags it by
     // symbol name (the generic extern fallback). The faithful algebraic variants
     // realize it as a power map (perfect cube root where has_cbrt), while FieldFast
     // uses a cheap deterministic tag.
@@ -176,9 +177,9 @@ namespace fpsan
             return F(static_cast<FT>(std::cbrt(static_cast<detail::compute_t<FT>>(x.to_float()))));
     }
 
-    // log is special: the Exp variants honor log(x*y)=log(x)+log(y) via the
-    // discrete log on the order-d channel (the dual of exp's g^(v mod d)); FPSan
-    // and the Field variants keep it as a tag.
+    // log is special: the composite algebraic families honor
+    // log(x*y)=log(x)+log(y) via the discrete log on the order-d channel (the dual
+    // of exp's g^(v mod d)); Triton and the Field-family semantics keep it as a tag.
     template <class FT, Semantics S, Conversions C>
     FPSAN_HOST_DEVICE Value<FT, S, C> log(Value<FT, S, C> x)
     {
@@ -196,9 +197,9 @@ namespace fpsan
         }
     }
 
-    // log2 mirrors log: the Exp/Trig variants honor log2(x*y)=log2(x)+log2(y) as
-    // the exact inverse of exp2 on the order-d channel; FPSan and the Field
-    // variants keep it as a tag.
+    // log2 mirrors log: the composite algebraic families honor
+    // log2(x*y)=log2(x)+log2(y) as the exact inverse of exp2 on the order-d channel;
+    // Triton and the Field-family semantics keep it as a tag.
     template <class FT, Semantics S, Conversions C>
     FPSAN_HOST_DEVICE Value<FT, S, C> log2(Value<FT, S, C> x)
     {
@@ -216,11 +217,12 @@ namespace fpsan
         }
     }
 
-    // exp10 / log10: base-10 members of the exp_b/log_b family. The Exp/Trig
-    // variants honor them as genuine homomorphisms on the order-d channel (a fixed
-    // base change, like exp2/log2). Triton has no exp10/log10 op (it lowers them to
-    // libdevice externs), so FPSan mode tags them by symbol name. Note: std::exp10
-    // is non-standard, so the Float path uses pow(10, v); std::log10 is standard.
+    // exp10 / log10: base-10 members of the exp_b/log_b family. The composite
+    // algebraic families honor them as genuine homomorphisms on the order-d channel
+    // (a fixed base change, like exp2/log2). Triton has no exp10/log10 op (it
+    // lowers them to libdevice externs), so the Triton path tags them by symbol
+    // name. Note: std::exp10 is non-standard, so the Native path uses pow(10, v);
+    // std::log10 is standard.
     template <class FT, Semantics S, Conversions C>
     FPSAN_HOST_DEVICE Value<FT, S, C> exp10(Value<FT, S, C> x)
     {
@@ -312,8 +314,8 @@ namespace fpsan
     FPSAN_DEFINE_MINMAX(max, payload_max, std::fmax)
 #undef FPSAN_DEFINE_MINMAX
 
-    // ---- fmed3: median of 3. In FPSan mode this resolves to signed-int median
-    // on the payload via three min/max calls (each already exact). In Float mode
+    // ---- fmed3: median of 3. In FPSan-family semantics this resolves to
+    // signed-int median on the payload via three min/max calls. In Native mode
     // it's the float median expressed the same way. ---------------------------
     template <class FT, Semantics S, Conversions C>
     FPSAN_HOST_DEVICE Value<FT, S, C> fmed3(Value<FT, S, C> a, Value<FT, S, C> b, Value<FT, S, C> c)
@@ -327,8 +329,8 @@ namespace fpsan
     // fingerprint -- the only structure an opaque function can carry. The scheme is
     // bit-for-bit Triton's extern tagging (see detail::payload_extern_tagged), so a
     // symbol tagged here matches what Triton's sanitizer emits for it. There is no
-    // Float-mode behavior (an opaque symbol has no native implementation), so Float
-    // mode must call the real function -- e.g. the FPSAN_DEFINE_AMDGCN_*_EXTERN
+    // Native-mode behavior (an opaque symbol has no native implementation), so the
+    // native wrapper must call the real function -- e.g. the FPSAN_DEFINE_AMDGCN_*_EXTERN
     // macros do exactly that. Pass detail::stable_string_hash("symbol") as the key.
     template <class FT, Semantics S, Conversions C, class... Rest>
     FPSAN_HOST_DEVICE Value<FT, S, C>
@@ -338,7 +340,7 @@ namespace fpsan
         static_assert(F::is_fpsan,
                       "extern_tagged is defined only in a payload mode (an opaque "
                       "symbol has no native implementation); call the real function "
-                      "in Float mode");
+                      "in Native mode");
         static_assert((std::is_same_v<Rest, Value<FT, S, C>> && ...),
                       "all operands of extern_tagged must be the same Value type");
         if constexpr(F::is_vector)

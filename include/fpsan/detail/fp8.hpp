@@ -4,17 +4,17 @@
 // fpsan/detail/fp8.hpp
 // ----------------------------------------------------------------------------
 // OCP FP8 scalar types (fp8_e4m3, fp8_e5m2) and the generic <-> f32 conversion
-// used by Semantics::Native casts and by the Float-mode oracles in tests.
+// used by Semantics::Native casts and by the Native-mode oracles in tests.
 //
 // The conversion routines (narrow_to_f32, f32_to_narrow) are a clean C++ port
 // of iree/runtime/src/iree/base/internal/math.h (Apache-2.0): a single generic
 // implementation parameterized by (exp_bits, mant_bits, have_inf, have_nan,
 // bias_tweak, nan_as_neg_zero), reused by every narrow FP format we need.
 //
-// In FPSan mode the cast machinery does NOT call these -- fpsan::cast<float>
-// merely sign-resizes the 8-bit payload to 32 bits (the Triton ext/trunc
-// model), purely integer-level. The conversion is only needed for Float-mode
-// parity with the hardware builtin (which uses the hardware fp8 unit).
+// In FPSan-family semantics the cast machinery does NOT call these; it operates
+// on payloads according to the selected cast policy. The conversion is only
+// needed for Native-mode parity with the hardware builtin (which uses the
+// hardware fp8 unit).
 // ----------------------------------------------------------------------------
 #ifndef FPSAN_DETAIL_FP8_HPP
 #define FPSAN_DETAIL_FP8_HPP

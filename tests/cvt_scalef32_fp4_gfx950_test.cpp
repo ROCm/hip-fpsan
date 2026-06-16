@@ -53,7 +53,7 @@ namespace
 
 #if !defined(__HIP_DEVICE_COMPILE__) || __has_builtin(__builtin_amdgcn_cvt_scalef32_pk_f32_fp4)
 
-// ============================ Float mode ====================================
+// ============================ Native mode ====================================
 
 // Unpack every fp4 code through the WRAPPER (Sel=0), scale=1, vs OCP host ref.
 __global__ void k_f32_unpack(const unsigned* packed, float* out)
@@ -278,7 +278,7 @@ TEST(CvtScalef32Fp4Wrap, FpsanSrPackMatchesDeterministic)
     });
 }
 
-// f16/bf16 unpack/pack: Float mode vs OCP host ref (round-trip through the f32
+// f16/bf16 unpack/pack: Native mode vs OCP host ref (round-trip through the f32
 // reference), confirming the wrappers compile and are hardware-correct.
 __global__ void k_f16_unpack(unsigned packed, float* out)
 {

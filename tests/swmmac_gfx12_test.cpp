@@ -6,9 +6,9 @@
 // Silicon tests for the gfx12 (RDNA4) sparse WMMA wrappers in
 // fpsan/amdgcn_swmmac_gfx12.hpp. Three layers:
 //
-//   * *FloatMatchesBuiltin: the wrapper in Float mode is a bit-exact
+//   * *FloatMatchesBuiltin: the wrapper in Native mode is a bit-exact
 //     pass-through to the underlying __builtin_amdgcn_swmmac_*.
-//   * *LayoutMatchesHardware: the software dataflow in Float mode produces
+//   * *LayoutMatchesHardware: the software dataflow in Native mode produces
 //     the same D fragment as the hardware builtin, byte-for-byte. This is
 //     the load-bearing layout proof -- if A/B/D/idx-lane mapping or the
 //     sparse-K selection were off by one, this fails.
@@ -89,7 +89,7 @@ __global__ void k_swmmac_f16_pair(const std::uint16_t* a_in,
     for(int s = 0; s < 8; ++s)
         raw_out[lane * 8 + s] = raw[s];
 
-    // --- via fpsan wrapper (Float mode) ---
+    // --- via fpsan wrapper (Native mode) ---
     Value<fpsan::v8h_native, Semantics::Native, kCC>         av{a};
     Value<fpsan::v16h_swmmac_native, Semantics::Native, kCC> bv{b};
     Value<fpsan::v8f_native, Semantics::Native, kCC>         cv{c};

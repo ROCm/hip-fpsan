@@ -128,7 +128,7 @@ namespace
 
 #if !defined(__HIP_DEVICE_COMPILE__) || __has_builtin(__builtin_amdgcn_cvt_scalef32_pk8_fp8_f32)
 
-// ============================ Float-mode golden =============================
+// ============================ Native-mode golden =============================
 // One real kernel + TEST per wrapper (scale == 1), checking the packed bits
 // against the host OCP encode and the contiguous layout.
 

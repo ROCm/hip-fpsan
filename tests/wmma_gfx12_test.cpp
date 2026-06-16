@@ -142,8 +142,8 @@ __device__ void load_frags(const typename Harness<Traits>::AElem*         A,
     c = Value<typename Harness<Traits>::CVec, S, kCC>(cn);
 }
 
-// Float-mode kernel: invokes Traits::call (which goes to the real builtin in
-// Float mode) and writes D as element-type values to a row-major host buffer.
+// Native-mode kernel: invokes Traits::call (which goes to the real builtin in
+// Native mode) and writes D as element-type values to a row-major host buffer.
 template <class Traits>
 __global__ void k_builtin(const typename Harness<Traits>::AElem* A,
                           const typename Harness<Traits>::BElem* B,
@@ -160,7 +160,7 @@ __global__ void k_builtin(const typename Harness<Traits>::AElem* A,
         D[cd_m_from_lane(lane, e) * N + (lane & 15)] = d.get(e).to_float();
 }
 
-// Float-mode kernel: invokes our software dataflow (NOT the builtin), used as
+// Native-mode kernel: invokes our software dataflow (NOT the builtin), used as
 // the oracle vs the builtin in the layout test.
 template <class Traits>
 __global__ void k_float_dataflow(const typename Harness<Traits>::AElem* A,

@@ -16,8 +16,8 @@
 // fpsan/amdgcn_mfma.hpp without a manual transpose.
 //
 // They are *pure data movement*: no arithmetic touches the loaded values, the
-// hardware just relocates bits across lanes. So Float mode and FPSan mode share
-// one implementation -- the lane's stored bits (IEEE float bits in Float mode,
+// hardware just relocates bits across lanes. So Native mode and FPSan mode share
+// one implementation -- the lane's stored bits (IEEE float bits in Native mode,
 // the FPSan payload in FPSan mode) are moved verbatim and rebuilt with
 // Value::from_storage_bits. Whatever was staged in LDS (a Value's storage) is
 // exactly what comes back, transposed.

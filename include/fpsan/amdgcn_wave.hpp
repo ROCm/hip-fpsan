@@ -34,7 +34,7 @@
 namespace fpsan
 {
 
-// Define one fpsan::<name> wave-reduce wrapper. Float mode forwards to BUILTIN
+// Define one fpsan::<name> wave-reduce wrapper. Native mode forwards to BUILTIN
 // (passes Strategy as the _Constant int32_t arg). FPSan mode runs a wave-size
 // correct XOR butterfly with COMBINE_EXPR, where the names `r` and `other` are
 // in scope and resolve to per-stage Values. Strategy is ignored in FPSan mode
@@ -126,7 +126,7 @@ namespace fpsan
     //
     // At the builtin level these all operate on i32 (or i64 for f64 storage); for
     // FPSan they ARE pure bit movement -- the lane's payload (FPSan mode) or float
-    // bits (Float mode) is moved verbatim across lanes. Float-mode and FPSan-mode
+    // bits (Native mode) is moved verbatim across lanes. Native-mode and FPSan-mode
     // share the same implementation (bit-cast storage -> apply builtin -> bit-cast
     // back). That's the whole identity the wrappers exploit: cross-lane moves
     // don't observe values, just bits.

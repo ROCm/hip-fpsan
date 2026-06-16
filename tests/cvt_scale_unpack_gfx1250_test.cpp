@@ -130,7 +130,7 @@ namespace
 
 #if !defined(__HIP_DEVICE_COMPILE__) || __has_builtin(__builtin_amdgcn_cvt_scale_pk8_f32_fp8)
 
-// ============================ Float-mode golden =============================
+// ============================ Native-mode golden =============================
 // One real kernel + TEST per wrapper, scale operand pinned to E8M0 x1, decoding
 // the packed stream and comparing each element to the host OCP decode.
 

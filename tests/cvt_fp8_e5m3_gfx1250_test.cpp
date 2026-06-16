@@ -11,7 +11,7 @@
 // bits, no sign, no inf, NaN == 0xFF, zero == 0x00, denormals). It is not in
 // LLVM APFloat, so the authoritative reference is the host codec
 // detail::kFp8E5M3 (a clean realization of that format) PLUS its explicit
-// special-value table, asserted directly here. Float-mode references are
+// special-value table, asserted directly here. Native-mode references are
 // host-computed and INDEPENDENT of the device builtin, so any implementation
 // that diverges from them fails. FPSan-mode references use the deterministic
 // width-8 payload resize.

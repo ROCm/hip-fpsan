@@ -154,7 +154,7 @@ namespace fpsan
         // Operand negation (the leading neg(A)/neg(B) bools) is reserved-zero [0,0]
         // on every FP shape, and matrix_a/b_reuse are perf hints with no numeric
         // effect -- so this is the only numerically-meaningful WMMA modifier.
-        // Float mode lets the builtin apply it (we pass the constant); FPSan mode
+        // Native mode lets the builtin apply it (we pass the constant); FPSan mode
         // pre-applies it to the C fragment here, leaving the dataflows unchanged.
         // abs is computed as max(c, -c) so the payload matches the host reference.
         template <int Cmod, class CV, Semantics S, Conversions C>
@@ -537,7 +537,7 @@ namespace fpsan
 
         // Wave-cooperative software MMA for the gfx1250 16x16x4 f32 shape (K=4
         // contraction, v2f A/B fragments, v8f C/D accumulator). Generic over
-        // Semantics so Float mode acts as a host/builtin oracle and FPSan mode runs
+        // Semantics so Native mode acts as a host/builtin oracle and FPSan mode runs
         // the same arithmetic in the payload ring.
         template <class AVec, class BVec, class CVec, Semantics S, Conversions C>
         FPSAN_DEVICE Value<CVec, S, C>
@@ -601,7 +601,7 @@ namespace fpsan
 
         // Wave-cooperative software MMA for the gfx1250 16x16x32 shapes. Identical in
         // shape to the 16x16x16 dataflow but with a K=32 contraction and v16 A/B
-        // fragments. Generic over Semantics so Float mode acts as a host/builtin
+        // fragments. Generic over Semantics so Native mode acts as a host/builtin
         // oracle and FPSan mode runs the same arithmetic in the payload ring.
         template <class AVec, class BVec, class CVec, Semantics S, Conversions C>
         FPSAN_DEVICE Value<CVec, S, C>
@@ -814,7 +814,7 @@ namespace fpsan
 
         // Wave-cooperative software MMA for the gfx1250 16x16x128 f8f6f4 sub-byte
         // shapes (K=128, fp6/bf6/fp4 A/B operands of possibly different sub-byte
-        // widths, v8f C/D accumulator). FPSan-only (Float mode calls the builtin).
+        // widths, v8f C/D accumulator). FPSan-only (Native mode calls the builtin).
         template <int WA, int WB, Semantics S, Conversions C>
         FPSAN_DEVICE Value<v8f_native, S, C> wmma_16x16x128_sub_dataflow(const int (&aw)[16],
                                                                          const int (&bw)[16],
@@ -853,7 +853,7 @@ namespace fpsan
         //   lane = (row|col) + 16*((k>>5)&1)   (uses k bit 5, vs the 8-bit bit 2)
         //   slot = 32*((k>>6)&1) + 16*((k>>2)&1) + 8*((k>>4)&1)
         //          + 4*((k>>3)&1) + 2*((k>>1)&1) + (k&1)
-        // FPSan-only (Float mode calls the builtin, which is layout-agnostic).
+        // FPSan-only (Native mode calls the builtin, which is layout-agnostic).
         FPSAN_HOST_DEVICE constexpr int wmma_mix_sub_lane(int rc, int k)
         {
             return rc + 16 * ((k >> 5) & 1);
@@ -962,7 +962,7 @@ namespace fpsan
         // the builtin in wmma_scale_f8f6f4_gfx1250_test): the scale word for row m /
         // col n lives at lane m / lane n (fetched with ds_bpermute), and within that
         // word the byte is wmma_sub_scale_byte(k) (scaleType/scaleFmt immediates
-        // pinned 0 == E8M0). FPSan-only (Float mode calls the builtin).
+        // pinned 0 == E8M0). FPSan-only (Native mode calls the builtin).
         template <int WA, int WB, Semantics S, Conversions C, int AScaleFmt = 0, int BScaleFmt = 0>
         FPSAN_DEVICE Value<v8f_native, S, C> wmma_16x16x128_sub_scaled_dataflow(
             const int (&aw)[16], const int (&bw)[16], Value<v8f_native, S, C> c, int sa, int sb)
@@ -1205,7 +1205,7 @@ namespace fpsan
             }
         };
 
-        // FPSan software MMA for gfx1250 wmma_f32_32x16x128_f4 (Float mode calls the
+        // FPSan software MMA for gfx1250 wmma_f32_32x16x128_f4 (Native mode calls the
         // builtin). fp4 nibbles never span a dword (width 4), so the B operand's 8
         // dwords fit the [16] gather array zero-padded.
         template <Semantics S, Conversions C>
@@ -1605,7 +1605,7 @@ namespace fpsan
 
 // =============================================================================
 // RDNA4 (gfx1200/gfx1201) wave32 WMMA wrappers. Each wrapper is one
-// macro-instantiation: type signature + a Float-mode call to the real builtin +
+// macro-instantiation: type signature + a Native-mode call to the real builtin +
 // FPSan-mode dispatch to the shared software dataflow. AMD's instruction-name
 // convention: "fp8" = OCP E4M3FN, "bf8" = OCP E5M2.
 //
@@ -2173,7 +2173,7 @@ namespace fpsan
     // per-lane fragment, so the FPSan dataflow stages the 8-bit operand on the
     // validated Wmma16x16x128Layout and the sub-byte operand on the mixed order
     // (detail::wmma_mix_sub_lane/slot, reverse-engineered from one-hot probes). Both
-    // operands are the raw packed v16i32 registers. Float mode calls the builtin
+    // operands are the raw packed v16i32 registers. Native mode calls the builtin
     // (layout-agnostic). Exactly one operand must be 8-bit and the other sub-byte;
     // for same-class pairs use the `_sub` wrapper (sub x sub) or the dedicated
     // fp8/bf8 K=128 wrappers (8-bit x 8-bit). The i16 immediate is the C neg/abs
@@ -2221,7 +2221,7 @@ namespace fpsan
 // (col, block) of B carries an E8M0 exponent; block kb's dot product is scaled by
 // 2^(eA-127) * 2^(eB-127). `sa`/`sb` are the per-lane i32 scale operands; the
 // scale_sel / scale_fmt immediates are pinned 0 (E8M0, natural byte=block
-// mapping), the validated layout. Float mode forwards to the builtin (exact);
+// mapping), the validated layout. Native mode forwards to the builtin (exact);
 // FPSan mode runs the block-scaled sub-byte dataflow. As with the unscaled
 // wrapper this covers sub-byte (fp6/bf6/fp4) operands; mixing an 8-bit with a
 // sub-byte operand needs the (not-yet-grounded) WMMA mix model.
@@ -2341,7 +2341,7 @@ namespace fpsan
 // (sub-byte operands). Same per-operand E8M0 block scaling as the i32 variant,
 // but each scale operand is a 64-bit word carrying 8 E8M0 bytes (finer
 // granularity); the controlling byte is detail::wmma_sub_scale16_byte(k). Scale
-// sel/fmt immediates pinned 0 (E8M0). Float mode forwards to the builtin (exact);
+// sel/fmt immediates pinned 0 (E8M0). Native mode forwards to the builtin (exact);
 // FPSan mode runs the scale16 sub-byte dataflow. Sub-byte (fp6/bf6/fp4) only.
 // =============================================================================
 #if !defined(__HIP_DEVICE_COMPILE__) \
@@ -2463,7 +2463,7 @@ namespace fpsan
 
 // =============================================================================
 // gfx1250 wave32 32x16x128 f4 (E2M1) WMMA wrapper. A is 32x128 fp4 (v16i32), B
-// is 128x16 fp4 (v8i32), C/D is 32x16 f32 (v16f32). Float mode forwards to the
+// is 128x16 fp4 (v8i32), C/D is 32x16 f32 (v16f32). Native mode forwards to the
 // builtin (exact); FPSan mode runs the grounded 32x16x128 f4 dataflow. The
 // fragment ABI is the silicon-grounded layout in detail::Wmma32x16x128F4Layout.
 // =============================================================================

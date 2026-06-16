@@ -10,7 +10,7 @@
 // the test pins exactly that contract without needing to know the transpose
 // pattern itself:
 //
-//   * MatchesBuiltin: the Float-mode wrapper returns the same bits as a direct
+//   * MatchesBuiltin: the Native-mode wrapper returns the same bits as a direct
 //     __builtin_amdgcn_global_load_tr_* call over identically staged global
 //     memory.
 //   * FpsanMovesSameBits: the FPSan-mode wrapper, given memory staged with the

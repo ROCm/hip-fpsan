@@ -109,7 +109,7 @@ namespace
             EXPECT_EQ(d.b_is_zero, h.b_is_zero) << label << " b_is_zero @" << i;
             // Every FPSan-family mode (Triton AND the algebraic
             // algebraic models) is integer/constexpr payload algebra: it MUST match
-            // bit-for-bit. Float mode is native hardware arithmetic, whose
+            // bit-for-bit. Native mode is native hardware arithmetic, whose
             // rounding may differ host vs device -- out of scope here.
             if constexpr(S != Semantics::Native)
             {
@@ -144,7 +144,7 @@ namespace
 
         // Host invariant on the shared body: in every FPSan-family mode (Triton
         // and the algebraic models) the payload ring laws are exact and
-        // must always hold. Float mode is native arithmetic, so no algebraic-law
+        // must always hold. Native mode is native arithmetic, so no algebraic-law
         // conformance is asserted.
         if constexpr(S != Semantics::Native)
             for(int i = 0; i < n; ++i)

@@ -194,7 +194,7 @@ TEST(WmmaScaleF8f6f4_128, LayoutMatchesHardware)
 
 // ===================== Sub-byte block-scaled wrapper =====================
 // Validate the shipped amdgcn_wmma_scale_f32_16x16x128_f8f6f4_sub wrapper for
-// sub-byte operands: Float mode == host block-scaled matmul (decoded values),
+// sub-byte operands: Native mode == host block-scaled matmul (decoded values),
 // FPSan mode == payload-ring block-scaled reference (sub-byte sign-resize).
 static constexpr Conversions kCC = Conversions::Explicit;
 using VF                         = Value<float, Semantics::Triton, kCC>;

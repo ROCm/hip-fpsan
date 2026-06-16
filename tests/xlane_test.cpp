@@ -8,7 +8,7 @@
 // up at some other lane unchanged -- so the property under test is that
 // after the move, each lane's payload (FPSan mode) and float bits (Float
 // mode) equal the source lane's, with the source lane chosen by the
-// builtin's semantics. Float-mode and FPSan-mode share the same
+// builtin's semantics. Native-mode and FPSan-mode share the same
 // bit-mover, so they should agree bit-for-bit on the lane mapping.
 #include "fpsan/amdgcn_wave.hpp"
 #include "fpsan/fpsan.hpp"
@@ -364,8 +364,8 @@ TEST(Xlane, DsPermuteXorFpsan32Boundary)
 // ---- ds_swizzle (cross-mode consistency) ------------------------------------
 // ds_swizzle encodings are intricate and hardware-revision-specific; rather
 // than pin down a specific permutation, we verify the load-bearing FPSan
-// invariant: Float-mode and FPSan-mode wrappers move the bits the SAME way.
-// That is, for any swizzle pattern, the lane mapping in Float mode must match
+// invariant: Native-mode and FPSan-mode wrappers move the bits the SAME way.
+// That is, for any swizzle pattern, the lane mapping in Native mode must match
 // the lane mapping in FPSan mode (both wrappers route through the same
 // detail::bit_move helper, but this test catches any divergence).
 template <Semantics S, class Out>

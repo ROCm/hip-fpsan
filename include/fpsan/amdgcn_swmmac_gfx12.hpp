@@ -18,7 +18,7 @@
 // B holds full density at K=32 (v16); a per-lane 16-bit index selects
 // the two live K positions per 4-K group.
 //
-// Float mode: pass-through to the matching __builtin_amdgcn_swmmac_*.
+// Native mode: pass-through to the matching __builtin_amdgcn_swmmac_*.
 // This is bit-exact -- the wrapper does no math, just forwards.
 //
 // FPSan mode: wave-cooperative software dataflow in the payload ring.

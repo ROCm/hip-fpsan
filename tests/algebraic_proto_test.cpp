@@ -86,8 +86,8 @@ static void test_width(const char* name, AlgVariant field, AlgVariant exp)
     check(alg_mul1(cf, 0, cf.inf_code) == cf.nan_code, "0*Inf = NaN");
     check(alg_add1(cf, cf.nan_code, 5) == cf.nan_code, "NaN absorbs");
 
-    // exp homomorphism (Exp variant, >= 8 bits): exp(a+b) = exp(a)*exp(b)
-    check(ce.two_moduli, "Exp variant has exp at this width");
+    // exp homomorphism (SophieGermain variant, >= 8 bits): exp(a+b) = exp(a)*exp(b)
+    check(ce.two_moduli, "SophieGermain variant has exp at this width");
     long eh = 0, en = 0;
     u64  seed = 12345;
     for(int k = 0; k < 5000; ++k, ++en)
@@ -125,16 +125,18 @@ static void test_width(const char* name, AlgVariant field, AlgVariant exp)
 
 int main()
 {
-    // sub-byte fallback: Exp variants behave like Field below 8 bits
-    check(!alg_modulus(AlgVariant::Exp1, 4).two_moduli, "Exp1 @4-bit: no exp (fallback)");
-    check(!alg_modulus(AlgVariant::Exp1, 6).two_moduli, "Exp1 @6-bit: no exp (fallback)");
-    check(alg_modulus(AlgVariant::Exp1, 8).two_moduli, "Exp1 @8-bit: has exp");
-    check(alg_modulus(AlgVariant::Exp1, 4).n == alg_modulus(AlgVariant::Field1, 4).n,
-          "Exp1 @4-bit reuses Field1's prime");
+    // sub-byte fallback: SophieGermain variants behave like Field below 8 bits
+    check(!alg_modulus(AlgVariant::SophieGermain1, 4).two_moduli,
+          "SophieGermain1 @4-bit: no exp (fallback)");
+    check(!alg_modulus(AlgVariant::SophieGermain1, 6).two_moduli,
+          "SophieGermain1 @6-bit: no exp (fallback)");
+    check(alg_modulus(AlgVariant::SophieGermain1, 8).two_moduli, "SophieGermain1 @8-bit: has exp");
+    check(alg_modulus(AlgVariant::SophieGermain1, 4).n == alg_modulus(AlgVariant::Field1, 4).n,
+          "SophieGermain1 @4-bit reuses Field1's prime");
 
-    test_width<float>("float (32-bit)", AlgVariant::Field1, AlgVariant::Exp1);
+    test_width<float>("float (32-bit)", AlgVariant::Field1, AlgVariant::SophieGermain1);
 #if FPSAN_HAS_FLOAT16
-    test_width<_Float16>("_Float16 (16-bit)", AlgVariant::Field1, AlgVariant::Exp1);
+    test_width<_Float16>("_Float16 (16-bit)", AlgVariant::Field1, AlgVariant::SophieGermain1);
 #endif
 
     std::printf("\npassed %ld, failed %ld\n", pass, fail);

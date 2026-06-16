@@ -8,7 +8,7 @@
 // MI350)'s 16x16x32 and 32x32x16 shapes, F64 MFMAs, and the new
 // 16x16x128 / 32x32x64 f8f6f4 scaled MFMAs.
 //
-// As with amdgcn_matrix.hpp (WMMA), Float mode forwards each wrapper to the
+// As with amdgcn_matrix.hpp (WMMA), Native mode forwards each wrapper to the
 // real __builtin_amdgcn_mfma_* and FPSan mode runs a wave-cooperative
 // software MMA in the payload ring, using the same fragment layout the
 // hardware uses. The layout helpers
@@ -212,8 +212,8 @@ namespace fpsan
         // the accumulator/output element type (CElem). All three Values carry per-
         // lane fragments; the dataflow walks the K dimension, gathers A[i][k] and
         // B[k][j] from the lanes that hold them, multiplies and accumulates in the
-        // payload ring (FPSan) or in real float (Float mode -- used only as an
-        // oracle in tests; production Float mode goes straight to the builtin).
+        // payload ring (FPSan) or in real float (Native mode -- used only as an
+        // oracle in tests; production Native mode goes straight to the builtin).
         //
         // The lane mapping comes from input_loc / output_loc_32 (or _64 for f64
         // accumulators). InRegA / InRegB select the per-lane scalar at a given
@@ -729,7 +729,7 @@ namespace fpsan
 // CDNA MFMA wrappers.
 //
 // Each wrapper:
-//   - Float mode: bit-casts the Value fragments to the native vector ABI and
+//   - Native mode: bit-casts the Value fragments to the native vector ABI and
 //     calls the matching __builtin_amdgcn_mfma_*.
 //   - FPSan mode: runs the software MFMA in detail::mfma_software, gathering
 //     A and B elements via wave_shfl and accumulating in the payload ring.
@@ -1488,7 +1488,7 @@ namespace fpsan
 // Companion to the fp8/bf8 wrappers above for the 6-bit (E2M3 fp6 / E3M2 bf6)
 // and 4-bit (E2M1 fp4) operand formats. Because sub-byte data is never a Value
 // scalar element type, the per-lane operands are passed as the raw packed
-// v8i32 register (exactly what the builtin consumes): in Float mode its bits
+// v8i32 register (exactly what the builtin consumes): in Native mode its bits
 // are the hardware codes; in FPSan mode they are the per-slot payloads packed
 // at the silicon-verified bit positions (Width-bit field s at bits Width*s..).
 //

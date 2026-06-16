@@ -446,7 +446,7 @@ TEST(CvtScalef32F32, Bf8)
 
 // cvt_scalef32_pk_{fp8,bf8}_f32 (the scaled PACK). DIRECTION: pack stores
 // value/scale (silicon-verified), so pack(x,s) then unpack(s) round-trips.
-// Float mode forwards to the builtin (always correct); the FPSan branch must
+// Native mode forwards to the builtin (always correct); the FPSan branch must
 // model the SAME divide-by-scale, else a kernel run under FPSan computes a
 // different algorithm than on hardware. The FPSan reference below divides;
 // this test fails if the wrapper multiplies (the prior bug).

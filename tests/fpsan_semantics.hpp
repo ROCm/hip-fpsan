@@ -86,12 +86,12 @@ namespace fpsan_test
     // sin/cos satisfy the angle-addition laws. Triton constructs them; the
     // Pythagorean variants carry a real trig channel; others reduce them to tags.
     template <class FT, fpsan::Semantics S>
-    constexpr bool flavor_has_trig()
+    constexpr bool flavor_has_sin_cos()
     {
         if constexpr(S == fpsan::Semantics::Triton)
             return true;
         else if constexpr(fpsan::detail::is_algebraic_semantics(S))
-            return fpsan::Value<FT, S, fpsan::Conversions::Explicit>::alg_cfg().has_trig;
+            return fpsan::Value<FT, S, fpsan::Conversions::Explicit>::alg_cfg().has_sin_cos;
         else
             return false;
     }

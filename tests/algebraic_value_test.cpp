@@ -221,10 +221,10 @@ static void battery_transcendental(const char* tag, bool two_moduli)
     }
 }
 
-// "sin/cos". has_trig (Pythagorean): genuine angle-addition + cos^2+sin^2==1;
-// otherwise sin/cos are tags (angle-addition fails).
+// "sin/cos". Pythagorean semantics carry a genuine angle-addition channel and
+// cos^2+sin^2==1; otherwise sin/cos are tags (angle-addition fails).
 template <class V>
-static void battery_trig(const char* tag, bool has_trig)
+static void battery_sin_cos(const char* tag, bool has_sin_cos)
 {
     float xs[] = {0.5f, 1.0f, 1.5f, 2.0f, 3.0f, -1.0f, 0.25f};
     long  ok = 0, n = 0;
@@ -237,7 +237,7 @@ static void battery_trig(const char* tag, bool has_trig)
             ok += (c1 && c2);
             ++n;
         }
-    if(has_trig)
+    if(has_sin_cos)
     {
         checkf(cos(V{0.0f}) == V{1.0f} && sin(V{0.0f}) == V{0.0f}, tag, "cos(0)==1, sin(0)==0");
         checkf(ok == n, tag, "sin/cos angle-addition");
@@ -272,7 +272,7 @@ static void battery_fast_field(const char* tag)
     battery_ring<V>(tag);
     battery_infnan<V>(tag);
     battery_transcendental<V>(tag, false);
-    battery_trig<V>(tag, false);
+    battery_sin_cos<V>(tag, false);
 
     V a{7.0f}, b{3.0f};
     checkf(V{0.0f} / b == V{0.0f}, tag, "fast division preserves 0/x == 0");
@@ -307,9 +307,9 @@ static void run_scorecard(const char* fld_tag, const char* sg_tag, const char* p
     battery_transcendental<Fld>(fld_tag, false);
     battery_transcendental<SG>(sg_tag, true);
     battery_transcendental<Py>(py_tag, true);
-    battery_trig<Fld>(fld_tag, false);
-    battery_trig<SG>(sg_tag, false);
-    battery_trig<Py>(py_tag, true);
+    battery_sin_cos<Fld>(fld_tag, false);
+    battery_sin_cos<SG>(sg_tag, false);
+    battery_sin_cos<Py>(py_tag, true);
 }
 
 static void check_field_cast_tower_constants(detail::AlgVariant v, const char* tag)
@@ -447,97 +447,96 @@ int main()
     using Alg2 = F<Semantics::Field2>;
     check((Alg2{2.0f} + Alg2{2.0f}) == Alg2{4.0f}, "alg2: 2+2 == 4");
 
-    // ---- the Exponentials variant honors exp(a+b) == exp(a)*exp(b) ----
-    using Exp = F<Semantics::SophieGermainRing>;
-    check(exp(Exp{0.0f}) == Exp{1.0f}, "exp: exp(0) == 1");
+    // ---- SophieGermainRing honors exp(a+b) == exp(a)*exp(b) ----
+    using SG = F<Semantics::SophieGermainRing>;
+    check(exp(SG{0.0f}) == SG{1.0f}, "exp: exp(0) == 1");
     {
         long  ok = 0, n = 0;
         float xs[] = {0.5f, 1.0f, 1.5f, 2.0f, -1.0f, 0.25f, 3.0f};
         for(float u : xs)
             for(float v : xs)
             {
-                Exp a{u}, b{v};
+                SG a{u}, b{v};
                 ok += (exp(a + b) == exp(a) * exp(b));
                 ++n;
             }
-        check(ok == n, "exp: exp(a+b) == exp(a)*exp(b) (Exponentials variant)");
+        check(ok == n, "exp: exp(a+b) == exp(a)*exp(b) (SophieGermainRing)");
     }
     // the Field variant has no exp homomorphism (exp is a tag there)
     check(exp(Alg{1.25f} + Alg{2.5f}) != exp(Alg{1.25f}) * exp(Alg{2.5f}),
           "field: exp is NOT a homomorphism (tag)");
 
-    // Exp2 is an independent variant: its own exp homomorphism, distinct modulus.
-    using Exp2 = F<Semantics::SophieGermainRing2>;
-    check(exp(Exp2{1.5f} + Exp2{2.5f}) == exp(Exp2{1.5f}) * exp(Exp2{2.5f}),
-          "exp2-variant: exp(a+b)==exp(a)*exp(b)");
+    // SophieGermainRing2 is independent: its own exp homomorphism, distinct modulus.
+    using SG2 = F<Semantics::SophieGermainRing2>;
+    check(exp(SG2{1.5f} + SG2{2.5f}) == exp(SG2{1.5f}) * exp(SG2{2.5f}),
+          "SophieGermainRing2: exp(a+b)==exp(a)*exp(b)");
     // 0.5 -> (n+1)/2 differs between the two moduli (small integers wouldn't).
-    check(Exp{0.5f}.fpsan_payload() != Exp2{0.5f}.fpsan_payload(),
-          "Exp1 and Exp2 use distinct moduli (different residue for 0.5)");
+    check(SG{0.5f}.fpsan_payload() != SG2{0.5f}.fpsan_payload(),
+          "SophieGermain variants use distinct moduli (different residue for 0.5)");
 
-    // ---- log: the Exp variant honors log(x*y) == log(x) + log(y) ----
-    check(log(Exp{1.0f}) == Exp{0.0f}, "log: log(1) == 0");
+    // ---- log: SophieGermainRing honors log(x*y) == log(x) + log(y) ----
+    check(log(SG{1.0f}) == SG{0.0f}, "log: log(1) == 0");
     {
         long  ok = 0, n = 0;
         float xs[] = {1.0f, 2.0f, 3.0f, 5.0f, 0.5f, 1.5f, 7.0f};
         for(float u : xs)
             for(float v : xs)
             {
-                Exp a{u}, b{v};
+                SG a{u}, b{v};
                 ok += (log(a * b) == log(a) + log(b));
                 ++n;
             }
-        check(ok == n, "log: log(x*y) == log(x)+log(y) (Exp variant, dlog homomorphism)");
+        check(ok == n, "log: log(x*y) == log(x)+log(y) (SophieGermainRing dlog)");
     }
     // log inverts exp on the exp-image: exp(log(exp v)) == exp v
-    check(exp(log(exp(Exp{1.5f}))) == exp(Exp{1.5f}), "log: exp(log(exp v)) == exp v");
+    check(exp(log(exp(SG{1.5f}))) == exp(SG{1.5f}), "log: exp(log(exp v)) == exp v");
     // Field variant: log is a tag, not a homomorphism
     check(log(Alg{2.0f} * Alg{3.0f}) != log(Alg{2.0f}) + log(Alg{3.0f}),
           "field: log is NOT a homomorphism (tag)");
 
-    // ---- Trigonometry variant: genuine sin/cos angle-addition (order-d rotation)
-    using Trig = F<Semantics::PythagoreanRing>;
-    check(cos(Trig{0.0f}) == Trig{1.0f}, "trig: cos(0) == 1");
-    check(sin(Trig{0.0f}) == Trig{0.0f}, "trig: sin(0) == 0");
+    // ---- PythagoreanRing: genuine sin/cos angle-addition (order-d rotation)
+    using Py = F<Semantics::PythagoreanRing>;
+    check(cos(Py{0.0f}) == Py{1.0f}, "pythagorean: cos(0) == 1");
+    check(sin(Py{0.0f}) == Py{0.0f}, "pythagorean: sin(0) == 0");
     {
         long  ok = 0, n = 0;
         float xs[] = {0.5f, 1.0f, 1.5f, 2.0f, 3.0f, -1.0f, 0.25f};
         for(float u : xs)
             for(float v : xs)
             {
-                Trig a{u}, b{v};
+                Py   a{u}, b{v};
                 bool c1 = (cos(a + b) == cos(a) * cos(b) - sin(a) * sin(b));
                 bool c2 = (sin(a + b) == sin(a) * cos(b) + cos(a) * sin(b));
                 ok += (c1 && c2);
                 ++n;
             }
-        check(ok == n, "trig: angle-addition for sin & cos (Trig variant)");
+        check(ok == n, "pythagorean: angle-addition for sin & cos");
     }
-    check(cos(Trig{1.3f}) * cos(Trig{1.3f}) + sin(Trig{1.3f}) * sin(Trig{1.3f}) == Trig{1.0f},
-          "trig: cos^2 + sin^2 == 1");
-    // a Trig variant ALSO carries exp + log (p=4d+1 keeps the d-channel)
-    check(exp(Trig{1.0f} + Trig{2.0f}) == exp(Trig{1.0f}) * exp(Trig{2.0f}),
-          "trig: exp homomorphism still holds");
-    check(log(Trig{2.0f} * Trig{3.0f}) == log(Trig{2.0f}) + log(Trig{3.0f}),
-          "trig: log homomorphism still holds");
-    // the Exp variant has NO angle-addition (sin/cos are tags there)
-    check(cos(Exp{0.5f} + Exp{1.0f})
-              != cos(Exp{0.5f}) * cos(Exp{1.0f}) - sin(Exp{0.5f}) * sin(Exp{1.0f}),
-          "exp-variant: sin/cos are tagged (no angle-addition)");
+    check(cos(Py{1.3f}) * cos(Py{1.3f}) + sin(Py{1.3f}) * sin(Py{1.3f}) == Py{1.0f},
+          "pythagorean: cos^2 + sin^2 == 1");
+    // PythagoreanRing also carries exp + log (p=4d+1 keeps the d-channel).
+    check(exp(Py{1.0f} + Py{2.0f}) == exp(Py{1.0f}) * exp(Py{2.0f}),
+          "pythagorean: exp homomorphism still holds");
+    check(log(Py{2.0f} * Py{3.0f}) == log(Py{2.0f}) + log(Py{3.0f}),
+          "pythagorean: log homomorphism still holds");
+    // SophieGermainRing has no angle-addition channel (sin/cos are tags there).
+    check(cos(SG{0.5f} + SG{1.0f}) != cos(SG{0.5f}) * cos(SG{1.0f}) - sin(SG{0.5f}) * sin(SG{1.0f}),
+          "SophieGermainRing: sin/cos are tagged (no angle-addition)");
 
     // ---- exp2 / log2: a second homomorphism pair on the same order-d channel ----
-    check(exp2(Exp{0.0f}) == Exp{1.0f}, "exp2: exp2(0) == 1");
-    check(log2(Exp{1.0f}) == Exp{0.0f}, "log2: log2(1) == 0");
+    check(exp2(SG{0.0f}) == SG{1.0f}, "exp2: exp2(0) == 1");
+    check(log2(SG{1.0f}) == SG{0.0f}, "log2: log2(1) == 0");
     {
         long  ok = 0, n = 0;
         float xs[] = {0.5f, 1.0f, 1.5f, 2.0f, -1.0f, 0.25f, 3.0f};
         for(float u : xs)
             for(float v : xs)
             {
-                Exp a{u}, b{v};
+                SG a{u}, b{v};
                 ok += (exp2(a + b) == exp2(a) * exp2(b));
                 ++n;
             }
-        check(ok == n, "exp2: exp2(a+b) == exp2(a)*exp2(b) (Exponentials variant)");
+        check(ok == n, "exp2: exp2(a+b) == exp2(a)*exp2(b) (SophieGermainRing)");
     }
     {
         long  ok = 0, n = 0;
@@ -545,20 +544,20 @@ int main()
         for(float u : xs)
             for(float v : xs)
             {
-                Exp a{u}, b{v};
+                SG a{u}, b{v};
                 ok += (log2(a * b) == log2(a) + log2(b));
                 ++n;
             }
-        check(ok == n, "log2: log2(x*y) == log2(x)+log2(y) (Exp variant, dlog homomorphism)");
+        check(ok == n, "log2: log2(x*y) == log2(x)+log2(y) (SophieGermainRing dlog)");
     }
-    check(exp2(log2(exp2(Exp{1.5f}))) == exp2(Exp{1.5f}), "log2: exp2(log2(exp2 v)) == exp2 v");
+    check(exp2(log2(exp2(SG{1.5f}))) == exp2(SG{1.5f}), "log2: exp2(log2(exp2 v)) == exp2 v");
     // exp2 uses a distinct base, so it is NOT the same fingerprint as exp
-    check(exp2(Exp{2.0f}) != exp(Exp{2.0f}), "exp2 != exp (distinct base change)");
-    // exp2/log2 carry over to the Trig variant (also a two-moduli channel)
-    check(exp2(Trig{1.0f} + Trig{2.0f}) == exp2(Trig{1.0f}) * exp2(Trig{2.0f}),
-          "trig: exp2 homomorphism still holds");
-    check(log2(Trig{2.0f} * Trig{3.0f}) == log2(Trig{2.0f}) + log2(Trig{3.0f}),
-          "trig: log2 homomorphism still holds");
+    check(exp2(SG{2.0f}) != exp(SG{2.0f}), "exp2 != exp (distinct base change)");
+    // exp2/log2 carry over to PythagoreanRing (also a two-moduli channel).
+    check(exp2(Py{1.0f} + Py{2.0f}) == exp2(Py{1.0f}) * exp2(Py{2.0f}),
+          "pythagorean: exp2 homomorphism still holds");
+    check(log2(Py{2.0f} * Py{3.0f}) == log2(Py{2.0f}) + log2(Py{3.0f}),
+          "pythagorean: log2 homomorphism still holds");
     // Field variant: exp2/log2 are tags, not homomorphisms
     check(exp2(Alg{1.25f} + Alg{2.5f}) != exp2(Alg{1.25f}) * exp2(Alg{2.5f}),
           "field: exp2 is NOT a homomorphism (tag)");
@@ -566,30 +565,30 @@ int main()
           "field: log2 is NOT a homomorphism (tag)");
 
     // ---- exp10 / log10: the base-10 members of the same family ----
-    check(exp10(Exp{0.0f}) == Exp{1.0f}, "exp10: exp10(0) == 1");
-    check(log10(Exp{1.0f}) == Exp{0.0f}, "log10: log10(1) == 0");
+    check(exp10(SG{0.0f}) == SG{1.0f}, "exp10: exp10(0) == 1");
+    check(log10(SG{1.0f}) == SG{0.0f}, "log10: log10(1) == 0");
     {
         long  e10 = 0, l10 = 0, inv = 0, n = 0;
         float xs[] = {0.5f, 1.0f, 1.5f, 2.0f, 3.0f, 5.0f, 7.0f};
         for(float u : xs)
             for(float v : xs)
             {
-                Exp a{u}, b{v};
+                SG a{u}, b{v};
                 e10 += (exp10(a + b) == exp10(a) * exp10(b));
                 l10 += (log10(a * b) == log10(a) + log10(b));
                 inv += (exp10(log10(exp10(a))) == exp10(a));
                 ++n;
             }
-        check(e10 == n, "exp10: exp10(a+b) == exp10(a)*exp10(b) (Exponentials variant)");
+        check(e10 == n, "exp10: exp10(a+b) == exp10(a)*exp10(b) (SophieGermainRing)");
         check(l10 == n, "log10: log10(x*y) == log10(x)+log10(y)");
         check(inv == n, "log10: exp10(log10(exp10 v)) == exp10 v");
     }
     // the three bases are distinct fingerprints (e, 2, 10)
-    check(exp10(Exp{2.0f}) != exp(Exp{2.0f}) && exp10(Exp{2.0f}) != exp2(Exp{2.0f}),
+    check(exp10(SG{2.0f}) != exp(SG{2.0f}) && exp10(SG{2.0f}) != exp2(SG{2.0f}),
           "exp10 != exp and != exp2 (distinct base)");
-    // carries to Trig; tags in the Field variant
-    check(exp10(Trig{1.0f} + Trig{2.0f}) == exp10(Trig{1.0f}) * exp10(Trig{2.0f}),
-          "trig: exp10 homomorphism holds");
+    // carries to PythagoreanRing; tags in the Field variant
+    check(exp10(Py{1.0f} + Py{2.0f}) == exp10(Py{1.0f}) * exp10(Py{2.0f}),
+          "pythagorean: exp10 homomorphism holds");
     check(exp10(Alg{1.25f} + Alg{2.5f}) != exp10(Alg{1.25f}) * exp10(Alg{2.5f}),
           "field: exp10 is NOT a homomorphism (tag)");
 
@@ -630,35 +629,35 @@ int main()
         check(ok == n, "field rsqrt: rsqrt(x)*sqrt(x) == 1");
         check(cons == n, "field rsqrt == 1/sqrt");
     }
-    // Exp variant: sqrt multiplicative, cbrt a perfect cube root (3 coprime to lambda)
-    check(Exp::alg_cfg().has_cbrt, "exp: cbrt is a perfect cube root (has_cbrt)");
+    // SophieGermainRing: sqrt multiplicative, cbrt a perfect cube root.
+    check(SG::alg_cfg().has_cbrt, "SophieGermainRing: cbrt is a perfect cube root (has_cbrt)");
     {
         long  ms = 0, c3 = 0, n = 0;
         float xs[] = {1.f, 2.f, 3.f, 5.f, 7.f, 0.5f, 1.5f, 6.f};
         for(float u : xs)
             for(float v : xs)
             {
-                Exp a{u}, b{v};
+                SG a{u}, b{v};
                 ms += (sqrt(a * b) == sqrt(a) * sqrt(b));
                 c3 += (cbrt(a) * cbrt(a) * cbrt(a) == a);
                 ++n;
             }
-        check(ms == n, "exp sqrt: multiplicative");
-        check(c3 == n, "exp cbrt: cbrt(x)^3 == x (perfect)");
+        check(ms == n, "SophieGermainRing sqrt: multiplicative");
+        check(c3 == n, "SophieGermainRing cbrt: cbrt(x)^3 == x (perfect)");
     }
-    // Trig variant: sqrt multiplicative; cbrt has no cube root here (3 | group order)
-    check(!Trig::alg_cfg().has_cbrt, "trig: cbrt is a tag (3 divides the group order)");
+    // PythagoreanRing: sqrt multiplicative; cbrt has no cube root here.
+    check(!Py::alg_cfg().has_cbrt, "pythagorean: cbrt is a tag (3 divides the group order)");
     {
         long  ms = 0, n = 0;
         float xs[] = {1.f, 2.f, 3.f, 5.f, 0.5f, 1.5f};
         for(float u : xs)
             for(float v : xs)
             {
-                Trig a{u}, b{v};
+                Py a{u}, b{v};
                 ms += (sqrt(a * b) == sqrt(a) * sqrt(b));
                 ++n;
             }
-        check(ms == n, "trig sqrt: multiplicative");
+        check(ms == n, "pythagorean sqrt: multiplicative");
     }
     // contrast: the Triton's sqrt is a tag (not multiplicative)
     check(sqrt(Scr{2.0f} * Scr{3.0f}) != sqrt(Scr{2.0f}) * sqrt(Scr{3.0f}),
@@ -776,13 +775,13 @@ int main()
         float B[4]  = {2.0f, 0.5f, 4.0f, 1.5f};
         int   o1[4] = {0, 1, 2, 3};
         int   o2[4] = {3, 1, 0, 2}; // a different accumulation order
-        // compiles & runs identically for Float, FPSan, and the algebraic variants:
+        // compiles & runs identically for Native, Triton, and the algebraic variants:
         (void)mac<F<Semantics::Native>>(A, B, 4, o1);
         (void)mac<F<Semantics::Triton>>(A, B, 4, o1);
         check(mac<Alg>(A, B, 4, o1) == mac<Alg>(A, B, 4, o2),
               "alg: matmul is reassociation-invariant (sanitizer property)");
-        check(mac<Exp>(A, B, 4, o1) == mac<Exp>(A, B, 4, o2),
-              "exp-variant: matmul is reassociation-invariant");
+        check(mac<SG>(A, B, 4, o1) == mac<SG>(A, B, 4, o2),
+              "SophieGermainRing: matmul is reassociation-invariant");
     }
 
     // ---- faithful fma: a*b+c exactly (algebraic model) ----

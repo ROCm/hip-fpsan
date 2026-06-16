@@ -9,7 +9,7 @@
 // validated against real silicon -- these tests are the gfx950 source of truth,
 // not any simulator):
 //
-//  (1) LayoutMatchesHardware (Float mode): we load the A/B/C fragments into the
+//  (1) LayoutMatchesHardware (Native mode): we load the A/B/C fragments into the
 //      per-lane registers using the ported input_loc / output_loc maps, call
 //      the real __builtin_amdgcn_mfma_*, read D back through output_loc, and
 //      compare against a host integer reference D = C + A*B.  Inputs are exact
@@ -212,7 +212,7 @@ typename Harness<Traits>::BElem
     return typename H::BElem{};
 }
 
-// Float-mode kernel: calls the real builtin (Float mode) and writes D as
+// Native-mode kernel: calls the real builtin (Native mode) and writes D as
 // element-type values to a row-major host buffer through output_loc_32.
 template <class Traits>
 __global__ void k_builtin(const typename Harness<Traits>::AElem* A,
@@ -337,10 +337,10 @@ void run_layout_matches_hardware()
 template <class Traits, Semantics S>
 void run_fpsan_matches_scalar_reference()
 {
-    using H     = Harness<Traits>;
-    using AE    = typename H::AElem;
-    using BE    = typename H::BElem;
-    using CE    = typename H::CElem;
+    using H        = Harness<Traits>;
+    using AE       = typename H::AElem;
+    using BE       = typename H::BElem;
+    using CE       = typename H::CElem;
     using CBits    = typename H::CBits;
     Mats<Traits> m = make_inputs<Traits>();
 
@@ -4709,7 +4709,7 @@ static void fp8_smf_test(int Mm, int Kk)
         GTEST_SKIP() << "no HIP device";
     const int    G = Kk / 4, Cc = 2 * G, Nn = Mm;
     SmfCdna3Data m = make_fp8(Mm, Kk);
-    // Float-mode layout reference (host integer matmul, exact small ints).
+    // Native-mode layout reference (host integer matmul, exact small ints).
     std::vector<float> ref(Mm * Nn);
     // FPSan reference (payload ring).
     using VF = Value<float, Semantics::Triton, kCC>;
