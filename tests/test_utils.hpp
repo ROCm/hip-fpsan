@@ -22,4 +22,13 @@ std::uint64_t bits_of(T v)
     return u;
 }
 
+#if defined(__clang__) && defined(__is_identifier)
+#if !__is_identifier(__bf16)
+inline std::uint64_t bits_of(__bf16 v)
+{
+    return __builtin_bit_cast(std::uint16_t, v);
+}
+#endif
+#endif
+
 #endif // FPSAN_TESTS_TEST_UTILS_HPP
