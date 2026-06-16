@@ -1,7 +1,8 @@
 # hip-fpsan
 
-`hip-fpsan` is a header-only C++17/HIP library for running numerical code under
-FPSan-family semantics.
+`hip-fpsan` supports C++17, HIP, and Python for running numerical code under
+FPSan-family semantics. The core C++17/HIP library is header-only; the Python
+bindings are optional and target interactive experiments.
 
 FPSan was introduced by the [Triton compiler](https://github.com/triton-lang/triton)
 as a way to test floating-point rewrites without requiring bit-identical rounded
@@ -30,7 +31,7 @@ Good starting points:
 - Hands-on guides:
   - [Authoring code with `Value`](docs/tutorial-authoring.md)
   - [Incremental porting](docs/tutorial-porting.md)
-  - [Python bindings](docs/python.md)
+  - [Python bindings](docs/python.md): interactive shell and notebook use.
 - Understanding FPSan:
   - [Triton FPSan from first principles](docs/triton-fpsan.md)
   - Algebraic FPSan:
