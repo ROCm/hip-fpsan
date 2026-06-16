@@ -37,6 +37,14 @@ def test_payload_construction_and_math():
     assert fpsan.fma(x, y, field(1.0)) == x * y + field(1.0)
 
 
+def test_repr_uses_python_class_name():
+    assert repr(fpsan.Float32Field(2.0)) == "fpsan.Float32Field(payload=2)"
+    assert (
+        repr(fpsan.Float32FieldImplicit(2.0)) == "fpsan.Float32FieldImplicit(payload=2)"
+    )
+    assert repr(fpsan.Float32Triton(2.0)).startswith("fpsan.Float32Triton(2, payload=")
+
+
 def test_native_and_triton_are_convertible_back_to_python_float():
     native = fpsan.Float32Native
     triton = fpsan.Float32Triton
