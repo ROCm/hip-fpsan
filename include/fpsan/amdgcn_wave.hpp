@@ -326,6 +326,12 @@ namespace fpsan
     template <class FT, Semantics S, Conversions C>
     FPSAN_DEVICE Value<FT, S, C> amdgcn_permlane64(Value<FT, S, C> v)
     {
+        // LLVM documents llvm.amdgcn.permlane64 as a wave64 half-swap that is a
+        // no-op in wave32 mode. Some gfx12 hardware/compiler combinations still
+        // produce surprising results for small integer payloads, so enforce the
+        // documented wave32 behavior before exposing it through FPSan storage bits.
+        if(__builtin_amdgcn_wavefrontsize() == 32)
+            return v;
         return detail::bit_move(
             v, [](std::uint32_t w) -> std::uint32_t { return __builtin_amdgcn_permlane64(w); });
     }
