@@ -1243,6 +1243,13 @@ namespace fpsan
                 out |= (static_cast<std::uint32_t>(n[i]) & 0xFu) << (4 * i);
             return out;
         }
+        template <class FP8, class DstFT, Semantics S, Conversions C>
+        FPSAN_DEVICE Value<DstFT, S, C> widen_fp8_payload_byte(std::uint32_t byte)
+        {
+            using Src = Value<FP8, S, C>;
+            return fpsan::cast<DstFT>(
+                Src::from_fpsan_payload(static_cast<typename Src::bits_type>(byte & 0xFFu)));
+        }
     } // namespace detail
 
 #if !defined(__HIP_DEVICE_COMPILE__) || __has_builtin(__builtin_amdgcn_cvt_scalef32_pk8_fp8_f32)
@@ -1479,12 +1486,10 @@ namespace fpsan
     // which is the authoritative reference.
     //
     // FPSan model: E5M3 cannot be a Value<> element type (1 + 5 + 3 != 8, since it
-    // has no sign bit), so there is no Value<fp8_e5m3>. The payload ring only ever
-    // cares about STORAGE WIDTH for a resize, and that is 8 bits -- identical to
-    // e4m3/e5m2. So the FPSan path is the same width-8 deterministic resize as its
-    // siblings (decode = subbyte_widen<8>; encode = low 8 payload bits), keeping
-    // mixed e4m3/e5m2/e5m3 FPSan kernels uniform; the format's unsignedness is only
-    // modeled in (authoritative) Native mode.
+    // has no sign bit), so there is no Value<fp8_e5m3>. The FPSan path therefore
+    // remains a width-8 deterministic resize (decode = subbyte_widen<8>; encode =
+    // low 8 payload bits). The format's unsignedness is modeled only in
+    // (authoritative) Native mode.
     // =============================================================================
 #if !defined(__HIP_DEVICE_COMPILE__) || __has_builtin(__builtin_amdgcn_cvt_f32_fp8_e5m3)
     // Decode: byte ByteIdx of `packed`, interpreted as E5M3, -> f32.
@@ -1558,18 +1563,20 @@ namespace fpsan
     //   pk8  fp4     : u32   (8 nibbles,  nib  i  = code i) -> v8.
     //   pk16 fp6/bf6 : v3u32 (16 codes,   contiguous 6-bit) -> v16.
     //
-    // Native mode forwards to the hardware builtin (authoritative). FPSan mode is a
-    // plain payload WIDEN of each narrow code (detail::subbyte_widen<8/6/4>) with
-    // NO scale applied: the block scale is a magnitude-only Float-domain effect,
-    // and the payload ring tracks precision/width, not the E8M0 multiply
-    // (Float-only -- a single-lane payload model cannot reproduce the
-    // per-lane byte selection anyway). Tests pin the Float scale operand to
-    // all-0x7f (E8M0 127 == x1) so Float and FPSan agree on an exact decode, plus
-    // a separate Float-only case for a 2^n scale.
+    // Native mode forwards to the hardware builtin (authoritative). FPSan-family
+    // mode ignores the block scale: the scale is a magnitude-only Float-domain
+    // effect, and the payload model tracks precision/width, not the E8M0 multiply
+    // (Float-only -- a single-lane payload model cannot reproduce the per-lane
+    // byte selection anyway). FP8/BF8 unpack widens a packed fp8 payload byte via
+    // fpsan::cast from Value<fp8_*, S>; fp4/fp6 still use the sub-byte signed
+    // payload-resize convention because they are not Value element types.
+    // Tests pin the Float scale operand to all-0x7f (E8M0 127 == x1) so Float and
+    // FPSan agree on an exact decode, plus a separate Float-only case for a 2^n
+    // scale.
     // =============================================================================
 #if !defined(__HIP_DEVICE_COMPILE__) || __has_builtin(__builtin_amdgcn_cvt_scale_pk8_f32_fp8)
     // ---- pk8 unpack from fp8/bf8: v2u32 (8 bytes) -> v8, each * scale (width-8).
-#define FPSAN_DEFINE_CVT_SCALE_UNPACK_PK8_FP8(NAME, DstFT, VEC, BUILTIN)             \
+#define FPSAN_DEFINE_CVT_SCALE_UNPACK_PK8_FP8(NAME, SrcFT, DstFT, VEC, BUILTIN)      \
     template <int         ScaleSel,                                                  \
               Semantics   S = Semantics::Native,                                     \
               Conversions C = Conversions::Explicit>                                 \
@@ -1584,32 +1591,38 @@ namespace fpsan
             for(int i = 0; i < 8; ++i)                                               \
             {                                                                        \
                 const std::uint32_t byte = (packed[i / 4] >> (8 * (i % 4))) & 0xFFu; \
-                r.set(i, fpsan::cast<DstFT>(detail::subbyte_widen<8, S, C>(byte)));  \
+                r.set(i, detail::widen_fp8_payload_byte<SrcFT, DstFT, S, C>(byte));  \
             }                                                                        \
             return r;                                                                \
         }                                                                            \
     }
     FPSAN_DEFINE_CVT_SCALE_UNPACK_PK8_FP8(amdgcn_cvt_scale_pk8_f32_fp8,
+                                          fp8_e4m3,
                                           float,
                                           v8f_native,
                                           __builtin_amdgcn_cvt_scale_pk8_f32_fp8)
     FPSAN_DEFINE_CVT_SCALE_UNPACK_PK8_FP8(amdgcn_cvt_scale_pk8_f32_bf8,
+                                          fp8_e5m2,
                                           float,
                                           v8f_native,
                                           __builtin_amdgcn_cvt_scale_pk8_f32_bf8)
     FPSAN_DEFINE_CVT_SCALE_UNPACK_PK8_FP8(amdgcn_cvt_scale_pk8_f16_fp8,
+                                          fp8_e4m3,
                                           _Float16,
                                           v8h_native,
                                           __builtin_amdgcn_cvt_scale_pk8_f16_fp8)
     FPSAN_DEFINE_CVT_SCALE_UNPACK_PK8_FP8(amdgcn_cvt_scale_pk8_f16_bf8,
+                                          fp8_e5m2,
                                           _Float16,
                                           v8h_native,
                                           __builtin_amdgcn_cvt_scale_pk8_f16_bf8)
     FPSAN_DEFINE_CVT_SCALE_UNPACK_PK8_FP8(amdgcn_cvt_scale_pk8_bf16_fp8,
+                                          fp8_e4m3,
                                           __bf16,
                                           v8bf_native,
                                           __builtin_amdgcn_cvt_scale_pk8_bf16_fp8)
     FPSAN_DEFINE_CVT_SCALE_UNPACK_PK8_FP8(amdgcn_cvt_scale_pk8_bf16_bf8,
+                                          fp8_e5m2,
                                           __bf16,
                                           v8bf_native,
                                           __builtin_amdgcn_cvt_scale_pk8_bf16_bf8)

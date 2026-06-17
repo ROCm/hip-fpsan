@@ -14,7 +14,8 @@
 // special-value table, asserted directly here. Native-mode references are
 // host-computed and INDEPENDENT of the device builtin, so any implementation
 // that diverges from them fails. FPSan-mode references use the deterministic
-// width-8 payload resize.
+// width-8 payload resize. Because E5M3 is not a scalar Value<> element type,
+// this stays a Triton/storage-payload convention rather than an algebraic cast.
 #include "fpsan/amdgcn_cvt.hpp"
 #include "fpsan/fpsan.hpp"
 

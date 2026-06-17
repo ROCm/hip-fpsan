@@ -18,6 +18,7 @@
 #include "fpsan/amdgcn_cvt.hpp"
 #include "fpsan/fpsan.hpp"
 
+#include "fpsan_semantics.hpp"
 #include "hip_test_utils.hpp"
 #include "test_random.hpp"
 
@@ -246,15 +247,16 @@ void run_pk_roundtrip()
             EXPECT_EQ(f16_bits(got[i]), f16_bits(in[i])) << "Float round-trip at " << i;
         (void)hipFree(dO);
     }
-    {
-        using VH = Value<_Float16, Semantics::Triton, kCC>;
+    fpsan_test::for_each_fpsan_semantics([&](auto sem) {
+        constexpr Semantics S = decltype(sem)::value;
+        using VH              = Value<_Float16, S, kCC>;
         std::vector<std::uint16_t> ref(2 * LANES);
         for(int i = 0; i < 2 * LANES; ++i)
             ref[i] = static_cast<std::uint16_t>(
                 fpsan::cast<_Float16>(fpsan::cast<FP8>(VH(in[i]))).fpsan_payload());
         std::uint16_t* dO;
         HIP_CHECK(hipMalloc(&dO, 2 * LANES * sizeof(std::uint16_t)));
-        k_pk_roundtrip<Semantics::Triton, FP8, std::uint16_t><<<1, LANES>>>(dIn, dO);
+        k_pk_roundtrip<S, FP8, std::uint16_t><<<1, LANES>>>(dIn, dO);
         HIP_CHECK(hipDeviceSynchronize());
         std::vector<std::uint16_t> got(2 * LANES);
         HIP_CHECK(
@@ -262,7 +264,7 @@ void run_pk_roundtrip()
         for(int i = 0; i < 2 * LANES; ++i)
             EXPECT_EQ(got[i], ref[i]) << "FPSan payload at " << i;
         (void)hipFree(dO);
-    }
+    });
     (void)hipFree(dIn);
 }
 
@@ -393,22 +395,23 @@ void run_sr_roundtrip()
             EXPECT_EQ(f16_bits(got[i]), f16_bits(in[i])) << "sr round-trip " << i;
         (void)hipFree(dO);
     }
-    {
-        using VH = Value<_Float16, Semantics::Triton, kCC>;
+    fpsan_test::for_each_fpsan_semantics([&](auto sem) {
+        constexpr Semantics S = decltype(sem)::value;
+        using VH              = Value<_Float16, S, kCC>;
         std::vector<std::uint16_t> ref(LANES);
         for(int i = 0; i < LANES; ++i)
             ref[i] = static_cast<std::uint16_t>(
                 fpsan::cast<_Float16>(fpsan::cast<FP8>(VH(in[i]))).fpsan_payload());
         std::uint16_t* dO;
         HIP_CHECK(hipMalloc(&dO, LANES * sizeof(std::uint16_t)));
-        k_sr_roundtrip<Semantics::Triton, FP8, std::uint16_t><<<1, LANES>>>(dIn, dO);
+        k_sr_roundtrip<S, FP8, std::uint16_t><<<1, LANES>>>(dIn, dO);
         HIP_CHECK(hipDeviceSynchronize());
         std::vector<std::uint16_t> got(LANES);
         HIP_CHECK(hipMemcpy(got.data(), dO, LANES * sizeof(std::uint16_t), hipMemcpyDeviceToHost));
         for(int i = 0; i < LANES; ++i)
             EXPECT_EQ(got[i], ref[i]) << "sr FPSan " << i;
         (void)hipFree(dO);
-    }
+    });
     (void)hipFree(dIn);
 }
 

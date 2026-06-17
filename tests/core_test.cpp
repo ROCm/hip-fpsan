@@ -146,10 +146,10 @@ TYPED_TEST_P(CoreTyped, RingLaws)
             for(FT xc : s)
             {
                 F a(xa), b(xb), c(xc);
-                // In FPSan mode these are EXACT (integer ring). In Native mode they are
+                // In FPSan mode these are exact ring laws. In Native mode they are
                 // the native float laws, which can round; so only assert the exact
                 // ones in FPSan mode.
-                if constexpr(TypeParam::sem == Semantics::Triton)
+                if constexpr(TypeParam::sem != Semantics::Native)
                 {
                     EXPECT_TRUE((a + b) + c == a + (b + c));
                     EXPECT_TRUE((a * b) * c == a * (b * c));

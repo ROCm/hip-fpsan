@@ -3,13 +3,15 @@
 //
 // fpsan/detail/subbyte_widen.hpp
 // ----------------------------------------------------------------------------
-// FPSan widen of a sub-byte payload field to a 32-bit f32 payload.
+// Deterministic widen of a sub-byte storage payload field to a 32-bit f32
+// payload.
 //
-// In FPSan mode a narrow->wide float conversion is a signed resize of the
-// payload (the Triton ExtSI model), purely integer-level. This single helper
-// implements that for any field width and is shared by the scaled-conversion
-// wrappers (amdgcn_cvt.hpp: fp4/fp6 unpack) and the scaled/sub-byte MFMA
-// dataflow (amdgcn_mfma.hpp), which both decode packed fp4/fp6 codes.
+// FP4/FP6 are not scalar Value element types, so their packed gfx intrinsics use
+// a storage-level convention rather than a value-faithful algebraic cast:
+// sign-resize the low Width payload bits. This single helper implements that
+// convention for the scaled-conversion wrappers (amdgcn_cvt.hpp: fp4/fp6 unpack)
+// and the scaled/sub-byte matrix dataflows, which both decode packed fp4/fp6
+// codes. Do not use it for FP8/BF8 Value types; those go through fpsan::cast.
 // ----------------------------------------------------------------------------
 #ifndef FPSAN_DETAIL_SUBBYTE_WIDEN_HPP
 #define FPSAN_DETAIL_SUBBYTE_WIDEN_HPP

@@ -6,16 +6,16 @@
 // FPSan wrappers for AMDGPU FP atomics. GPU-only, opt-in (not pulled by
 // <fpsan/fpsan.hpp>).
 //
-// The two identities behind every atomic in this header:
+// The identities behind every atomic in this header:
 //
-//   - FPSan addition on f32/f64 is integer add mod 2^w on the payload (see
-//     [[mix.hpp]]). The corresponding FPSan atomic_fadd is therefore a
-//     hardware INTEGER atomicAdd on the payload word -- lock-free, exact, and
-//     identical to the FPSan + operation done sequentially.
+//   - Native f32/f64 addition can use HIP's hardware atomicAdd directly.
+//     FPSan-family addition uses the selected Value<> semantics, so atomic_fadd
+//     uses a CAS loop that recomputes old + v through Value's operator+. That
+//     covers both Triton's Z/2^w payload ring and the algebraic Z/nZ variants.
 //
-//   - FPSan order is signed-int order on the payload ([[value.hpp]]:less()).
-//     Hardware signed-int atomicMin/atomicMax on the payload IS the FPSan
-//     atomic_fmin/fmax -- again lock-free and exact.
+//   - FPSan order is signed-int order on the payload ([[value.hpp]]:less()) for
+//     every FPSan-family semantics. Hardware signed-int atomicMin/atomicMax on
+//     the payload IS the FPSan atomic_fmin/fmax -- lock-free and exact.
 //
 // We use HIP's atomicAdd/atomicMin/atomicMax overloads as the underlying
 // primitive: HIP picks the right hardware instruction (global/flat/ds) based
@@ -65,8 +65,8 @@ namespace fpsan
             // A bare integer atomicAdd accumulates the payload mod 2^w. That is the
             // Triton's ring exactly, but NOT the algebraic models' Z/nZ -- so use a
             // CAS loop and let Value's operator+ apply the correct per-semantics add
-            // (mod 2^w for Triton, mod n for the algebraic variants). Lock-
-            // free; returns the OLD value, like the hardware atomic. (cf. pk_add.)
+            // (mod 2^w for Triton, mod n for the algebraic variants).
+            // Lock-free; returns the OLD value, like the hardware atomic. (cf. pk_add.)
             using V      = Value<float, S, C>;
             auto*    p   = reinterpret_cast<unsigned*>(addr);
             unsigned old = *p;

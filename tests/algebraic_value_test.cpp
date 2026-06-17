@@ -9,6 +9,7 @@
 #include "fpsan/math.hpp"
 #include "fpsan/value.hpp"
 
+#include <cstdint>
 #include <cstdio>
 
 using namespace fpsan;
@@ -16,6 +17,14 @@ template <Semantics S>
 using F = Value<float, S, Conversions::Explicit>;
 template <Semantics S>
 using D = Value<double, S, Conversions::Explicit>;
+#if FPSAN_HAS_FLOAT16
+template <Semantics S>
+using H = Value<_Float16, S, Conversions::Explicit>;
+#endif
+#if FPSAN_HAS_BF16
+template <Semantics S>
+using Bf = Value<__bf16, S, Conversions::Explicit>;
+#endif
 
 static long pass = 0, fail = 0;
 static void check(bool ok, const char* msg)
@@ -283,6 +292,25 @@ static void battery_fast_field(const char* tag)
     checkf(sqrt(a * b) != sqrt(a) * sqrt(b), tag, "fast sqrt is tagged, not multiplicative");
     checkf(cbrt(a) * cbrt(a) * cbrt(a) != a, tag, "fast cbrt is tagged, not a cube root");
     checkf(rsqrt(a) * sqrt(a) != V{1.0f}, tag, "fast rsqrt is tagged, not reciprocal sqrt");
+}
+
+template <class V>
+static void battery_supported_narrow_type(const char* tag)
+{
+    using FT = typename V::float_type;
+    auto v   = [](float x) { return V{static_cast<FT>(x)}; };
+
+    checkf(v(0.0f) + v(2.0f) == v(2.0f), tag, "narrow type: 0+x == x");
+    checkf(v(2.0f) + v(2.0f) == v(4.0f), tag, "narrow type: 2+2 == 4");
+    checkf(v(3.0f) * v(2.0f) == v(6.0f), tag, "narrow type: 3*2 == 6");
+    checkf((v(1.0f) + v(2.0f)) + v(3.0f) == v(1.0f) + (v(2.0f) + v(3.0f)),
+           tag,
+           "narrow type: reassociation");
+    checkf(v(1.0f) / v(0.0f) == v(2.0f) / v(0.0f), tag, "narrow type: x/0 -> Inf");
+    if constexpr(detail::has_fast_field_ops(V::semantics))
+        checkf(v(7.0f) / v(7.0f) != v(1.0f), tag, "narrow type: fast division is tagged");
+    else
+        checkf(v(7.0f) / v(7.0f) == v(1.0f), tag, "narrow type: faithful x/x == 1");
 }
 
 // Run the whole scorecard over one variant (T = a Value<...> type).
@@ -767,6 +795,38 @@ int main()
     check(((Alg{1.0f} / Alg{0.0f}) / (Alg{1.0f} / Alg{0.0f}))
               == (Alg{1.0f} / Alg{0.0f}) / (Alg{1.0f} / Alg{0.0f}),
           "alg: Inf compares equal to itself (deterministic)");
+    // FP8 formats have non-IEEE non-finite layouts. E4M3 has NaN but no Inf;
+    // AMD FNUZ formats use negative zero as NaN and have no Inf. The algebraic
+    // embed path must classify those raw source encodings before reducing finite
+    // values modulo p.
+    {
+        using E4  = Value<fp8_e4m3, Semantics::Field, Conversions::Explicit>;
+        using E5  = Value<fp8_e5m2, Semantics::Field, Conversions::Explicit>;
+        using A4  = Value<amd_fp8_e4m3, Semantics::Field, Conversions::Explicit>;
+        using A5  = Value<amd_fp8_e5m2, Semantics::Field, Conversions::Explicit>;
+        auto e4cf = E4::alg_cfg();
+        auto e5cf = E5::alg_cfg();
+        auto a4cf = A4::alg_cfg();
+        auto a5cf = A5::alg_cfg();
+        check(E4{fp8_e4m3{std::uint8_t{0x78}}}.fpsan_payload() != e4cf.inf_code,
+              "fp8 e4m3: all-ones exponent, zero mantissa is finite (no Inf)");
+        check(E4{fp8_e4m3{std::uint8_t{0x7e}}}.fpsan_payload() != e4cf.nan_code,
+              "fp8 e4m3: all-ones exponent is finite except max mantissa");
+        check(E4{fp8_e4m3{std::uint8_t{0x7f}}}.fpsan_payload() == e4cf.nan_code,
+              "fp8 e4m3: max positive code is NaN");
+        check(E4{fp8_e4m3{std::uint8_t{0xff}}}.fpsan_payload() == e4cf.nan_code,
+              "fp8 e4m3: max negative code is NaN");
+        check(E5{fp8_e5m2{std::uint8_t{0x7c}}}.fpsan_payload() == e5cf.inf_code,
+              "fp8 e5m2: all-ones exponent, zero mantissa is Inf");
+        check(E5{fp8_e5m2{std::uint8_t{0x7d}}}.fpsan_payload() == e5cf.nan_code,
+              "fp8 e5m2: all-ones exponent, nonzero mantissa is NaN");
+        check(A4{amd_fp8_e4m3{std::uint8_t{0x80}}}.fpsan_payload() == a4cf.nan_code,
+              "amd fp8 e4m3 fnuz: negative zero encodes NaN");
+        check(A4{amd_fp8_e4m3{std::uint8_t{0x78}}}.fpsan_payload() != a4cf.inf_code,
+              "amd fp8 e4m3 fnuz: no infinity encoding");
+        check(A5{amd_fp8_e5m2{std::uint8_t{0x80}}}.fpsan_payload() == a5cf.nan_code,
+              "amd fp8 e5m2 fnuz: negative zero encodes NaN");
+    }
 
     // ---- orthogonality: the SAME generic dataflow runs for every Semantics, and
     //      is reassociation-invariant in a payload mode (the sanitizer property) --
@@ -818,6 +878,30 @@ int main()
     battery_fast_field<D<Semantics::FieldFast2>>("dbl fieldFast2");
     check(D<Semantics::Field>{0.5}.fpsan_payload() != D<Semantics::Field2>{0.5}.fpsan_payload(),
           "dbl field/field2 use distinct moduli");
+#if FPSAN_HAS_FLOAT16
+    battery_supported_narrow_type<H<Semantics::Field>>("f16 field");
+    battery_supported_narrow_type<H<Semantics::Field2>>("f16 field2");
+    battery_supported_narrow_type<H<Semantics::FieldFast>>("f16 fieldFast");
+    battery_supported_narrow_type<H<Semantics::FieldFast2>>("f16 fieldFast2");
+    battery_supported_narrow_type<H<Semantics::FieldWithMulCasts>>("f16 fieldWithMulCasts");
+    battery_supported_narrow_type<H<Semantics::FieldWithMulCasts2>>("f16 fieldWithMulCasts2");
+    battery_supported_narrow_type<H<Semantics::SophieGermainRing>>("f16 SophieGermain");
+    battery_supported_narrow_type<H<Semantics::SophieGermainRing2>>("f16 SophieGermain2");
+    battery_supported_narrow_type<H<Semantics::PythagoreanRing>>("f16 Pythagorean");
+    battery_supported_narrow_type<H<Semantics::PythagoreanRing2>>("f16 Pythagorean2");
+#endif
+#if FPSAN_HAS_BF16
+    battery_supported_narrow_type<Bf<Semantics::Field>>("bf16 field");
+    battery_supported_narrow_type<Bf<Semantics::Field2>>("bf16 field2");
+    battery_supported_narrow_type<Bf<Semantics::FieldFast>>("bf16 fieldFast");
+    battery_supported_narrow_type<Bf<Semantics::FieldFast2>>("bf16 fieldFast2");
+    battery_supported_narrow_type<Bf<Semantics::FieldWithMulCasts>>("bf16 fieldWithMulCasts");
+    battery_supported_narrow_type<Bf<Semantics::FieldWithMulCasts2>>("bf16 fieldWithMulCasts2");
+    battery_supported_narrow_type<Bf<Semantics::SophieGermainRing>>("bf16 SophieGermain");
+    battery_supported_narrow_type<Bf<Semantics::SophieGermainRing2>>("bf16 SophieGermain2");
+    battery_supported_narrow_type<Bf<Semantics::PythagoreanRing>>("bf16 Pythagorean");
+    battery_supported_narrow_type<Bf<Semantics::PythagoreanRing2>>("bf16 Pythagorean2");
+#endif
 
     std::printf("passed %ld, failed %ld\n", pass, fail);
     return fail == 0 ? 0 : 1;

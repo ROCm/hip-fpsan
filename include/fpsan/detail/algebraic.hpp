@@ -287,7 +287,10 @@ namespace fpsan
             u64      exp_max     = 0; // all-ones exponent field
             u64      mant_mask   = 0;
             int      bias        = 0;
-            bool     has_inf_nan = false;
+            bool     has_inf_nan = false; // the algebraic carrier reserves Inf/NaN sentinels
+            bool     format_has_infinity    = false;
+            bool     format_has_nan         = false;
+            bool     format_nan_as_neg_zero = false;
         };
 
         // Modular multiply through a 128-bit intermediate, so it is correct for
@@ -309,26 +312,29 @@ namespace fpsan
                           "fpsan algebraic: multiplicative casts currently distinguish at "
                           "most two same-width format classes");
             AlgConfig        c;
-            const AlgModulus m = alg_modulus(v, T::bit_width);
-            c.n                = m.n;
-            c.g                = m.g;
-            c.cast_g           = (!m.two_moduli && m.g != 0 && T::cast_tag == 1)
-                                     ? alg_mulmod(alg_mulmod(m.g, m.g, m.n), m.g, m.n)
-                                     : m.g;
-            c.d                = m.d;
-            c.two_moduli       = m.two_moduli;
-            c.omega_re         = m.omega_re;
-            c.omega_im         = m.omega_im;
-            c.has_sin_cos      = m.has_sin_cos;
-            c.inv2             = (m.n + 1) / 2; // inverse of 2 mod odd n
-            c.inf_code         = m.n;
-            c.nan_code         = m.n + 1;
-            c.bit_width        = T::bit_width;
-            c.mant_bits        = T::mantissa_bits;
-            c.bias             = T::bias;
-            c.mant_mask        = (u64{1} << T::mantissa_bits) - 1;
-            c.exp_max          = (u64{1} << T::exponent_bits) - 1;
-            c.has_inf_nan      = true; // scalar Value element types reserve Inf/NaN sentinels
+            const AlgModulus m       = alg_modulus(v, T::bit_width);
+            c.n                      = m.n;
+            c.g                      = m.g;
+            c.cast_g                 = (!m.two_moduli && m.g != 0 && T::cast_tag == 1)
+                                           ? alg_mulmod(alg_mulmod(m.g, m.g, m.n), m.g, m.n)
+                                           : m.g;
+            c.d                      = m.d;
+            c.two_moduli             = m.two_moduli;
+            c.omega_re               = m.omega_re;
+            c.omega_im               = m.omega_im;
+            c.has_sin_cos            = m.has_sin_cos;
+            c.inv2                   = (m.n + 1) / 2; // inverse of 2 mod odd n
+            c.inf_code               = m.n;
+            c.nan_code               = m.n + 1;
+            c.bit_width              = T::bit_width;
+            c.mant_bits              = T::mantissa_bits;
+            c.bias                   = T::bias;
+            c.mant_mask              = (u64{1} << T::mantissa_bits) - 1;
+            c.exp_max                = (u64{1} << T::exponent_bits) - 1;
+            c.has_inf_nan            = true;
+            c.format_has_infinity    = T::has_infinity;
+            c.format_has_nan         = T::has_nan;
+            c.format_nan_as_neg_zero = T::nan_as_neg_zero;
             // Root power maps. lam = exponent of the unit group (Carmichael):
             // n-1 for a prime field, lcm(p-1, d-1) for the composite CRT rings.
             const u64 pf = c.two_moduli ? (c.n / c.d) : c.n; // F_p factor
@@ -504,11 +510,19 @@ namespace fpsan
         // phi_n of a raw float bit-pattern of the element type (one lane).
         FPSAN_HOST_DEVICE constexpr u64 alg_embed1(const AlgConfig& c, u64 raw)
         {
-            const u64 sign  = (raw >> (c.bit_width - 1)) & 1;
-            const u64 expf  = (raw >> c.mant_bits) & c.exp_max;
-            const u64 mantf = raw & c.mant_mask;
-            if(c.has_inf_nan && expf == c.exp_max)
-                return mantf == 0 ? c.inf_code : c.nan_code;
+            const u64 sign      = (raw >> (c.bit_width - 1)) & 1;
+            const u64 expf      = (raw >> c.mant_bits) & c.exp_max;
+            const u64 mantf     = raw & c.mant_mask;
+            const u64 sign_mask = u64{1} << (c.bit_width - 1);
+            if(c.format_has_nan && c.format_nan_as_neg_zero && raw == sign_mask)
+                return c.nan_code;
+            if(expf == c.exp_max)
+            {
+                if(c.format_has_infinity)
+                    return mantf == 0 ? c.inf_code : c.nan_code;
+                if(c.format_has_nan && !c.format_nan_as_neg_zero && mantf == c.mant_mask)
+                    return c.nan_code;
+            }
             u64 mag = 0;
             int e   = 0;
             if(expf == 0)
@@ -531,15 +545,25 @@ namespace fpsan
 
         // phi_n^{-1} is NOT well-defined (the residue does not determine the value),
         // so this is a best-effort, non-faithful decode used only by to_float() for
-        // display: Inf/NaN map to the format's Inf/NaN bit patterns, and a finite
-        // residue is returned as-is (a deterministic but meaningless bit pattern).
+        // display: sentinels map to native Inf/NaN bit patterns when the element
+        // format has them, or to a native NaN where a format has NaN but no Inf.
+        // A finite residue is returned as-is (a deterministic but meaningless bit
+        // pattern).
         // Algebraic Values are meant to be compared by payload, not unembedded.
         FPSAN_HOST_DEVICE constexpr u64 alg_unembed1(const AlgConfig& c, u64 p)
         {
+            const u64 sign_mask = u64{1} << (c.bit_width - 1);
+            const u64 nan_bits
+                = c.format_nan_as_neg_zero ? sign_mask : ((c.exp_max << c.mant_bits) | c.mant_mask);
             if(c.has_inf_nan && p == c.inf_code)
-                return c.exp_max << c.mant_bits; // +Inf
+            {
+                if(c.format_has_infinity)
+                    return c.exp_max << c.mant_bits; // +Inf
+                if(c.format_has_nan)
+                    return nan_bits;
+            }
             if(c.has_inf_nan && p == c.nan_code)
-                return (c.exp_max << c.mant_bits) | 1; // NaN
+                return c.format_has_nan ? nan_bits : 0;
             const u64 width_mask = (c.bit_width >= 64) ? ~u64{0} : ((u64{1} << c.bit_width) - 1);
             return p & width_mask;
         }

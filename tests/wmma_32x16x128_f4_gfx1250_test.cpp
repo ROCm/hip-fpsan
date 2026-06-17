@@ -172,6 +172,9 @@ TEST(WmmaF4_32x16x128, LayoutMatchesHardware)
 }
 
 // ===================== wrapper: Float + FPSan =====================
+// FP4 is a packed storage format, not a scalar Value<> element type. The FPSan
+// checks here therefore pin the Triton/storage-payload convention
+// (subbyte_widen-style signed resize), not an algebraic Value cast.
 using VF = Value<float, Semantics::Triton, kCC>;
 
 static std::uint32_t sign_resize(std::uint32_t code, int width)

@@ -57,22 +57,30 @@ namespace fpsan
         {
             static_assert(always_false<T>,
                           "fpsan: unsupported floating-point type. Supported: float, "
-                          "double, _Float16, __bf16 (the latter two where available).");
+                          "double, _Float16, __bf16, and the fpsan FP8 scalar "
+                          "types where available.");
         };
 
-#define FPSAN_DEFINE_FP_TRAITS_WITH_CAST_TAG(T, MANT, EXP, BIAS, CAST_TAG)                       \
+#define FPSAN_DEFINE_FP_TRAITS_FORMAT(                                                           \
+    T, MANT, EXP, BIAS, CAST_TAG, HAS_INFINITY, HAS_NAN, NAN_AS_NEG_ZERO)                        \
     template <>                                                                                  \
     struct fp_traits<T>                                                                          \
     {                                                                                            \
-        using value_type                        = T;                                             \
-        using bits_type                         = typename uint_by_size<sizeof(T)>::type;        \
-        static constexpr unsigned bit_width     = sizeof(T) * 8;                                 \
-        static constexpr unsigned mantissa_bits = (MANT);                                        \
-        static constexpr unsigned exponent_bits = (EXP);                                         \
-        static constexpr int      bias          = (BIAS);                                        \
-        static constexpr unsigned cast_tag      = (CAST_TAG);                                    \
+        using value_type                          = T;                                           \
+        using bits_type                           = typename uint_by_size<sizeof(T)>::type;      \
+        static constexpr unsigned bit_width       = sizeof(T) * 8;                               \
+        static constexpr unsigned mantissa_bits   = (MANT);                                      \
+        static constexpr unsigned exponent_bits   = (EXP);                                       \
+        static constexpr int      bias            = (BIAS);                                      \
+        static constexpr unsigned cast_tag        = (CAST_TAG);                                  \
+        static constexpr bool     has_infinity    = (HAS_INFINITY);                              \
+        static constexpr bool     has_nan         = (HAS_NAN);                                   \
+        static constexpr bool     nan_as_neg_zero = (NAN_AS_NEG_ZERO);                           \
         static_assert(1 + (EXP) + (MANT) == bit_width, "fpsan: inconsistent fp_traits for " #T); \
     }
+
+#define FPSAN_DEFINE_FP_TRAITS_WITH_CAST_TAG(T, MANT, EXP, BIAS, CAST_TAG) \
+    FPSAN_DEFINE_FP_TRAITS_FORMAT(T, MANT, EXP, BIAS, CAST_TAG, true, true, false)
 
 #define FPSAN_DEFINE_FP_TRAITS(T, MANT, EXP, BIAS) \
     FPSAN_DEFINE_FP_TRAITS_WITH_CAST_TAG(T, MANT, EXP, BIAS, 0)

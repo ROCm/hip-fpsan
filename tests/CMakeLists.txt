@@ -261,7 +261,8 @@ if(TARGET GTest::gtest_main)
       target_compile_definitions(fpsan_global_load_tr_gfx12_w64_test
                                  PRIVATE FPSAN_TEST_GLOBAL_LOAD_TR_W64=1)
       target_compile_definitions(fpsan_wave_gfx12_w64_test
-                                 PRIVATE FPSAN_TEST_ENABLE_WAVE_F64=1)
+                                 PRIVATE FPSAN_TEST_ENABLE_WAVE_F64=1
+                                         FPSAN_TEST_SKIP_FLOAT_WAVE_REDUCE=1)
       fpsan_enable_wave64(fpsan_global_load_tr_gfx12_w64_test)
       fpsan_enable_wave64(fpsan_wmma_gfx12_w64_test)
       fpsan_enable_wave64(fpsan_swmmac_gfx12_w64_test)

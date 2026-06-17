@@ -24,6 +24,7 @@
 #include "fpsan/amdgcn_cvt.hpp"
 #include "fpsan/fpsan.hpp"
 
+#include "fpsan_semantics.hpp"
 #include "hip_test_utils.hpp"
 
 #include <hip/hip_runtime.h>
@@ -46,7 +47,6 @@ using fpsan::detail::kFp8E4M3;
 using fpsan::detail::kFp8E5M2;
 
 static constexpr Conversions kCC = Conversions::Explicit;
-using VF                         = Value<float, Semantics::Triton, kCC>;
 
 namespace
 {
@@ -377,20 +377,22 @@ TEST(CvtScalef32Pk8, Fp8ScaleDivides)
 // Payload references built from the public Value algebra (independent of the
 // wrapper's internal helpers).
 
+template <Semantics S>
 __global__ void k_fpsan_pk8_fp8(const float* in, unsigned* out)
 {
     using V = float __attribute__((ext_vector_type(8)));
     V v;
     for(int i = 0; i < 8; ++i)
         v[i] = in[i];
-    Value<V, Semantics::Triton, kCC> vv{v};
-    fpsan::v2u32_native              r
-        = fpsan::amdgcn_cvt_scalef32_pk8_fp8_f32<Semantics::Triton, kCC>(vv, VF{2.0f});
+    Value<V, S, kCC>    vv{v};
+    fpsan::v2u32_native r
+        = fpsan::amdgcn_cvt_scalef32_pk8_fp8_f32<S, kCC>(vv, Value<float, S, kCC>{2.0f});
     out[0] = r[0];
     out[1] = r[1];
 }
 
-TEST(CvtScalef32Pk8, FpsanFp8Payload)
+template <Semantics S>
+void run_fpsan_pk8_fp8_payload()
 {
     if(!have_device())
         GTEST_SKIP() << "no HIP device";
@@ -398,11 +400,12 @@ TEST(CvtScalef32Pk8, FpsanFp8Payload)
     float*    dIn = to_dev(in);
     unsigned* dO;
     HIP_CHECK(hipMalloc(&dO, 2 * sizeof(unsigned)));
-    k_fpsan_pk8_fp8<<<1, 1>>>(dIn, dO);
+    k_fpsan_pk8_fp8<S><<<1, 1>>>(dIn, dO);
     HIP_CHECK(hipDeviceSynchronize());
     auto got = from_dev(dO, 2);
     for(int i = 0; i < 8; ++i)
     {
+        using VF           = Value<float, S, kCC>;
         std::uint32_t want = static_cast<std::uint8_t>(
             fpsan::cast<fpsan::fp8_e4m3>(VF{in[i]} / VF{2.0f}).fpsan_payload());
         std::uint32_t have = (got[i / 4] >> (8 * (i % 4))) & 0xFFu;
@@ -412,21 +415,28 @@ TEST(CvtScalef32Pk8, FpsanFp8Payload)
     (void)hipFree(dO);
 }
 
+TEST(CvtScalef32Pk8, FpsanFp8Payload)
+{
+    FPSAN_RUN_ALL_VARIANTS(run_fpsan_pk8_fp8_payload);
+}
+
+template <Semantics S>
 __global__ void k_fpsan_pk16_fp6(const float* in, unsigned* out)
 {
     using V = float __attribute__((ext_vector_type(16)));
     V v;
     for(int i = 0; i < 16; ++i)
         v[i] = in[i];
-    Value<V, Semantics::Triton, kCC> vv{v};
-    fpsan::v3u32_native              r
-        = fpsan::amdgcn_cvt_scalef32_pk16_fp6_f32<Semantics::Triton, kCC>(vv, VF{1.0f});
+    Value<V, S, kCC>    vv{v};
+    fpsan::v3u32_native r
+        = fpsan::amdgcn_cvt_scalef32_pk16_fp6_f32<S, kCC>(vv, Value<float, S, kCC>{1.0f});
     out[0] = r[0];
     out[1] = r[1];
     out[2] = r[2];
 }
 
-TEST(CvtScalef32Pk16, FpsanFp6Payload)
+template <Semantics S>
+void run_fpsan_pk16_fp6_payload()
 {
     if(!have_device())
         GTEST_SKIP() << "no HIP device";
@@ -434,11 +444,12 @@ TEST(CvtScalef32Pk16, FpsanFp6Payload)
     float*    dIn = to_dev(in);
     unsigned* dO;
     HIP_CHECK(hipMalloc(&dO, 3 * sizeof(unsigned)));
-    k_fpsan_pk16_fp6<<<1, 1>>>(dIn, dO);
+    k_fpsan_pk16_fp6<S><<<1, 1>>>(dIn, dO);
     HIP_CHECK(hipDeviceSynchronize());
     auto got = from_dev(dO, 3);
     for(int i = 0; i < 16; ++i)
     {
+        using VF           = Value<float, S, kCC>;
         std::uint32_t want = (VF{in[i]} / VF{1.0f}).fpsan_payload() & 0x3Fu;
         std::uint32_t have = host_extract6(got, i);
         EXPECT_EQ(have, want) << "code " << i;
@@ -447,18 +458,26 @@ TEST(CvtScalef32Pk16, FpsanFp6Payload)
     (void)hipFree(dO);
 }
 
+TEST(CvtScalef32Pk16, FpsanFp6Payload)
+{
+    FPSAN_RUN_ALL_VARIANTS(run_fpsan_pk16_fp6_payload);
+}
+
 // SR pk8 fp4 FPSan equals the deterministic (non-SR) pack -- seed is opaque.
+template <Semantics S>
 __global__ void k_fpsan_sr_pk8_fp4(const float* in, unsigned seed, unsigned* out)
 {
     using V = float __attribute__((ext_vector_type(8)));
     V v;
     for(int i = 0; i < 8; ++i)
         v[i] = in[i];
-    Value<V, Semantics::Triton, kCC> vv{v};
-    out[0] = fpsan::amdgcn_cvt_scalef32_sr_pk8_fp4_f32<Semantics::Triton, kCC>(vv, seed, VF{1.0f});
+    Value<V, S, kCC> vv{v};
+    out[0]
+        = fpsan::amdgcn_cvt_scalef32_sr_pk8_fp4_f32<S, kCC>(vv, seed, Value<float, S, kCC>{1.0f});
 }
 
-TEST(CvtScalef32SrPk8, FpsanFp4MatchesDeterministic)
+template <Semantics S>
+void run_fpsan_sr_pk8_fp4_matches_deterministic()
 {
     if(!have_device())
         GTEST_SKIP() << "no HIP device";
@@ -466,17 +485,23 @@ TEST(CvtScalef32SrPk8, FpsanFp4MatchesDeterministic)
     float*    dIn = to_dev(in);
     unsigned* dO;
     HIP_CHECK(hipMalloc(&dO, sizeof(unsigned)));
-    k_fpsan_sr_pk8_fp4<<<1, 1>>>(dIn, 0xdeadbeefu, dO);
+    k_fpsan_sr_pk8_fp4<S><<<1, 1>>>(dIn, 0xdeadbeefu, dO);
     HIP_CHECK(hipDeviceSynchronize());
     unsigned got = from_dev(dO, 1)[0];
     for(int i = 0; i < 8; ++i)
     {
+        using VF           = Value<float, S, kCC>;
         std::uint32_t want = VF{in[i]}.fpsan_payload() & 0xFu;
         std::uint32_t have = (got >> (4 * i)) & 0xFu;
         EXPECT_EQ(have, want) << "nibble " << i;
     }
     (void)hipFree(dIn);
     (void)hipFree(dO);
+}
+
+TEST(CvtScalef32SrPk8, FpsanFp4MatchesDeterministic)
+{
+    FPSAN_RUN_ALL_VARIANTS(run_fpsan_sr_pk8_fp4_matches_deterministic);
 }
 
 #endif // has builtin

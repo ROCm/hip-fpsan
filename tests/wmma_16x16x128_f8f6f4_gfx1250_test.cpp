@@ -300,6 +300,8 @@ TEST(WmmaF8f6f4_128, Fp6Fp8_mixed)
 // payload-ring reference. The per-slot payload of a sub-byte code is the signed
 // resize of its Width-bit field (the ExtSI / subbyte_widen model, same as the
 // fp4/fp6 cvt-unpack path); products and the C term accumulate in the ring.
+// FP4/FP6 are storage formats rather than scalar Value<> element types, so this
+// remains a Triton/storage-payload convention, not an algebraic Value cast.
 using VF = Value<float, Semantics::Triton, kCC>;
 
 static std::uint32_t sign_resize(std::uint32_t code, int width)
