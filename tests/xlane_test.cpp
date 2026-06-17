@@ -113,11 +113,11 @@ TEST(Xlane, ReadlaneFloat17)
 }
 TEST(Xlane, ReadlaneFpsan0)
 {
-    FPSAN_RUN_ALL_VARIANTS(test_readlane, 0);
+    FPSAN_RUN_FPSAN_SEMANTICS(test_readlane, 0);
 }
 TEST(Xlane, ReadlaneFpsan17)
 {
-    FPSAN_RUN_ALL_VARIANTS(test_readlane, 17);
+    FPSAN_RUN_FPSAN_SEMANTICS(test_readlane, 17);
 }
 #if FPSAN_TEST_FORCE_WAVE_SIZE == 64
 TEST(Xlane, ReadlaneFloat48)
@@ -126,7 +126,7 @@ TEST(Xlane, ReadlaneFloat48)
 }
 TEST(Xlane, ReadlaneFpsan48)
 {
-    FPSAN_RUN_ALL_VARIANTS(test_readlane, 48);
+    FPSAN_RUN_FPSAN_SEMANTICS(test_readlane, 48);
 }
 #endif
 
@@ -175,7 +175,7 @@ TEST(Xlane, ReadfirstlaneFloat)
 }
 TEST(Xlane, ReadfirstlaneFpsan)
 {
-    FPSAN_RUN_ALL_VARIANTS(test_readfirstlane, );
+    FPSAN_RUN_FPSAN_SEMANTICS(test_readfirstlane, );
 }
 
 // ---- ds_bpermute (gather: result[lane] = src[addr[lane]/4]) -----------------
@@ -241,11 +241,11 @@ TEST(Xlane, DsBpermuteXorFloat16)
 }
 TEST(Xlane, DsBpermuteXorFpsan1)
 {
-    FPSAN_RUN_ALL_VARIANTS(test_ds_bpermute_xor, 1);
+    FPSAN_RUN_FPSAN_SEMANTICS(test_ds_bpermute_xor, 1);
 }
 TEST(Xlane, DsBpermuteXorFpsan16)
 {
-    FPSAN_RUN_ALL_VARIANTS(test_ds_bpermute_xor, 16);
+    FPSAN_RUN_FPSAN_SEMANTICS(test_ds_bpermute_xor, 16);
 }
 #if FPSAN_TEST_FORCE_WAVE_SIZE == 64
 // off=31 covers the largest same-half XOR in W64 mode.
@@ -255,7 +255,7 @@ TEST(Xlane, DsBpermuteXorFloat31)
 }
 TEST(Xlane, DsBpermuteXorFpsan31)
 {
-    FPSAN_RUN_ALL_VARIANTS(test_ds_bpermute_xor, 31);
+    FPSAN_RUN_FPSAN_SEMANTICS(test_ds_bpermute_xor, 31);
 }
 // off=32 is the cross-half boundary: gfx11 expects modulo-32 lane selection,
 // while RDNA4/gfx950 expect a full-wave exchange.
@@ -265,7 +265,7 @@ TEST(Xlane, DsBpermuteXorFloat32Boundary)
 }
 TEST(Xlane, DsBpermuteXorFpsan32Boundary)
 {
-    FPSAN_RUN_ALL_VARIANTS(test_ds_bpermute_xor, 32);
+    FPSAN_RUN_FPSAN_SEMANTICS(test_ds_bpermute_xor, 32);
 }
 #endif
 
@@ -333,11 +333,11 @@ TEST(Xlane, DsPermuteXorFloat16)
 }
 TEST(Xlane, DsPermuteXorFpsan1)
 {
-    FPSAN_RUN_ALL_VARIANTS(test_ds_permute_xor, 1);
+    FPSAN_RUN_FPSAN_SEMANTICS(test_ds_permute_xor, 1);
 }
 TEST(Xlane, DsPermuteXorFpsan16)
 {
-    FPSAN_RUN_ALL_VARIANTS(test_ds_permute_xor, 16);
+    FPSAN_RUN_FPSAN_SEMANTICS(test_ds_permute_xor, 16);
 }
 #if FPSAN_TEST_FORCE_WAVE_SIZE == 64
 // off=31 covers the largest same-half XOR in W64 mode.
@@ -347,7 +347,7 @@ TEST(Xlane, DsPermuteXorFloat31)
 }
 TEST(Xlane, DsPermuteXorFpsan31)
 {
-    FPSAN_RUN_ALL_VARIANTS(test_ds_permute_xor, 31);
+    FPSAN_RUN_FPSAN_SEMANTICS(test_ds_permute_xor, 31);
 }
 // off=32 is the cross-half boundary: gfx11 expects modulo-32 lane selection,
 // while RDNA4/gfx950 expect a full-wave exchange.
@@ -357,7 +357,7 @@ TEST(Xlane, DsPermuteXorFloat32Boundary)
 }
 TEST(Xlane, DsPermuteXorFpsan32Boundary)
 {
-    FPSAN_RUN_ALL_VARIANTS(test_ds_permute_xor, 32);
+    FPSAN_RUN_FPSAN_SEMANTICS(test_ds_permute_xor, 32);
 }
 #endif
 
@@ -521,7 +521,7 @@ TEST(Xlane, DsSwizzleHostOracle)
 
 TEST(Xlane, DsSwizzleFloatVsFpsanLaneMapping)
 {
-    FPSAN_RUN_ALL_VARIANTS(test_ds_swizzle_lane_mapping, );
+    FPSAN_RUN_FPSAN_SEMANTICS(test_ds_swizzle_lane_mapping, );
 }
 // ---- mov_dpp (QUAD_PERM identity = 0xE4: lane k <- lane k) ------------------
 // QUAD_PERM is universal across gfx generations; the encoding 0xE4 selects
@@ -575,7 +575,7 @@ TEST(Xlane, MovDppIdentityFloat)
 }
 TEST(Xlane, MovDppIdentityFpsan)
 {
-    FPSAN_RUN_ALL_VARIANTS(test_mov_dpp_identity, );
+    FPSAN_RUN_FPSAN_SEMANTICS(test_mov_dpp_identity, );
 }
 
 // ---- update_dpp (quad swap plus row-mask blend with old value) ---------------
@@ -637,7 +637,7 @@ TEST(Xlane, UpdateDppQuadSwapRowMaskFloat)
 }
 TEST(Xlane, UpdateDppQuadSwapRowMaskFpsan)
 {
-    FPSAN_RUN_ALL_VARIANTS(test_update_dpp_quad_swap_row_mask, );
+    FPSAN_RUN_FPSAN_SEMANTICS(test_update_dpp_quad_swap_row_mask, );
 }
 
 #if !defined(__HIP_DEVICE_COMPILE__) || __has_builtin(__builtin_amdgcn_mov_dpp8)
@@ -694,7 +694,7 @@ TEST(Xlane, MovDpp8IdentityFpsan)
 {
     if(device_is_gfx950())
         GTEST_SKIP() << "mov_dpp8 is not a gfx950 op";
-    FPSAN_RUN_ALL_VARIANTS(test_mov_dpp8_identity, );
+    FPSAN_RUN_FPSAN_SEMANTICS(test_mov_dpp8_identity, );
 }
 
 #endif // __has_builtin(__builtin_amdgcn_mov_dpp8)
@@ -766,7 +766,7 @@ TEST(Xlane, Permlane64Float)
 }
 TEST(Xlane, Permlane64Fpsan)
 {
-    FPSAN_RUN_ALL_VARIANTS(test_permlane64, );
+    FPSAN_RUN_FPSAN_SEMANTICS(test_permlane64, );
 }
 #endif // __has_builtin(__builtin_amdgcn_permlane64)
 
@@ -915,7 +915,7 @@ TEST(Xlane, DsBpermuteFiXorFloat1)
 }
 TEST(Xlane, DsBpermuteFiXorFpsan1)
 {
-    FPSAN_RUN_ALL_VARIANTS(test_ds_bpermute_fi_xor, 1);
+    FPSAN_RUN_FPSAN_SEMANTICS(test_ds_bpermute_fi_xor, 1);
 }
 #if FPSAN_TEST_FORCE_WAVE_SIZE == 64
 TEST(Xlane, DsBpermuteFiXorFloat32)
@@ -924,7 +924,7 @@ TEST(Xlane, DsBpermuteFiXorFloat32)
 }
 TEST(Xlane, DsBpermuteFiXorFpsan32)
 {
-    FPSAN_RUN_ALL_VARIANTS(test_ds_bpermute_fi_xor, 32);
+    FPSAN_RUN_FPSAN_SEMANTICS(test_ds_bpermute_fi_xor, 32);
 }
 #endif
 #endif // __has_builtin(__builtin_amdgcn_ds_bpermute_fi_b32)

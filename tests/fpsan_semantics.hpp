@@ -7,12 +7,13 @@
 // self-consistency test exercises". A self-consistency test asserts that the
 // device payload equals the host recomputation in the SAME semantics, so it
 // generalizes to every algebraic model; the test bodies are written generic over
-// Semantics and driven by the loop below.
+// Semantics and driven by the loops below.
 //
-// To add, remove, or rename a Semantics variant, edit ONLY this list -- every
-// test that loops over for_each_fpsan_semantics picks the change up, with no
-// per-test, per-intrinsic, or per-gfx-arch edits. The intrinsic wrappers are
-// already generic over Semantics, so they are never touched.
+// Most tests use the default loop, which skips the "2" reroll variants because
+// they share the same implementation paths and differ only in collision sets.
+// Core algebraic tests use the all-variants loop when the reroll distinction is
+// itself under test. To add, remove, or rename a Semantics value, edit these
+// lists in one place.
 //
 // Native is excluded on purpose: it is the bit-exact-vs-hardware oracle (the
 // reference the fpsan payloads are checked against), driven separately by each
@@ -27,14 +28,30 @@
 
 namespace fpsan_test
 {
-    // Invoke f(std::integral_constant<Semantics, S>{}) for each FPSan-family
-    // semantics. Use a generic lambda and read the value as decltype(sem)::value:
+    // Invoke f(std::integral_constant<Semantics, S>{}) for each default
+    // FPSan-family semantics. Use a generic lambda and read the value as
+    // decltype(sem)::value:
     //
     //   for_each_fpsan_semantics([](auto sem) {
     //       run_my_self_consistency_test<Traits, decltype(sem)::value>();
     //   });
     template <class F>
     void for_each_fpsan_semantics(F&& f)
+    {
+        using S = fpsan::Semantics;
+        f(std::integral_constant<S, S::Triton>{});
+        f(std::integral_constant<S, S::Field>{});
+        f(std::integral_constant<S, S::FieldFast>{});
+        f(std::integral_constant<S, S::FieldWithMulCasts>{});
+        f(std::integral_constant<S, S::SophieGermainRing>{});
+        f(std::integral_constant<S, S::PythagoreanRing>{});
+    }
+
+    // The exhaustive variant loop keeps the 2-suffixed reroll variants. Use it
+    // for tests whose purpose is the algebraic semantics themselves, not merely
+    // verifying that a generic wrapper is semantics-agnostic.
+    template <class F>
+    void for_each_fpsan_semantics_all_variants(F&& f)
     {
         using S = fpsan::Semantics;
         f(std::integral_constant<S, S::Triton>{});
@@ -129,9 +146,13 @@ namespace fpsan_test
 } // namespace fpsan_test
 
 // Convenience for tests whose body is a single Semantics-templated function
-// fn<S>(args...): run it for every FPSan-family variant.
-//   TEST(Foo, BarFpsan) { FPSAN_RUN_ALL_VARIANTS(test_bar, 17); }
-#define FPSAN_RUN_ALL_VARIANTS(fn, ...) \
+// fn<S>(args...).
+//   TEST(Foo, BarFpsan) { FPSAN_RUN_FPSAN_SEMANTICS(test_bar, 17); }
+#define FPSAN_RUN_FPSAN_SEMANTICS(fn, ...) \
     ::fpsan_test::for_each_fpsan_semantics([&](auto sem) { fn<decltype(sem)::value>(__VA_ARGS__); })
+
+#define FPSAN_RUN_ALL_VARIANTS(fn, ...)                  \
+    ::fpsan_test::for_each_fpsan_semantics_all_variants( \
+        [&](auto sem) { fn<decltype(sem)::value>(__VA_ARGS__); })
 
 #endif // FPSAN_TESTS_FPSAN_SEMANTICS_HPP
