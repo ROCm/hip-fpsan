@@ -8,7 +8,7 @@
 // MI350)'s 16x16x32 and 32x32x16 shapes, F64 MFMAs, and the new
 // 16x16x128 / 32x32x64 f8f6f4 scaled MFMAs.
 //
-// As with amdgcn_matrix.hpp (WMMA), Float mode forwards each wrapper to the
+// As with amdgcn_matrix.hpp (WMMA), Native mode forwards each wrapper to the
 // real __builtin_amdgcn_mfma_* and FPSan mode runs a wave-cooperative
 // software MMA in the payload ring, using the same fragment layout the
 // hardware uses. The layout helpers
@@ -212,8 +212,8 @@ namespace fpsan
         // the accumulator/output element type (CElem). All three Values carry per-
         // lane fragments; the dataflow walks the K dimension, gathers A[i][k] and
         // B[k][j] from the lanes that hold them, multiplies and accumulates in the
-        // payload ring (FPSan) or in real float (Float mode -- used only as an
-        // oracle in tests; production Float mode goes straight to the builtin).
+        // payload ring (FPSan) or in real float (Native mode -- used only as an
+        // oracle in tests; production Native mode goes straight to the builtin).
         //
         // The lane mapping comes from input_loc / output_loc_32 (or _64 for f64
         // accumulators). InRegA / InRegB select the per-lane scalar at a given
@@ -486,8 +486,8 @@ namespace fpsan
         // consumes): in FPSan mode its bits ARE the per-slot payloads, packed at the
         // silicon-verified positions -- Width-bit field s occupies bits Width*s ..
         // Width*s+Width-1, little-endian across the 8 i32 words. This matches the cvt
-        // sub-byte convention (no phi bijection on sub-byte payloads; widen == signed
-        // resize of the n-bit payload). Verified on MI350 by a full-block-random
+        // sub-byte convention (no FP4/FP6 Value<> element type; widen uses the
+        // per-semantics storage-payload convention). Verified on MI350 by a full-block-random
         // match of the builtin for every same-width A/B combo.
         //
         // Cross-lane gather uses ds_bpermute on the individual 32-bit words (the field
@@ -496,8 +496,9 @@ namespace fpsan
         // permutations cancel in a same-format test but not when mixed), so the
         // wrappers static_assert that A and B share a bit width.
 
-        // detail::subbyte_widen (the FPSan signed-resize of a Width-bit payload to
-        // f32) comes from fpsan/detail/subbyte_widen.hpp, shared with amdgcn_cvt.hpp.
+        // detail::subbyte_widen (the FPSan storage-payload widening of a Width-bit
+        // field to f32) comes from fpsan/detail/subbyte_widen.hpp, shared with
+        // amdgcn_cvt.hpp.
 
         // Gather the Width-bit field at slot s from `srclane`'s packed register `pw`
         // (8 i32, this lane's copy) and widen it to an f32 payload.
@@ -621,7 +622,7 @@ namespace fpsan
         //   32x32x64  sub mix slot: lane = 16*(2*(k/32) + idx/16) + (idx%16),
         //     field p0 = 16*((k%32)/16) + (k%16)
         // The 8-bit operand stays a Value<v32_fragment> (proper fp8 payload casting);
-        // the sub operand is the raw packed v8i32 (bits are payloads, signed-resized).
+        // the sub operand is the raw packed v8i32 (bits are storage payloads).
         // `aIsSub` picks which side is sub. Per-K-block scale via scale_block_factor.
         template <bool AIsSub, int Wsub, class Fp8Frag, Semantics S, Conversions C>
         FPSAN_DEVICE Value<v4f_native, S, C> mfma_scale_mixed_16x16x128(Value<Fp8Frag, S, C> fp8,
@@ -729,7 +730,7 @@ namespace fpsan
 // CDNA MFMA wrappers.
 //
 // Each wrapper:
-//   - Float mode: bit-casts the Value fragments to the native vector ABI and
+//   - Native mode: bit-casts the Value fragments to the native vector ABI and
 //     calls the matching __builtin_amdgcn_mfma_*.
 //   - FPSan mode: runs the software MFMA in detail::mfma_software, gathering
 //     A and B elements via wave_shfl and accumulating in the payload ring.
@@ -1488,7 +1489,7 @@ namespace fpsan
 // Companion to the fp8/bf8 wrappers above for the 6-bit (E2M3 fp6 / E3M2 bf6)
 // and 4-bit (E2M1 fp4) operand formats. Because sub-byte data is never a Value
 // scalar element type, the per-lane operands are passed as the raw packed
-// v8i32 register (exactly what the builtin consumes): in Float mode its bits
+// v8i32 register (exactly what the builtin consumes): in Native mode its bits
 // are the hardware codes; in FPSan mode they are the per-slot payloads packed
 // at the silicon-verified bit positions (Width-bit field s at bits Width*s..).
 //

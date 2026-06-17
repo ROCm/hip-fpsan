@@ -19,11 +19,13 @@
 //     including the E4M3 high-exponent / NaN region the small-int tests miss.
 //   * PackUnpackRoundTrip: pack a/scale, b/scale into an fp8 word then unpack
 //     with the same scale -> recover (a, b). Exercises the scaled PACK
-//     (divide) and the matching scaled UNPACK (multiply) together. Float mode
+//     (divide) and the matching scaled UNPACK (multiply) together. Native mode
 //     is bit-exact for values exact in fp8; FPSan mode must match the
 //     payload-ring reference (which divides on pack, multiplies on unpack).
 #include "fpsan/amdgcn_cvt.hpp"
 #include "fpsan/fpsan.hpp"
+
+#include "fpsan_semantics.hpp"
 
 #include "hip_test_utils.hpp"
 #include "test_random.hpp"
@@ -296,9 +298,10 @@ void run_roundtrip()
     }
     // FPSan: payload must equal the payload-ring reference. Pack divides, unpack
     // multiplies: cast<float>(cast<FP8>(cast<SrcElem>(x) / scale)) * scale.
-    {
-        using VF = Value<float, Semantics::Triton, kCC>;
-        using VS = Value<SrcElem, Semantics::Triton, kCC>;
+    fpsan_test::for_each_fpsan_semantics([&](auto sem) {
+        constexpr Semantics S = decltype(sem)::value;
+        using VF              = Value<float, S, kCC>;
+        using VS              = Value<SrcElem, S, kCC>;
         std::vector<std::uint32_t> ref(2 * LANES);
         for(int i = 0; i < 2 * LANES; ++i)
         {
@@ -308,8 +311,7 @@ void run_roundtrip()
         }
         std::uint32_t* dO;
         HIP_CHECK(hipMalloc(&dO, 2 * LANES * sizeof(std::uint32_t)));
-        k_roundtrip<Semantics::Triton, FP8, SrcVEC, SrcElem, std::uint32_t>
-            <<<1, LANES>>>(dIn, dO, scale);
+        k_roundtrip<S, FP8, SrcVEC, SrcElem, std::uint32_t><<<1, LANES>>>(dIn, dO, scale);
         HIP_CHECK(hipDeviceSynchronize());
         std::vector<std::uint32_t> got(2 * LANES);
         HIP_CHECK(
@@ -317,7 +319,7 @@ void run_roundtrip()
         for(int i = 0; i < 2 * LANES; ++i)
             EXPECT_EQ(got[i], ref[i]) << "FPSan payload at " << i;
         (void)hipFree(dO);
-    }
+    });
     (void)hipFree(dIn);
 }
 

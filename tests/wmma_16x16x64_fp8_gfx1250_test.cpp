@@ -17,6 +17,7 @@
 #include "fpsan/amdgcn_matrix.hpp"
 #include "fpsan/fpsan.hpp"
 
+#include "fpsan_semantics.hpp"
 #include "hip_test_utils.hpp"
 #include "test_random.hpp"
 
@@ -119,18 +120,18 @@ __global__ void k_float_dataflow(const typename Harness<Traits>::AElem* A,
         D[(e + 8 * (lane >> 4)) * N + (lane & 15)] = d.get(e).to_float();
 }
 
-template <class Traits>
+template <class Traits, Semantics S>
 __global__ void k_fpsan(const typename Harness<Traits>::AElem* A,
                         const typename Harness<Traits>::BElem* B,
                         const typename Harness<Traits>::CElem* C,
                         typename Harness<Traits>::CBits*       Dpay)
 {
-    int                                                           lane = threadIdx.x;
-    Value<typename Harness<Traits>::AVec, Semantics::Triton, kCC> a;
-    Value<typename Harness<Traits>::BVec, Semantics::Triton, kCC> b;
-    Value<typename Harness<Traits>::CVec, Semantics::Triton, kCC> c;
-    load_frags<Traits, Semantics::Triton>(A, B, C, lane, a, b, c);
-    auto d = Traits::template call<Semantics::Triton, kCC>(a, b, c);
+    int                                           lane = threadIdx.x;
+    Value<typename Harness<Traits>::AVec, S, kCC> a;
+    Value<typename Harness<Traits>::BVec, S, kCC> b;
+    Value<typename Harness<Traits>::CVec, S, kCC> c;
+    load_frags<Traits, S>(A, B, C, lane, a, b, c);
+    auto d = Traits::template call<S, kCC>(a, b, c);
     for(int e = 0; e < 8; ++e)
         Dpay[(e + 8 * (lane >> 4)) * N + (lane & 15)] = d.get(e).fpsan_payload();
 }
@@ -196,7 +197,7 @@ void run_layout_matches_hardware()
     (void)hipFree(dOurs);
 }
 
-template <class Traits>
+template <class Traits, Semantics S>
 void run_fpsan_matches_scalar_reference()
 {
     using AE    = typename Harness<Traits>::AElem;
@@ -207,9 +208,9 @@ void run_fpsan_matches_scalar_reference()
     if(hipGetDeviceCount(&ndev) != hipSuccess || ndev == 0)
         GTEST_SKIP() << "no HIP device";
     Mats<Traits> m = make_inputs<Traits>();
-    using VA       = Value<AE, Semantics::Triton, kCC>;
-    using VB       = Value<BE, Semantics::Triton, kCC>;
-    using VC       = Value<CE, Semantics::Triton, kCC>;
+    using VA       = Value<AE, S, kCC>;
+    using VB       = Value<BE, S, kCC>;
+    using VC       = Value<CE, S, kCC>;
     std::vector<CBits> ref(M * N);
     for(int mm = 0; mm < M; ++mm)
         for(int nn = 0; nn < N; ++nn)
@@ -225,7 +226,7 @@ void run_fpsan_matches_scalar_reference()
     CE*    dC = to_dev(m.C);
     CBits* dD;
     HIP_CHECK(hipMalloc(&dD, M * N * sizeof(CBits)));
-    k_fpsan<Traits><<<1, 32>>>(dA, dB, dC, dD);
+    k_fpsan<Traits, S><<<1, 32>>>(dA, dB, dC, dD);
     HIP_CHECK(hipDeviceSynchronize());
     std::vector<CBits> got(M * N);
     HIP_CHECK(hipMemcpy(got.data(), dD, M * N * sizeof(CBits), hipMemcpyDeviceToHost));
@@ -239,29 +240,30 @@ void run_fpsan_matches_scalar_reference()
 
 // K=64 contraction: keep operand magnitudes small so 64-term integer sums stay
 // exact in f32 and f16 (|sum| <= 64*4 + 4 = 260 < 2048).
-#define FPSAN_WMMA64_TRAITS(NAME, AVEC, BVEC, CVEC, CALL)                       \
-    struct NAME                                                                 \
-    {                                                                           \
-        using AVec                = AVEC;                                       \
-        using BVec                = BVEC;                                       \
-        using CVec                = CVEC;                                       \
-        static constexpr int a_lo = -2, a_hi = 2;                               \
-        static constexpr int b_lo = -2, b_hi = 2;                               \
-        static constexpr int c_lo = -4, c_hi = 4;                               \
-        template <Semantics S, Conversions C>                                   \
-        __device__ static Value<CVec, S, C>                                     \
-            call(Value<AVec, S, C> a, Value<BVec, S, C> b, Value<CVec, S, C> c) \
-        {                                                                       \
-            return fpsan::CALL(a, b, c);                                        \
-        }                                                                       \
-    };                                                                          \
-    TEST(NAME, LayoutMatchesHardware)                                           \
-    {                                                                           \
-        run_layout_matches_hardware<NAME>();                                    \
-    }                                                                           \
-    TEST(NAME, FpsanMatchesScalarReference)                                     \
-    {                                                                           \
-        run_fpsan_matches_scalar_reference<NAME>();                             \
+#define FPSAN_WMMA64_TRAITS(NAME, AVEC, BVEC, CVEC, CALL)                                        \
+    struct NAME                                                                                  \
+    {                                                                                            \
+        using AVec                = AVEC;                                                        \
+        using BVec                = BVEC;                                                        \
+        using CVec                = CVEC;                                                        \
+        static constexpr int a_lo = -2, a_hi = 2;                                                \
+        static constexpr int b_lo = -2, b_hi = 2;                                                \
+        static constexpr int c_lo = -4, c_hi = 4;                                                \
+        template <Semantics S, Conversions C>                                                    \
+        __device__ static Value<CVec, S, C>                                                      \
+            call(Value<AVec, S, C> a, Value<BVec, S, C> b, Value<CVec, S, C> c)                  \
+        {                                                                                        \
+            return fpsan::CALL(a, b, c);                                                         \
+        }                                                                                        \
+    };                                                                                           \
+    TEST(NAME, LayoutMatchesHardware)                                                            \
+    {                                                                                            \
+        run_layout_matches_hardware<NAME>();                                                     \
+    }                                                                                            \
+    TEST(NAME, FpsanMatchesScalarReference)                                                      \
+    {                                                                                            \
+        fpsan_test::for_each_fpsan_semantics(                                                    \
+            [](auto sem) { run_fpsan_matches_scalar_reference<NAME, decltype(sem)::value>(); }); \
     }
 
 FPSAN_WMMA64_TRAITS(

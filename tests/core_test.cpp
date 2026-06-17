@@ -4,7 +4,7 @@
 // tests/core_test.cpp
 //
 // Core Value tests: embedding/round-trip, the fixed points, drop-in
-// Float-mode parity with native arithmetic, FPSan-mode ring laws,
+// Native-mode parity with native arithmetic, FPSan-mode ring laws,
 // mixed-POD operators, and cross-checks against the ground-truth reference
 // fpsan_generic.hpp (which itself mirrors Triton). Exhaustive 16-bit checks
 // live in their own TESTs so ctest -j can parallelize.
@@ -69,19 +69,31 @@ TYPED_TEST_P(CoreTyped, DefaultIsZero)
     using FT = typename TypeParam::ftype;
     using F  = Value<FT, TypeParam::sem, TypeParam::conv>;
     F z{};
-    EXPECT_EQ(bits_of(static_cast<FT>(z.to_float())), bits_of(FT(0)));
+    // Default is the zero value: a Native/Triton float reads back as 0; an
+    // algebraic payload is the residue phi(0) == 0 (to_float() is unavailable
+    // there).
+    if constexpr(F::is_algebraic)
+        EXPECT_EQ(z.fpsan_payload(), typename F::bits_type(0));
+    else
+        EXPECT_EQ(bits_of(static_cast<FT>(z.to_float())), bits_of(FT(0)));
 }
 
 TYPED_TEST_P(CoreTyped, RoundTripExact)
 {
     using FT = typename TypeParam::ftype;
     using F  = Value<FT, TypeParam::sem, TypeParam::conv>;
-    for(FT x : samples<FT>())
+    // phi is a bit-level bijection only for the bijective models (Native is the
+    // identity; Triton is an invertible bit scramble), so the exact
+    // construct/convert round trip is asserted there. The algebraic models embed
+    // by value and deliberately do not bit-preserve arbitrary inputs; their
+    // round-trip / quantization behavior is covered by algebraic_value_test.
+    if constexpr(TypeParam::sem == Semantics::Native || TypeParam::sem == Semantics::Triton)
     {
-        F a(x);
-        // A construct/convert round trip with no arithmetic recovers x exactly,
-        // in both modes (phi is a bijection; mode=false is the identity).
-        EXPECT_EQ(bits_of(a.to_float()), bits_of(x));
+        for(FT x : samples<FT>())
+        {
+            F a(x);
+            EXPECT_EQ(bits_of(a.to_float()), bits_of(x));
+        }
     }
 }
 
@@ -89,12 +101,23 @@ TYPED_TEST_P(CoreTyped, FixedPoints)
 {
     using FT = typename TypeParam::ftype;
     using F  = Value<FT, TypeParam::sem, TypeParam::conv>;
-    if constexpr(TypeParam::sem == Semantics::Triton)
+    using B  = typename F::bits_type;
+    // Payload-algebra flavors only (Triton + algebraic); Native has no payload.
+    if constexpr(F::is_fpsan)
     {
-        using B = typename F::bits_type;
+        // 0 and 1 are universal fixed points: any homomorphic encoding (and
+        // Triton's free-ring scramble) sends the additive identity to 0 and the
+        // multiplicative identity to 1.
         EXPECT_EQ(F(FT(0)).fpsan_payload(), B(0));
         EXPECT_EQ(F(FT(1)).fpsan_payload(), B(1));
-        EXPECT_EQ(F(FT(-1)).fpsan_payload(), static_cast<B>(~B(0)));
+        // -1 is the additive inverse of 1 in every flavor, with a flavor-specific
+        // stored residue: Triton's free ring Z/2^w stores the all-ones two's
+        // complement; an algebraic Z/nZ stores n-1.
+        EXPECT_TRUE(F(FT(-1)) == -F(FT(1)));
+        if constexpr(TypeParam::sem == Semantics::Triton)
+            EXPECT_EQ(F(FT(-1)).fpsan_payload(), static_cast<B>(~B(0)));
+        else
+            EXPECT_EQ(F(FT(-1)).fpsan_payload(), static_cast<B>(F::alg_cfg().n - 1));
     }
 }
 
@@ -123,10 +146,10 @@ TYPED_TEST_P(CoreTyped, RingLaws)
             for(FT xc : s)
             {
                 F a(xa), b(xb), c(xc);
-                // In FPSan mode these are EXACT (integer ring). In Float mode they are
+                // In FPSan mode these are exact ring laws. In Native mode they are
                 // the native float laws, which can round; so only assert the exact
                 // ones in FPSan mode.
-                if constexpr(TypeParam::sem == Semantics::Triton)
+                if constexpr(TypeParam::sem != Semantics::Native)
                 {
                     EXPECT_TRUE((a + b) + c == a + (b + c));
                     EXPECT_TRUE((a * b) * c == a * (b * c));
@@ -175,11 +198,23 @@ REGISTER_TYPED_TEST_SUITE_P(CoreTyped,
 
 // Build the type list: all (mode x explicit) combinations for each available
 // float type.
-#define FPSAN_CFGS(FT)                                     \
-    Cfg<FT, Semantics::Native, Conversions::Implicit>,     \
-        Cfg<FT, Semantics::Native, Conversions::Explicit>, \
-        Cfg<FT, Semantics::Triton, Conversions::Implicit>, \
-        Cfg<FT, Semantics::Triton, Conversions::Explicit>
+// Native + Triton carry both conversion modes; the algebraic value
+// models are orthogonal to Conversions, so one representative (Explicit) each.
+#define FPSAN_CFGS(FT)                                                 \
+    Cfg<FT, Semantics::Native, Conversions::Implicit>,                 \
+        Cfg<FT, Semantics::Native, Conversions::Explicit>,             \
+        Cfg<FT, Semantics::Triton, Conversions::Implicit>,             \
+        Cfg<FT, Semantics::Triton, Conversions::Explicit>,             \
+        Cfg<FT, Semantics::Field, Conversions::Explicit>,              \
+        Cfg<FT, Semantics::Field2, Conversions::Explicit>,             \
+        Cfg<FT, Semantics::FieldFast, Conversions::Explicit>,          \
+        Cfg<FT, Semantics::FieldFast2, Conversions::Explicit>,         \
+        Cfg<FT, Semantics::FieldWithMulCasts, Conversions::Explicit>,  \
+        Cfg<FT, Semantics::FieldWithMulCasts2, Conversions::Explicit>, \
+        Cfg<FT, Semantics::SophieGermainRing, Conversions::Explicit>,  \
+        Cfg<FT, Semantics::SophieGermainRing2, Conversions::Explicit>, \
+        Cfg<FT, Semantics::PythagoreanRing, Conversions::Explicit>,    \
+        Cfg<FT, Semantics::PythagoreanRing2, Conversions::Explicit>
 
 using CoreConfigs = ::testing::Types<FPSAN_CFGS(float),
                                      FPSAN_CFGS(double)

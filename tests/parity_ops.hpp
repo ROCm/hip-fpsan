@@ -12,7 +12,7 @@
 //
 // All observables are extracted via Value::to_storage_bits(), which returns the
 // raw stored representation in BOTH modes (the integer payload in FPSan mode,
-// the float's bits in Float mode) -- so a single code path covers every config.
+// the float's bits in Native mode) -- so a single code path covers every config.
 //
 // Scope of the host<->device guarantee: in FPSan mode every result is integer /
 // constexpr payload algebra and must be bit-identical on host and device. Float
@@ -21,7 +21,7 @@
 // and the GPU; bit-exact host/device conformance of native FP is NOT a property
 // this suite asserts. The test therefore compares all observables for FPSan mode
 // and only the rounding-independent ones (embed round-trip, negation, the b==0
-// flag) for Float mode.
+// flag) for Native mode.
 // ----------------------------------------------------------------------------
 #ifndef FPSAN_TESTS_PARITY_OPS_HPP
 #define FPSAN_TESTS_PARITY_OPS_HPP

@@ -6,16 +6,16 @@
 // FPSan wrappers for AMDGPU FP atomics. GPU-only, opt-in (not pulled by
 // <fpsan/fpsan.hpp>).
 //
-// The two identities behind every atomic in this header:
+// The identities behind every atomic in this header:
 //
-//   - FPSan addition on f32/f64 is integer add mod 2^w on the payload (see
-//     [[mix.hpp]]). The corresponding FPSan atomic_fadd is therefore a
-//     hardware INTEGER atomicAdd on the payload word -- lock-free, exact, and
-//     identical to the FPSan + operation done sequentially.
+//   - Native f32/f64 addition can use HIP's hardware atomicAdd directly.
+//     FPSan-family addition uses the selected Value<> semantics, so atomic_fadd
+//     uses a CAS loop that recomputes old + v through Value's operator+. That
+//     covers both Triton's Z/2^w payload ring and the algebraic Z/nZ variants.
 //
-//   - FPSan order is signed-int order on the payload ([[value.hpp]]:less()).
-//     Hardware signed-int atomicMin/atomicMax on the payload IS the FPSan
-//     atomic_fmin/fmax -- again lock-free and exact.
+//   - FPSan order is signed-int order on the payload ([[value.hpp]]:less()) for
+//     every FPSan-family semantics. Hardware signed-int atomicMin/atomicMax on
+//     the payload IS the FPSan atomic_fmin/fmax -- lock-free and exact.
 //
 // We use HIP's atomicAdd/atomicMin/atomicMax overloads as the underlying
 // primitive: HIP picks the right hardware instruction (global/flat/ds) based
@@ -23,7 +23,7 @@
 // covers all three pointer kinds without duplicated code or address-space
 // gymnastics.
 //
-// Float-mode fmin/fmax need a CAS loop because there is no hardware
+// Native-mode fmin/fmax need a CAS loop because there is no hardware
 // integer-typed atomic on a float (and the dedicated atomic_fmin/fmax_f32
 // builtins are buffer-resource forms that need explicit buffer descriptors).
 // The CAS loop is straightforward: read old, compute fmin/fmax in float, CAS
@@ -62,15 +62,30 @@ namespace fpsan
         }
         else
         {
-            unsigned old = atomicAdd(reinterpret_cast<unsigned*>(addr),
-                                     static_cast<unsigned>(v.fpsan_payload()));
-            return Value<float, S, C>::from_fpsan_payload(static_cast<std::uint32_t>(old));
+            // A bare integer atomicAdd accumulates the payload mod 2^w. That is the
+            // Triton's ring exactly, but NOT the algebraic models' Z/nZ -- so use a
+            // CAS loop and let Value's operator+ apply the correct per-semantics add
+            // (mod 2^w for Triton, mod n for the algebraic variants).
+            // Lock-free; returns the OLD value, like the hardware atomic. (cf. pk_add.)
+            using V      = Value<float, S, C>;
+            auto*    p   = reinterpret_cast<unsigned*>(addr);
+            unsigned old = *p;
+            for(;;)
+            {
+                const V oldV = V::from_storage_bits(__builtin_bit_cast(typename V::bits_type, old));
+                const V newV = oldV + v;
+                const unsigned newbits = __builtin_bit_cast(unsigned, newV.to_storage_bits());
+                const unsigned witness = atomicCAS(p, old, newbits);
+                if(witness == old)
+                    return oldV;
+                old = witness;
+            }
         }
     }
 
     // ---- atomic_fmin_f32 / atomic_fmax_f32 --------------------------------------
     // FPSan mode reduces to hardware SIGNED-INT atomicMin/atomicMax on the
-    // payload. Float mode runs a CAS loop on the float bits.
+    // payload. Native mode runs a CAS loop on the float bits.
     namespace detail
     {
 
@@ -93,7 +108,7 @@ namespace fpsan
             return fmax(a, b);
         }
 
-        // Float-mode fmin/fmax CAS loop on the raw bits, shared by f32 and f64:
+        // Native-mode fmin/fmax CAS loop on the raw bits, shared by f32 and f64:
         // read old, compute the FP min/max, CAS until success. UInt is the
         // same-width unsigned integer the hardware atomicCAS operates on (there is
         // no hardware integer-typed atomic on a float/double directly).
@@ -165,15 +180,29 @@ namespace fpsan
         }
         else
         {
-            unsigned long long old = atomicAdd(reinterpret_cast<unsigned long long*>(addr),
-                                               static_cast<unsigned long long>(v.fpsan_payload()));
-            return Value<double, S, C>::from_fpsan_payload(static_cast<std::uint64_t>(old));
+            // CAS loop with the per-semantics add (mod 2^w Triton, mod n algebraic
+            // models); a bare integer atomicAdd would be mod 2^64 only. See the f32
+            // wrapper above. Returns the OLD value.
+            using V                = Value<double, S, C>;
+            auto*              p   = reinterpret_cast<unsigned long long*>(addr);
+            unsigned long long old = *p;
+            for(;;)
+            {
+                const V oldV = V::from_storage_bits(__builtin_bit_cast(typename V::bits_type, old));
+                const V newV = oldV + v;
+                const unsigned long long newbits
+                    = __builtin_bit_cast(unsigned long long, newV.to_storage_bits());
+                const unsigned long long witness = atomicCAS(p, old, newbits);
+                if(witness == old)
+                    return oldV;
+                old = witness;
+            }
         }
     }
 
     // ---- atomic_fmin_f64 / atomic_fmax_f64 -------------------------------------
     // FPSan order is signed-int order on the (64-bit) payload, so FPSan reduces to
-    // a hardware signed 64-bit atomicMin/atomicMax. Float mode runs a CAS loop on
+    // a hardware signed 64-bit atomicMin/atomicMax. Native mode runs a CAS loop on
     // the 64-bit float bits (no hardware integer-typed atomic on a double).
     template <Semantics S, Conversions C>
     FPSAN_DEVICE Value<double, S, C> amdgcn_atomic_fmin_f64(Value<double, S, C>* addr,

@@ -3,6 +3,8 @@
 
 #include "fpsan/amdgcn_swmmac_gfx12.hpp"
 #include "fpsan/fpsan.hpp"
+
+#include "fpsan_semantics.hpp"
 #include "test_random.hpp"
 
 #include <hip/hip_runtime.h>
@@ -183,12 +185,12 @@ namespace
         return ref;
     }
 
-    template <class AScalar, class BScalar, class CScalar>
+    template <class AScalar, class BScalar, class CScalar, Semantics S>
     std::vector<std::uint64_t> sw_reference_fpsan_h(const SwData& d)
     {
-        using VA = Value<AScalar, Semantics::Triton, kCC>;
-        using VB = Value<BScalar, Semantics::Triton, kCC>;
-        using VC = Value<CScalar, Semantics::Triton, kCC>;
+        using VA = Value<AScalar, S, kCC>;
+        using VB = Value<BScalar, S, kCC>;
+        using VC = Value<CScalar, S, kCC>;
         std::vector<std::uint64_t> ref(M * N);
         for(int m = 0; m < M; ++m)
             for(int n = 0; n < N; ++n)
@@ -198,7 +200,7 @@ namespace
                 {
                     const int k0 = 4 * g + d.p0[m * G + g];
                     const int k1 = 4 * g + d.p1[m * G + g];
-                    acc = acc
+                    acc          = acc
                           + fpsan::cast<CScalar>(VA(static_cast<AScalar>(d.A[m * K + k0])))
                                 * fpsan::cast<CScalar>(VB(static_cast<BScalar>(d.B[k0 * N + n])));
                     acc = acc
@@ -210,12 +212,12 @@ namespace
         return ref;
     }
 
-    template <class AScalar, class BScalar>
+    template <class AScalar, class BScalar, Semantics S>
     std::vector<std::uint32_t> sw_reference_fp8_fpsan(const SwData& d)
     {
-        using VA = Value<AScalar, Semantics::Triton, kCC>;
-        using VB = Value<BScalar, Semantics::Triton, kCC>;
-        using VF = Value<float, Semantics::Triton, kCC>;
+        using VA = Value<AScalar, S, kCC>;
+        using VB = Value<BScalar, S, kCC>;
+        using VF = Value<float, S, kCC>;
         std::vector<std::uint32_t> ref(M * N);
         for(int m = 0; m < M; ++m)
             for(int n = 0; n < N; ++n)
@@ -225,7 +227,7 @@ namespace
                 {
                     const int k0 = 4 * g + d.p0[m * G + g];
                     const int k1 = 4 * g + d.p1[m * G + g];
-                    acc = acc
+                    acc          = acc
                           + fpsan::cast<float>(VA(static_cast<AScalar>(d.A[m * K + k0])))
                                 * fpsan::cast<float>(VB(static_cast<BScalar>(d.B[k0 * N + n])));
                     acc = acc
@@ -391,9 +393,9 @@ namespace
         template <Semantics S>
         __device__ Value<fpsan::v4f_native, S, kCC>
                    operator()(Value<fpsan::v4e4m3_native, S, kCC> a,
-                              Value<fpsan::v8e4m3_native, S, kCC> b,
-                              Value<fpsan::v4f_native, S, kCC>    c,
-                              int                                 idx) const
+                       Value<fpsan::v8e4m3_native, S, kCC> b,
+                       Value<fpsan::v4f_native, S, kCC>    c,
+                       int                                 idx) const
         {
             return fpsan::amdgcn_swmmac_f32_16x16x32_fp8_fp8_w64<S, kCC>(a, b, c, idx);
         }
@@ -403,9 +405,9 @@ namespace
         template <Semantics S>
         __device__ Value<fpsan::v4f_native, S, kCC>
                    operator()(Value<fpsan::v4e4m3_native, S, kCC> a,
-                              Value<fpsan::v8e5m2_native, S, kCC> b,
-                              Value<fpsan::v4f_native, S, kCC>    c,
-                              int                                 idx) const
+                       Value<fpsan::v8e5m2_native, S, kCC> b,
+                       Value<fpsan::v4f_native, S, kCC>    c,
+                       int                                 idx) const
         {
             return fpsan::amdgcn_swmmac_f32_16x16x32_fp8_bf8_w64<S, kCC>(a, b, c, idx);
         }
@@ -415,9 +417,9 @@ namespace
         template <Semantics S>
         __device__ Value<fpsan::v4f_native, S, kCC>
                    operator()(Value<fpsan::v4e5m2_native, S, kCC> a,
-                              Value<fpsan::v8e4m3_native, S, kCC> b,
-                              Value<fpsan::v4f_native, S, kCC>    c,
-                              int                                 idx) const
+                       Value<fpsan::v8e4m3_native, S, kCC> b,
+                       Value<fpsan::v4f_native, S, kCC>    c,
+                       int                                 idx) const
         {
             return fpsan::amdgcn_swmmac_f32_16x16x32_bf8_fp8_w64<S, kCC>(a, b, c, idx);
         }
@@ -427,9 +429,9 @@ namespace
         template <Semantics S>
         __device__ Value<fpsan::v4f_native, S, kCC>
                    operator()(Value<fpsan::v4e5m2_native, S, kCC> a,
-                              Value<fpsan::v8e5m2_native, S, kCC> b,
-                              Value<fpsan::v4f_native, S, kCC>    c,
-                              int                                 idx) const
+                       Value<fpsan::v8e5m2_native, S, kCC> b,
+                       Value<fpsan::v4f_native, S, kCC>    c,
+                       int                                 idx) const
         {
             return fpsan::amdgcn_swmmac_f32_16x16x32_bf8_bf8_w64<S, kCC>(a, b, c, idx);
         }
@@ -540,17 +542,21 @@ namespace
             EXPECT_EQ(bits_of(got[t]), bits_of(ref[t])) << "Layout at " << t;
         (void)hipFree(dD);
 
-        std::vector<std::uint64_t> ref_p
-            = sw_reference_fpsan_h<typename Traits::AScalar, typename Traits::BScalar, Out>(d);
-        Payload* dP = nullptr;
-        HIP_CHECK(hipMalloc(&dP, M * N * sizeof(Payload)));
-        k_swmmac_h<Traits, Semantics::Triton><<<1, WAVE>>>(dA, dB, dC, dp0, dp1, dI, dP);
-        HIP_CHECK(hipDeviceSynchronize());
-        std::vector<Payload> got_p(M * N);
-        HIP_CHECK(hipMemcpy(got_p.data(), dP, M * N * sizeof(Payload), hipMemcpyDeviceToHost));
-        for(int t = 0; t < M * N; ++t)
-            EXPECT_EQ(static_cast<std::uint64_t>(got_p[t]), ref_p[t]) << "FPSan at " << t;
-        (void)hipFree(dP);
+        fpsan_test::for_each_fpsan_semantics([&](auto sem) {
+            constexpr Semantics        S = decltype(sem)::value;
+            std::vector<std::uint64_t> ref_p
+                = sw_reference_fpsan_h<typename Traits::AScalar, typename Traits::BScalar, Out, S>(
+                    d);
+            Payload* dP = nullptr;
+            HIP_CHECK(hipMalloc(&dP, M * N * sizeof(Payload)));
+            k_swmmac_h<Traits, S><<<1, WAVE>>>(dA, dB, dC, dp0, dp1, dI, dP);
+            HIP_CHECK(hipDeviceSynchronize());
+            std::vector<Payload> got_p(M * N);
+            HIP_CHECK(hipMemcpy(got_p.data(), dP, M * N * sizeof(Payload), hipMemcpyDeviceToHost));
+            for(int t = 0; t < M * N; ++t)
+                EXPECT_EQ(static_cast<std::uint64_t>(got_p[t]), ref_p[t]) << "FPSan at " << t;
+            (void)hipFree(dP);
+        });
 
         (void)hipFree(dA);
         (void)hipFree(dB);
@@ -582,18 +588,21 @@ namespace
             EXPECT_EQ(bits_of(got[t]), bits_of(ref[t])) << "Layout at " << t;
         (void)hipFree(dD);
 
-        std::vector<std::uint32_t> ref_p
-            = sw_reference_fp8_fpsan<typename Traits::AScalar, typename Traits::BScalar>(d);
-        std::uint32_t* dP = nullptr;
-        HIP_CHECK(hipMalloc(&dP, M * N * sizeof(std::uint32_t)));
-        k_swmmac_fp8<Traits, Semantics::Triton><<<1, WAVE>>>(dA, dB, dC, dp0, dp1, dI, dP);
-        HIP_CHECK(hipDeviceSynchronize());
-        std::vector<std::uint32_t> got_p(M * N);
-        HIP_CHECK(
-            hipMemcpy(got_p.data(), dP, M * N * sizeof(std::uint32_t), hipMemcpyDeviceToHost));
-        for(int t = 0; t < M * N; ++t)
-            EXPECT_EQ(got_p[t], ref_p[t]) << "FPSan at " << t;
-        (void)hipFree(dP);
+        fpsan_test::for_each_fpsan_semantics([&](auto sem) {
+            constexpr Semantics        S = decltype(sem)::value;
+            std::vector<std::uint32_t> ref_p
+                = sw_reference_fp8_fpsan<typename Traits::AScalar, typename Traits::BScalar, S>(d);
+            std::uint32_t* dP = nullptr;
+            HIP_CHECK(hipMalloc(&dP, M * N * sizeof(std::uint32_t)));
+            k_swmmac_fp8<Traits, S><<<1, WAVE>>>(dA, dB, dC, dp0, dp1, dI, dP);
+            HIP_CHECK(hipDeviceSynchronize());
+            std::vector<std::uint32_t> got_p(M * N);
+            HIP_CHECK(
+                hipMemcpy(got_p.data(), dP, M * N * sizeof(std::uint32_t), hipMemcpyDeviceToHost));
+            for(int t = 0; t < M * N; ++t)
+                EXPECT_EQ(got_p[t], ref_p[t]) << "FPSan at " << t;
+            (void)hipFree(dP);
+        });
 
         (void)hipFree(dA);
         (void)hipFree(dB);

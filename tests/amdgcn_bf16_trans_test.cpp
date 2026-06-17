@@ -13,17 +13,17 @@
 // for a hardware rcp/rsq/sin/... approximation (the exact result is defined by
 // the unit's table+interpolation, not by std::sin), and we have no real silicon
 // to sample. So the two assertions we CAN make authoritatively are:
-//   - Float mode: the wrapper is a bit-exact pass-through to the builtin (this
+//   - Native mode: the wrapper is a bit-exact pass-through to the builtin (this
 //     proves our wrapper plumbing; the builtin's accuracy is the hardware's
 //     contract, not ours to redefine).
-//   - FPSan mode: the wrapper's payload equals the matching fpsan:: tagged op,
-//     payload-for-payload (deterministic integer ring -- computed independently
-//     of the device builtin).
+//   - FPSan-family semantics: the wrapper's payload equals the matching fpsan::
+//     operation, payload-for-payload, in that same semantics.
 // We deliberately do NOT assert a numeric tolerance here, to avoid encoding a
 // non-authoritative ULP bound.
 #include "fpsan/amdgcn_math.hpp"
 #include "fpsan/fpsan.hpp"
 
+#include "fpsan_semantics.hpp"
 #include "hip_test_utils.hpp"
 #include "test_random.hpp"
 
@@ -62,22 +62,22 @@ namespace
     }
 } // namespace
 
-#define BF16_TRANS_KERNEL(name, FPSAN_OP)                                                          \
-    __global__ void k_##name##_pair(const __bf16*  in,                                             \
-                                    __bf16*        direct,                                         \
-                                    __bf16*        via_wrapper,                                    \
-                                    std::uint16_t* pay_direct,                                     \
-                                    std::uint16_t* pay_wrapper)                                    \
-    {                                                                                              \
-        int    i  = threadIdx.x;                                                                   \
-        __bf16 x  = in[i];                                                                         \
-        direct[i] = __builtin_##name(x);                                                           \
-        Value<__bf16, Semantics::Native, kCC> vf{x};                                               \
-        via_wrapper[i] = static_cast<__bf16>(fpsan::name<Semantics::Native, kCC>(vf));             \
-        Value<__bf16, Semantics::Triton, kCC> vp{x};                                               \
-        pay_direct[i] = static_cast<std::uint16_t>(fpsan::FPSAN_OP(vp).fpsan_payload());           \
-        pay_wrapper[i]                                                                             \
-            = static_cast<std::uint16_t>(fpsan::name<Semantics::Triton, kCC>(vp).fpsan_payload()); \
+#define BF16_TRANS_KERNEL(name, FPSAN_OP)                                                     \
+    template <Semantics S>                                                                    \
+    __global__ void k_##name##_pair(const __bf16*  in,                                        \
+                                    __bf16*        direct,                                    \
+                                    __bf16*        via_wrapper,                               \
+                                    std::uint16_t* pay_direct,                                \
+                                    std::uint16_t* pay_wrapper)                               \
+    {                                                                                         \
+        int    i  = threadIdx.x;                                                              \
+        __bf16 x  = in[i];                                                                    \
+        direct[i] = __builtin_##name(x);                                                      \
+        Value<__bf16, Semantics::Native, kCC> vf{x};                                          \
+        via_wrapper[i] = static_cast<__bf16>(fpsan::name<Semantics::Native, kCC>(vf));        \
+        Value<__bf16, S, kCC> vp{x};                                                          \
+        pay_direct[i]  = static_cast<std::uint16_t>(fpsan::FPSAN_OP(vp).fpsan_payload());     \
+        pay_wrapper[i] = static_cast<std::uint16_t>(fpsan::name<S, kCC>(vp).fpsan_payload()); \
     }
 
 BF16_TRANS_KERNEL(amdgcn_rcp_bf16, rcp)
@@ -89,41 +89,52 @@ BF16_TRANS_KERNEL(amdgcn_exp2_bf16, exp2)
 BF16_TRANS_KERNEL(amdgcn_log_bf16, log)
 BF16_TRANS_KERNEL(amdgcn_tanh_bf16, tanh)
 
-#define BF16_TRANS_TEST(name)                                                                    \
-    TEST(AmdgcnBf16Trans, name##_FloatForwardsAndFpsanRoutes)                                    \
-    {                                                                                            \
-        int ndev = 0;                                                                            \
-        if(hipGetDeviceCount(&ndev) != hipSuccess || ndev == 0)                                  \
-            GTEST_SKIP() << "no HIP device";                                                     \
-        auto           in  = make_inputs();                                                      \
-        const int      N   = static_cast<int>(in.size());                                        \
-        __bf16*        dIn = to_dev(in);                                                         \
-        __bf16 *       dDirect, *dWrap;                                                          \
-        std::uint16_t *dPdir, *dPwrap;                                                           \
-        HIP_CHECK(hipMalloc(&dDirect, N * sizeof(__bf16)));                                      \
-        HIP_CHECK(hipMalloc(&dWrap, N * sizeof(__bf16)));                                        \
-        HIP_CHECK(hipMalloc(&dPdir, N * sizeof(std::uint16_t)));                                 \
-        HIP_CHECK(hipMalloc(&dPwrap, N * sizeof(std::uint16_t)));                                \
-        k_##name##_pair<<<1, N>>>(dIn, dDirect, dWrap, dPdir, dPwrap);                           \
-        HIP_CHECK(hipDeviceSynchronize());                                                       \
-        std::vector<__bf16>        direct(N), wrap(N);                                           \
-        std::vector<std::uint16_t> pdir(N), pwrap(N);                                            \
-        HIP_CHECK(hipMemcpy(direct.data(), dDirect, N * sizeof(__bf16), hipMemcpyDeviceToHost)); \
-        HIP_CHECK(hipMemcpy(wrap.data(), dWrap, N * sizeof(__bf16), hipMemcpyDeviceToHost));     \
-        HIP_CHECK(                                                                               \
-            hipMemcpy(pdir.data(), dPdir, N * sizeof(std::uint16_t), hipMemcpyDeviceToHost));    \
-        HIP_CHECK(                                                                               \
-            hipMemcpy(pwrap.data(), dPwrap, N * sizeof(std::uint16_t), hipMemcpyDeviceToHost));  \
-        for(int i = 0; i < N; ++i)                                                               \
-        {                                                                                        \
-            EXPECT_EQ(bits_u16(wrap[i]), bits_u16(direct[i])) << "Float lane " << i;             \
-            EXPECT_EQ(pwrap[i], pdir[i]) << "FPSan lane " << i;                                  \
-        }                                                                                        \
-        (void)hipFree(dIn);                                                                      \
-        (void)hipFree(dDirect);                                                                  \
-        (void)hipFree(dWrap);                                                                    \
-        (void)hipFree(dPdir);                                                                    \
-        (void)hipFree(dPwrap);                                                                   \
+#define BF16_TRANS_TEST(name)                                                                     \
+    TEST(AmdgcnBf16Trans, name##_FloatForwardsAndFpsanRoutes)                                     \
+    {                                                                                             \
+        int ndev = 0;                                                                             \
+        if(hipGetDeviceCount(&ndev) != hipSuccess || ndev == 0)                                   \
+            GTEST_SKIP() << "no HIP device";                                                      \
+        auto           in  = make_inputs();                                                       \
+        const int      N   = static_cast<int>(in.size());                                         \
+        __bf16*        dIn = to_dev(in);                                                          \
+        __bf16 *       dDirect, *dWrap;                                                           \
+        std::uint16_t *dPdir, *dPwrap;                                                            \
+        HIP_CHECK(hipMalloc(&dDirect, N * sizeof(__bf16)));                                       \
+        HIP_CHECK(hipMalloc(&dWrap, N * sizeof(__bf16)));                                         \
+        HIP_CHECK(hipMalloc(&dPdir, N * sizeof(std::uint16_t)));                                  \
+        HIP_CHECK(hipMalloc(&dPwrap, N * sizeof(std::uint16_t)));                                 \
+        k_##name##_pair<Semantics::Triton><<<1, N>>>(dIn, dDirect, dWrap, dPdir, dPwrap);         \
+        HIP_CHECK(hipDeviceSynchronize());                                                        \
+        std::vector<__bf16>        direct(N), wrap(N);                                            \
+        std::vector<std::uint16_t> pdir(N), pwrap(N);                                             \
+        HIP_CHECK(hipMemcpy(direct.data(), dDirect, N * sizeof(__bf16), hipMemcpyDeviceToHost));  \
+        HIP_CHECK(hipMemcpy(wrap.data(), dWrap, N * sizeof(__bf16), hipMemcpyDeviceToHost));      \
+        HIP_CHECK(                                                                                \
+            hipMemcpy(pdir.data(), dPdir, N * sizeof(std::uint16_t), hipMemcpyDeviceToHost));     \
+        HIP_CHECK(                                                                                \
+            hipMemcpy(pwrap.data(), dPwrap, N * sizeof(std::uint16_t), hipMemcpyDeviceToHost));   \
+        for(int i = 0; i < N; ++i)                                                                \
+        {                                                                                         \
+            EXPECT_EQ(bits_u16(wrap[i]), bits_u16(direct[i])) << "Float lane " << i;              \
+            EXPECT_EQ(pwrap[i], pdir[i]) << "FPSan lane " << i;                                   \
+        }                                                                                         \
+        fpsan_test::for_each_fpsan_semantics([&](auto sem) {                                      \
+            constexpr Semantics S = decltype(sem)::value;                                         \
+            k_##name##_pair<S><<<1, N>>>(dIn, dDirect, dWrap, dPdir, dPwrap);                     \
+            HIP_CHECK(hipDeviceSynchronize());                                                    \
+            HIP_CHECK(                                                                            \
+                hipMemcpy(pdir.data(), dPdir, N * sizeof(std::uint16_t), hipMemcpyDeviceToHost)); \
+            HIP_CHECK(hipMemcpy(                                                                  \
+                pwrap.data(), dPwrap, N * sizeof(std::uint16_t), hipMemcpyDeviceToHost));         \
+            for(int i = 0; i < N; ++i)                                                            \
+                EXPECT_EQ(pwrap[i], pdir[i]) << fpsan::semantics_name(S) << " lane " << i;        \
+        });                                                                                       \
+        (void)hipFree(dIn);                                                                       \
+        (void)hipFree(dDirect);                                                                   \
+        (void)hipFree(dWrap);                                                                     \
+        (void)hipFree(dPdir);                                                                     \
+        (void)hipFree(dPwrap);                                                                    \
     }
 
 BF16_TRANS_TEST(amdgcn_rcp_bf16)

@@ -20,6 +20,7 @@
 #include "fpsan/amdgcn_cvt.hpp"
 #include "fpsan/fpsan.hpp"
 
+#include "fpsan_semantics.hpp"
 #include "hip_test_utils.hpp"
 
 #include <hip/hip_runtime.h>
@@ -37,7 +38,6 @@ using fpsan::Value;
 
 static constexpr Conversions kCC = Conversions::Explicit;
 using FVF                        = Value<float, Semantics::Native, kCC>;
-using VF                         = Value<float, Semantics::Triton, kCC>;
 
 #if !defined(__HIP_DEVICE_COMPILE__) || __has_builtin(__builtin_amdgcn_cvt_sr_pk_f16_f32)
 
@@ -113,25 +113,29 @@ TEST(CvtSrPkF16, FloatStochasticBracket)
     (void)hipFree(dO);
 }
 
+template <Semantics S>
 __global__ void k_f16_fpsan(const float* a, const float* b, unsigned* out)
 {
-    int  l = threadIdx.x;
-    auto r = fpsan::amdgcn_cvt_sr_pk_f16_f32<Semantics::Triton, kCC>(VF{a[l]}, VF{b[l]}, 0x55u + l);
+    using VF       = Value<float, S, kCC>;
+    int  l         = threadIdx.x;
+    auto r         = fpsan::amdgcn_cvt_sr_pk_f16_f32<S, kCC>(VF{a[l]}, VF{b[l]}, 0x55u + l);
     out[2 * l]     = r.get(0).fpsan_payload();
     out[2 * l + 1] = r.get(1).fpsan_payload();
 }
 
-TEST(CvtSrPkF16, FpsanPayloadTruncate)
+template <Semantics S>
+void run_f16_fpsan_payload_truncate()
 {
     if(!have_device())
         GTEST_SKIP() << "no HIP device";
+    using VF              = Value<float, S, kCC>;
     std::vector<float> a  = {1.0f, -2.5f, 3.0f, -0.5f};
     std::vector<float> b  = {2.0f, 0.25f, -4.0f, 7.0f};
     const int          n  = static_cast<int>(a.size());
     float *            dA = to_dev(a), *dB = to_dev(b);
     unsigned*          dO;
     HIP_CHECK(hipMalloc(&dO, 2 * n * sizeof(unsigned)));
-    k_f16_fpsan<<<1, n>>>(dA, dB, dO);
+    k_f16_fpsan<S><<<1, n>>>(dA, dB, dO);
     HIP_CHECK(hipDeviceSynchronize());
     auto got = from_dev(dO, 2 * n);
     for(int i = 0; i < n; ++i)
@@ -143,6 +147,11 @@ TEST(CvtSrPkF16, FpsanPayloadTruncate)
     (void)hipFree(dA);
     (void)hipFree(dB);
     (void)hipFree(dO);
+}
+
+TEST(CvtSrPkF16, FpsanPayloadTruncate)
+{
+    FPSAN_RUN_ALL_VARIANTS(run_f16_fpsan_payload_truncate);
 }
 
 #endif // cvt_sr_pk_f16_f32
@@ -217,26 +226,29 @@ TEST(CvtSrPkBf16, FloatStochasticBracket)
     (void)hipFree(dO);
 }
 
+template <Semantics S>
 __global__ void k_bf16_fpsan(const float* a, const float* b, unsigned* out)
 {
-    int  l = threadIdx.x;
-    auto r
-        = fpsan::amdgcn_cvt_sr_pk_bf16_f32<Semantics::Triton, kCC>(VF{a[l]}, VF{b[l]}, 0x55u + l);
+    using VF       = Value<float, S, kCC>;
+    int  l         = threadIdx.x;
+    auto r         = fpsan::amdgcn_cvt_sr_pk_bf16_f32<S, kCC>(VF{a[l]}, VF{b[l]}, 0x55u + l);
     out[2 * l]     = r.get(0).fpsan_payload();
     out[2 * l + 1] = r.get(1).fpsan_payload();
 }
 
-TEST(CvtSrPkBf16, FpsanPayloadTruncate)
+template <Semantics S>
+void run_bf16_fpsan_payload_truncate()
 {
     if(!have_device())
         GTEST_SKIP() << "no HIP device";
+    using VF              = Value<float, S, kCC>;
     std::vector<float> a  = {1.0f, -2.5f, 3.0f, -0.5f};
     std::vector<float> b  = {2.0f, 0.25f, -4.0f, 7.0f};
     const int          n  = static_cast<int>(a.size());
     float *            dA = to_dev(a), *dB = to_dev(b);
     unsigned*          dO;
     HIP_CHECK(hipMalloc(&dO, 2 * n * sizeof(unsigned)));
-    k_bf16_fpsan<<<1, n>>>(dA, dB, dO);
+    k_bf16_fpsan<S><<<1, n>>>(dA, dB, dO);
     HIP_CHECK(hipDeviceSynchronize());
     auto got = from_dev(dO, 2 * n);
     for(int i = 0; i < n; ++i)
@@ -247,6 +259,11 @@ TEST(CvtSrPkBf16, FpsanPayloadTruncate)
     (void)hipFree(dA);
     (void)hipFree(dB);
     (void)hipFree(dO);
+}
+
+TEST(CvtSrPkBf16, FpsanPayloadTruncate)
+{
+    FPSAN_RUN_ALL_VARIANTS(run_bf16_fpsan_payload_truncate);
 }
 
 #endif // cvt_sr_pk_bf16_f32

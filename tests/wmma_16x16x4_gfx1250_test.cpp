@@ -19,6 +19,7 @@
 #include "fpsan/amdgcn_matrix.hpp"
 #include "fpsan/fpsan.hpp"
 
+#include "fpsan_semantics.hpp"
 #include "hip_test_utils.hpp"
 #include "test_random.hpp"
 
@@ -95,14 +96,15 @@ __global__ void k_float_dataflow(const float* A, const float* B, const float* C,
         D[(e + 8 * (lane >> 4)) * N + (lane & 15)] = d.get(e).to_float();
 }
 
+template <Semantics S>
 __global__ void k_fpsan(const float* A, const float* B, const float* C, std::uint32_t* Dpay)
 {
-    int                                       lane = threadIdx.x;
-    Value<v2f_native, Semantics::Triton, kCC> a;
-    Value<v2f_native, Semantics::Triton, kCC> b;
-    Value<v8f_native, Semantics::Triton, kCC> c;
-    load_frags<Semantics::Triton>(A, B, C, lane, a, b, c);
-    auto d = fpsan::amdgcn_wmma_f32_16x16x4_f32<Semantics::Triton, kCC>(a, b, c);
+    int                       lane = threadIdx.x;
+    Value<v2f_native, S, kCC> a;
+    Value<v2f_native, S, kCC> b;
+    Value<v8f_native, S, kCC> c;
+    load_frags<S>(A, B, C, lane, a, b, c);
+    auto d = fpsan::amdgcn_wmma_f32_16x16x4_f32<S, kCC>(a, b, c);
     for(int e = 0; e < 8; ++e)
         Dpay[(e + 8 * (lane >> 4)) * N + (lane & 15)] = d.get(e).fpsan_payload();
 }
@@ -157,14 +159,15 @@ TEST(WmmaF32F32_4, LayoutMatchesHardware)
     (void)hipFree(dOurs);
 }
 
-TEST(WmmaF32F32_4, FpsanMatchesScalarReference)
+template <Semantics S>
+void run_fpsan_matches_scalar_reference()
 {
     int ndev = 0;
     if(hipGetDeviceCount(&ndev) != hipSuccess || ndev == 0)
         GTEST_SKIP() << "no HIP device";
     Mats m = make_inputs();
 
-    using VF = Value<float, Semantics::Triton, kCC>;
+    using VF = Value<float, S, kCC>;
     std::vector<std::uint32_t> ref(M * N);
     for(int mm = 0; mm < M; ++mm)
         for(int nn = 0; nn < N; ++nn)
@@ -180,7 +183,7 @@ TEST(WmmaF32F32_4, FpsanMatchesScalarReference)
     float*         dC = to_dev(m.C);
     std::uint32_t* dD;
     HIP_CHECK(hipMalloc(&dD, M * N * sizeof(std::uint32_t)));
-    k_fpsan<<<1, 32>>>(dA, dB, dC, dD);
+    k_fpsan<S><<<1, 32>>>(dA, dB, dC, dD);
     HIP_CHECK(hipDeviceSynchronize());
     std::vector<std::uint32_t> got(M * N);
     HIP_CHECK(hipMemcpy(got.data(), dD, M * N * sizeof(std::uint32_t), hipMemcpyDeviceToHost));
@@ -190,4 +193,9 @@ TEST(WmmaF32F32_4, FpsanMatchesScalarReference)
     (void)hipFree(dB);
     (void)hipFree(dC);
     (void)hipFree(dD);
+}
+
+TEST(WmmaF32F32_4, FpsanMatchesScalarReference)
+{
+    FPSAN_RUN_ALL_VARIANTS(run_fpsan_matches_scalar_reference);
 }

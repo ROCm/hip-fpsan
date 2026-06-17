@@ -18,9 +18,10 @@
 //
 //   Semantics::Native : bit-cast to the native vectors and call the real builtin
 //                      (true hardware MMA -- fast and bit-faithful).
-//   Semantics::Triton : a wave-cooperative software MMA computing D = A*B + C in
-//                      the payload ring, using the hardware fragment layout so
-//                      results match an FPSan scalar/Triton reference.
+//   FPSan-family semantics : a wave-cooperative software MMA computing D=A*B+C in
+//                      the selected payload arithmetic, using the hardware
+//                      fragment layout so results match the scalar FPSan reference
+//                      in the same semantics.
 //
 // This header is opt-in (not pulled by <fpsan/fpsan.hpp>) and HIP/device only.
 // gfx11 (RDNA3), gfx12 (RDNA4), and gfx1250 expose related WMMA builtins,
@@ -154,7 +155,7 @@ namespace fpsan
         // Operand negation (the leading neg(A)/neg(B) bools) is reserved-zero [0,0]
         // on every FP shape, and matrix_a/b_reuse are perf hints with no numeric
         // effect -- so this is the only numerically-meaningful WMMA modifier.
-        // Float mode lets the builtin apply it (we pass the constant); FPSan mode
+        // Native mode lets the builtin apply it (we pass the constant); FPSan mode
         // pre-applies it to the C fragment here, leaving the dataflows unchanged.
         // abs is computed as max(c, -c) so the payload matches the host reference.
         template <int Cmod, class CV, Semantics S, Conversions C>
@@ -364,8 +365,8 @@ namespace fpsan
         // fragment layout is fixed; the accumulator type is whatever C and D carry
         // (== AVec/BVec for the f16/bf16 'same-type' variants, == f32 for the f32-out
         // variants). Generic over Value Semantics: real-float arithmetic at
-        // Semantics::Native is used as an oracle vs the real builtin in tests, and at
-        // Semantics::Triton the same arithmetic happens in the payload ring.
+        // Semantics::Native is used as an oracle vs the real builtin in tests, and
+        // FPSan-family semantics use their selected payload arithmetic.
         template <class AVec, class BVec, class CVec, Semantics S, Conversions C>
         FPSAN_DEVICE Value<CVec, S, C>
             wmma_16x16x16_dataflow(Value<AVec, S, C> a, Value<BVec, S, C> b, Value<CVec, S, C> c)
@@ -537,7 +538,7 @@ namespace fpsan
 
         // Wave-cooperative software MMA for the gfx1250 16x16x4 f32 shape (K=4
         // contraction, v2f A/B fragments, v8f C/D accumulator). Generic over
-        // Semantics so Float mode acts as a host/builtin oracle and FPSan mode runs
+        // Semantics so Native mode acts as a host/builtin oracle and FPSan mode runs
         // the same arithmetic in the payload ring.
         template <class AVec, class BVec, class CVec, Semantics S, Conversions C>
         FPSAN_DEVICE Value<CVec, S, C>
@@ -601,7 +602,7 @@ namespace fpsan
 
         // Wave-cooperative software MMA for the gfx1250 16x16x32 shapes. Identical in
         // shape to the 16x16x16 dataflow but with a K=32 contraction and v16 A/B
-        // fragments. Generic over Semantics so Float mode acts as a host/builtin
+        // fragments. Generic over Semantics so Native mode acts as a host/builtin
         // oracle and FPSan mode runs the same arithmetic in the payload ring.
         template <class AVec, class BVec, class CVec, Semantics S, Conversions C>
         FPSAN_DEVICE Value<CVec, S, C>
@@ -784,9 +785,10 @@ namespace fpsan
         // 512-bit packed register (v16i32 == int[16]) the builtin consumes. In FPSan
         // mode its bits ARE the per-slot payloads: slot s occupies the contiguous
         // Width-bit field at bit Width*s (little-endian across the 16 words), and the
-        // FPSan widen of a Width-bit code is the signed resize (subbyte_widen), exactly
-        // as the fp4/fp6 cvt-unpack path. The cross-lane element->(lane, slot) mapping
-        // is the SAME Wmma16x16x128Layout validated for the 8-bit K=128 WMMA: the
+        // FPSan widen of a Width-bit code uses the storage-payload convention from
+        // subbyte_widen, exactly as the fp4/fp6 cvt-unpack path. The cross-lane
+        // element->(lane, slot) mapping is the SAME Wmma16x16x128Layout validated for the
+        // 8-bit K=128 WMMA: the
         // grounding test confirms bit-exact builtin equality for every same-class
         // (8x8, sub x sub incl. fp6 x fp4) staging. Mixing an 8-bit with a sub-byte
         // operand uses a DIFFERENT physical k order on hardware and is NOT handled here
@@ -795,9 +797,8 @@ namespace fpsan
         // Gather the Width-bit field at slot s from `srclane`'s packed 512-bit register
         // (16 i32, this lane's copy) and widen it to an f32 payload. The field may
         // straddle two 32-bit words for fp6 (6 does not divide 32).
-        template <int Width, Semantics S, Conversions C>
-        FPSAN_DEVICE Value<float, S, C>
-                     wmma_sub_gather_widen(const int (&pw)[16], int s, int srclane)
+        template <int Width>
+        FPSAN_DEVICE std::uint32_t wmma_sub_gather_field(const int (&pw)[16], int s, int srclane)
         {
             const int p = Width * s, wi = p >> 5, off = p & 31;
             unsigned  w0 = static_cast<unsigned>(__builtin_amdgcn_ds_bpermute(srclane * 4, pw[wi]));
@@ -809,12 +810,44 @@ namespace fpsan
                 field |= w1 << (32 - off);
             }
             field &= (1u << Width) - 1u;
+            return field;
+        }
+
+        template <int Width, Semantics S, Conversions C>
+        FPSAN_DEVICE Value<float, S, C>
+                     wmma_sub_gather_widen(const int (&pw)[16], int s, int srclane)
+        {
+            static_assert(Width < 8, "public FP8/BF8 operands use wmma_f8f6f4_gather_widen");
+            const std::uint32_t field = wmma_sub_gather_field<Width>(pw, s, srclane);
             return subbyte_widen<Width, S, C>(field);
+        }
+
+        template <int Format, Semantics S, Conversions C>
+        FPSAN_DEVICE Value<float, S, C>
+                     wmma_f8f6f4_gather_widen(const int (&pw)[16], int s, int srclane)
+        {
+            static_assert(Format >= 0 && Format <= 4, "f8f6f4 format must be 0-4");
+            constexpr int Width = f8f6f4_width(Format);
+            const auto    field = wmma_sub_gather_field<Width>(pw, s, srclane);
+            if constexpr(Format == 0)
+            {
+                using FP8 = Value<fp8_e4m3, S, C>;
+                return cast<float>(FP8::from_fpsan_payload(static_cast<std::uint8_t>(field)));
+            }
+            else if constexpr(Format == 1)
+            {
+                using BF8 = Value<fp8_e5m2, S, C>;
+                return cast<float>(BF8::from_fpsan_payload(static_cast<std::uint8_t>(field)));
+            }
+            else
+            {
+                return subbyte_widen<Width, S, C>(field);
+            }
         }
 
         // Wave-cooperative software MMA for the gfx1250 16x16x128 f8f6f4 sub-byte
         // shapes (K=128, fp6/bf6/fp4 A/B operands of possibly different sub-byte
-        // widths, v8f C/D accumulator). FPSan-only (Float mode calls the builtin).
+        // widths, v8f C/D accumulator). FPSan-only (Native mode calls the builtin).
         template <int WA, int WB, Semantics S, Conversions C>
         FPSAN_DEVICE Value<v8f_native, S, C> wmma_16x16x128_sub_dataflow(const int (&aw)[16],
                                                                          const int (&bw)[16],
@@ -853,7 +886,7 @@ namespace fpsan
         //   lane = (row|col) + 16*((k>>5)&1)   (uses k bit 5, vs the 8-bit bit 2)
         //   slot = 32*((k>>6)&1) + 16*((k>>2)&1) + 8*((k>>4)&1)
         //          + 4*((k>>3)&1) + 2*((k>>1)&1) + (k&1)
-        // FPSan-only (Float mode calls the builtin, which is layout-agnostic).
+        // FPSan-only (Native mode calls the builtin, which is layout-agnostic).
         FPSAN_HOST_DEVICE constexpr int wmma_mix_sub_lane(int rc, int k)
         {
             return rc + 16 * ((k >> 5) & 1);
@@ -864,11 +897,11 @@ namespace fpsan
                    + 4 * ((k >> 3) & 1) + 2 * ((k >> 1) & 1) + (k & 1);
         }
 
-        template <int WA, int WB, Semantics S, Conversions C>
+        template <int AFMT, int BFMT, Semantics S, Conversions C>
         FPSAN_DEVICE Value<v8f_native, S, C> wmma_16x16x128_mixed_dataflow(
             const int (&aw)[16], const int (&bw)[16], Value<v8f_native, S, C> c)
         {
-            static_assert((WA == 8) != (WB == 8),
+            static_assert((AFMT <= 1) != (BFMT <= 1),
                           "mixed dataflow: exactly one operand must be 8-bit, the other sub-byte");
             using Acc                    = Value<float, S, C>;
             const int               lane = wave_lane();
@@ -881,16 +914,16 @@ namespace fpsan
                 for(int k = 0; k < 128; ++k)
                 {
                     const int aslot
-                        = (WA == 8) ? Wmma16x16x128Layout::ab_index(k) : wmma_mix_sub_slot(k);
-                    const int alane
-                        = (WA == 8) ? Wmma16x16x128Layout::ab_lane(m, k) : wmma_mix_sub_lane(m, k);
+                        = (AFMT <= 1) ? Wmma16x16x128Layout::ab_index(k) : wmma_mix_sub_slot(k);
+                    const int alane = (AFMT <= 1) ? Wmma16x16x128Layout::ab_lane(m, k)
+                                                  : wmma_mix_sub_lane(m, k);
                     const int bslot
-                        = (WB == 8) ? Wmma16x16x128Layout::ab_index(k) : wmma_mix_sub_slot(k);
-                    const int blane
-                        = (WB == 8) ? Wmma16x16x128Layout::ab_lane(n, k) : wmma_mix_sub_lane(n, k);
-                    auto av = wmma_sub_gather_widen<WA, S, C>(aw, aslot, alane);
-                    auto bv = wmma_sub_gather_widen<WB, S, C>(bw, bslot, blane);
-                    acc     = acc + av * bv;
+                        = (BFMT <= 1) ? Wmma16x16x128Layout::ab_index(k) : wmma_mix_sub_slot(k);
+                    const int blane = (BFMT <= 1) ? Wmma16x16x128Layout::ab_lane(n, k)
+                                                  : wmma_mix_sub_lane(n, k);
+                    auto      av    = wmma_f8f6f4_gather_widen<AFMT, S, C>(aw, aslot, alane);
+                    auto      bv    = wmma_f8f6f4_gather_widen<BFMT, S, C>(bw, bslot, blane);
+                    acc             = acc + av * bv;
                 }
                 d.set(e, acc);
             }
@@ -962,7 +995,7 @@ namespace fpsan
         // the builtin in wmma_scale_f8f6f4_gfx1250_test): the scale word for row m /
         // col n lives at lane m / lane n (fetched with ds_bpermute), and within that
         // word the byte is wmma_sub_scale_byte(k) (scaleType/scaleFmt immediates
-        // pinned 0 == E8M0). FPSan-only (Float mode calls the builtin).
+        // pinned 0 == E8M0). FPSan-only (Native mode calls the builtin).
         template <int WA, int WB, Semantics S, Conversions C, int AScaleFmt = 0, int BScaleFmt = 0>
         FPSAN_DEVICE Value<v8f_native, S, C> wmma_16x16x128_sub_scaled_dataflow(
             const int (&aw)[16], const int (&bw)[16], Value<v8f_native, S, C> c, int sa, int sb)
@@ -1056,11 +1089,16 @@ namespace fpsan
         // a mix BOTH operands use the 8-bit scale-byte map wmma_mix_scale_byte(k)
         // (i32) -- distinct from the same-class sub map. The scale word for row m /
         // col n is the i32 supplied at lane m / lane n (ds_bpermute). FPSan-only.
-        template <int WA, int WB, Semantics S, Conversions C, int AScaleFmt = 0, int BScaleFmt = 0>
+        template <int         AFMT,
+                  int         BFMT,
+                  Semantics   S,
+                  Conversions C,
+                  int         AScaleFmt = 0,
+                  int         BScaleFmt = 0>
         FPSAN_DEVICE Value<v8f_native, S, C> wmma_16x16x128_mixed_scaled_dataflow(
             const int (&aw)[16], const int (&bw)[16], Value<v8f_native, S, C> c, int sa, int sb)
         {
-            static_assert((WA == 8) != (WB == 8),
+            static_assert((AFMT <= 1) != (BFMT <= 1),
                           "mixed scaled dataflow: exactly one operand must be 8-bit");
             using Acc                    = Value<float, S, C>;
             const int               lane = wave_lane();
@@ -1075,16 +1113,16 @@ namespace fpsan
                 for(int k = 0; k < 128; ++k)
                 {
                     const int aslot
-                        = (WA == 8) ? Wmma16x16x128Layout::ab_index(k) : wmma_mix_sub_slot(k);
-                    const int alane
-                        = (WA == 8) ? Wmma16x16x128Layout::ab_lane(m, k) : wmma_mix_sub_lane(m, k);
+                        = (AFMT <= 1) ? Wmma16x16x128Layout::ab_index(k) : wmma_mix_sub_slot(k);
+                    const int alane = (AFMT <= 1) ? Wmma16x16x128Layout::ab_lane(m, k)
+                                                  : wmma_mix_sub_lane(m, k);
                     const int bslot
-                        = (WB == 8) ? Wmma16x16x128Layout::ab_index(k) : wmma_mix_sub_slot(k);
-                    const int blane
-                        = (WB == 8) ? Wmma16x16x128Layout::ab_lane(n, k) : wmma_mix_sub_lane(n, k);
-                    auto      av   = wmma_sub_gather_widen<WA, S, C>(aw, aslot, alane);
-                    auto      bv   = wmma_sub_gather_widen<WB, S, C>(bw, bslot, blane);
-                    const int byte = wmma_mix_scale_byte(k);
+                        = (BFMT <= 1) ? Wmma16x16x128Layout::ab_index(k) : wmma_mix_sub_slot(k);
+                    const int blane = (BFMT <= 1) ? Wmma16x16x128Layout::ab_lane(n, k)
+                                                  : wmma_mix_sub_lane(n, k);
+                    auto      av    = wmma_f8f6f4_gather_widen<AFMT, S, C>(aw, aslot, alane);
+                    auto      bv    = wmma_f8f6f4_gather_widen<BFMT, S, C>(bw, bslot, blane);
+                    const int byte  = wmma_mix_scale_byte(k);
                     const Acc fa(wmma_scale_byte_to_float<AScaleFmt>((wa >> (8 * byte)) & 0xFFu));
                     const Acc fb(wmma_scale_byte_to_float<BScaleFmt>((wb >> (8 * byte)) & 0xFFu));
                     acc = acc + av * bv * fa * fb;
@@ -1097,7 +1135,12 @@ namespace fpsan
         // scale16 (i64, 8 bytes) variant of the mixed scaled dataflow; controlling
         // byte = wmma_mix_scale16_byte(k). The 64-bit scale word for row m / col n is
         // gathered from lane m / lane n with a pair of 32-bit ds_bpermutes.
-        template <int WA, int WB, Semantics S, Conversions C, int AScaleFmt = 0, int BScaleFmt = 0>
+        template <int         AFMT,
+                  int         BFMT,
+                  Semantics   S,
+                  Conversions C,
+                  int         AScaleFmt = 0,
+                  int         BScaleFmt = 0>
         FPSAN_DEVICE Value<v8f_native, S, C>
                      wmma_16x16x128_mixed_scaled16_dataflow(const int (&aw)[16],
                                                             const int (&bw)[16],
@@ -1105,7 +1148,7 @@ namespace fpsan
                                                             long long               sa,
                                                             long long               sb)
         {
-            static_assert((WA == 8) != (WB == 8),
+            static_assert((AFMT <= 1) != (BFMT <= 1),
                           "mixed scaled16 dataflow: exactly one operand must be 8-bit");
             using Acc                     = Value<float, S, C>;
             const int               lane  = wave_lane();
@@ -1134,16 +1177,16 @@ namespace fpsan
                 for(int k = 0; k < 128; ++k)
                 {
                     const int aslot
-                        = (WA == 8) ? Wmma16x16x128Layout::ab_index(k) : wmma_mix_sub_slot(k);
-                    const int alane
-                        = (WA == 8) ? Wmma16x16x128Layout::ab_lane(m, k) : wmma_mix_sub_lane(m, k);
+                        = (AFMT <= 1) ? Wmma16x16x128Layout::ab_index(k) : wmma_mix_sub_slot(k);
+                    const int alane = (AFMT <= 1) ? Wmma16x16x128Layout::ab_lane(m, k)
+                                                  : wmma_mix_sub_lane(m, k);
                     const int bslot
-                        = (WB == 8) ? Wmma16x16x128Layout::ab_index(k) : wmma_mix_sub_slot(k);
-                    const int blane
-                        = (WB == 8) ? Wmma16x16x128Layout::ab_lane(n, k) : wmma_mix_sub_lane(n, k);
-                    auto      av   = wmma_sub_gather_widen<WA, S, C>(aw, aslot, alane);
-                    auto      bv   = wmma_sub_gather_widen<WB, S, C>(bw, bslot, blane);
-                    const int byte = wmma_mix_scale16_byte(k);
+                        = (BFMT <= 1) ? Wmma16x16x128Layout::ab_index(k) : wmma_mix_sub_slot(k);
+                    const int blane = (BFMT <= 1) ? Wmma16x16x128Layout::ab_lane(n, k)
+                                                  : wmma_mix_sub_lane(n, k);
+                    auto      av    = wmma_f8f6f4_gather_widen<AFMT, S, C>(aw, aslot, alane);
+                    auto      bv    = wmma_f8f6f4_gather_widen<BFMT, S, C>(bw, bslot, blane);
+                    const int byte  = wmma_mix_scale16_byte(k);
                     const Acc fa(wmma_scale_byte_to_float<AScaleFmt>(
                         static_cast<unsigned>((wa >> (8 * byte)) & 0xFFull)));
                     const Acc fb(wmma_scale_byte_to_float<BScaleFmt>(
@@ -1205,7 +1248,7 @@ namespace fpsan
             }
         };
 
-        // FPSan software MMA for gfx1250 wmma_f32_32x16x128_f4 (Float mode calls the
+        // FPSan software MMA for gfx1250 wmma_f32_32x16x128_f4 (Native mode calls the
         // builtin). fp4 nibbles never span a dword (width 4), so the B operand's 8
         // dwords fit the [16] gather array zero-padded.
         template <Semantics S, Conversions C>
@@ -1605,7 +1648,7 @@ namespace fpsan
 
 // =============================================================================
 // RDNA4 (gfx1200/gfx1201) wave32 WMMA wrappers. Each wrapper is one
-// macro-instantiation: type signature + a Float-mode call to the real builtin +
+// macro-instantiation: type signature + a Native-mode call to the real builtin +
 // FPSan-mode dispatch to the shared software dataflow. AMD's instruction-name
 // convention: "fp8" = OCP E4M3FN, "bf8" = OCP E5M2.
 //
@@ -2173,7 +2216,7 @@ namespace fpsan
     // per-lane fragment, so the FPSan dataflow stages the 8-bit operand on the
     // validated Wmma16x16x128Layout and the sub-byte operand on the mixed order
     // (detail::wmma_mix_sub_lane/slot, reverse-engineered from one-hot probes). Both
-    // operands are the raw packed v16i32 registers. Float mode calls the builtin
+    // operands are the raw packed v16i32 registers. Native mode calls the builtin
     // (layout-agnostic). Exactly one operand must be 8-bit and the other sub-byte;
     // for same-class pairs use the `_sub` wrapper (sub x sub) or the dedicated
     // fp8/bf8 K=128 wrappers (8-bit x 8-bit). The i16 immediate is the C neg/abs
@@ -2205,10 +2248,7 @@ namespace fpsan
                 aw[w] = a[w];
                 bw[w] = b[w];
             }
-            return detail::wmma_16x16x128_mixed_dataflow<detail::f8f6f4_width(AFMT),
-                                                         detail::f8f6f4_width(BFMT),
-                                                         S,
-                                                         C>(
+            return detail::wmma_16x16x128_mixed_dataflow<AFMT, BFMT, S, C>(
                 aw, bw, detail::wmma_apply_cmod<Cmod>(c));
         }
     }
@@ -2221,7 +2261,7 @@ namespace fpsan
 // (col, block) of B carries an E8M0 exponent; block kb's dot product is scaled by
 // 2^(eA-127) * 2^(eB-127). `sa`/`sb` are the per-lane i32 scale operands; the
 // scale_sel / scale_fmt immediates are pinned 0 (E8M0, natural byte=block
-// mapping), the validated layout. Float mode forwards to the builtin (exact);
+// mapping), the validated layout. Native mode forwards to the builtin (exact);
 // FPSan mode runs the block-scaled sub-byte dataflow. As with the unscaled
 // wrapper this covers sub-byte (fp6/bf6/fp4) operands; mixing an 8-bit with a
 // sub-byte operand needs the (not-yet-grounded) WMMA mix model.
@@ -2325,13 +2365,9 @@ namespace fpsan
                 aw[w] = a[w];
                 bw[w] = b[w];
             }
-            return detail::wmma_16x16x128_mixed_scaled_dataflow<detail::f8f6f4_width(AFMT),
-                                                                detail::f8f6f4_width(BFMT),
-                                                                S,
-                                                                C,
-                                                                AScaleFmt,
-                                                                BScaleFmt>(
-                aw, bw, detail::wmma_apply_cmod<Cmod>(c), sa, sb);
+            return detail::
+                wmma_16x16x128_mixed_scaled_dataflow<AFMT, BFMT, S, C, AScaleFmt, BScaleFmt>(
+                    aw, bw, detail::wmma_apply_cmod<Cmod>(c), sa, sb);
         }
     }
 #endif // __has_builtin(__builtin_amdgcn_wmma_scale_f32_16x16x128_f8f6f4)
@@ -2341,7 +2377,7 @@ namespace fpsan
 // (sub-byte operands). Same per-operand E8M0 block scaling as the i32 variant,
 // but each scale operand is a 64-bit word carrying 8 E8M0 bytes (finer
 // granularity); the controlling byte is detail::wmma_sub_scale16_byte(k). Scale
-// sel/fmt immediates pinned 0 (E8M0). Float mode forwards to the builtin (exact);
+// sel/fmt immediates pinned 0 (E8M0). Native mode forwards to the builtin (exact);
 // FPSan mode runs the scale16 sub-byte dataflow. Sub-byte (fp6/bf6/fp4) only.
 // =============================================================================
 #if !defined(__HIP_DEVICE_COMPILE__) \
@@ -2446,24 +2482,20 @@ namespace fpsan
                 aw[w] = a[w];
                 bw[w] = b[w];
             }
-            return detail::wmma_16x16x128_mixed_scaled16_dataflow<detail::f8f6f4_width(AFMT),
-                                                                  detail::f8f6f4_width(BFMT),
-                                                                  S,
-                                                                  C,
-                                                                  AScaleFmt,
-                                                                  BScaleFmt>(
-                aw,
-                bw,
-                detail::wmma_apply_cmod<Cmod>(c),
-                static_cast<long long>(sa),
-                static_cast<long long>(sb));
+            return detail::
+                wmma_16x16x128_mixed_scaled16_dataflow<AFMT, BFMT, S, C, AScaleFmt, BScaleFmt>(
+                    aw,
+                    bw,
+                    detail::wmma_apply_cmod<Cmod>(c),
+                    static_cast<long long>(sa),
+                    static_cast<long long>(sb));
         }
     }
 #endif // __has_builtin(__builtin_amdgcn_wmma_scale16_f32_16x16x128_f8f6f4)
 
 // =============================================================================
 // gfx1250 wave32 32x16x128 f4 (E2M1) WMMA wrapper. A is 32x128 fp4 (v16i32), B
-// is 128x16 fp4 (v8i32), C/D is 32x16 f32 (v16f32). Float mode forwards to the
+// is 128x16 fp4 (v8i32), C/D is 32x16 f32 (v16f32). Native mode forwards to the
 // builtin (exact); FPSan mode runs the grounded 32x16x128 f4 dataflow. The
 // fragment ABI is the silicon-grounded layout in detail::Wmma32x16x128F4Layout.
 // =============================================================================

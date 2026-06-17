@@ -13,6 +13,7 @@
 #include "fpsan/amdgcn_atomic.hpp"
 #include "fpsan/fpsan.hpp"
 
+#include "fpsan_semantics.hpp"
 #include "hip_test_utils.hpp"
 #include "test_random.hpp"
 
@@ -153,23 +154,27 @@ TEST(Atomic, FaddFpsanMatchesScalarRingSum)
     int ndev = 0;
     if(hipGetDeviceCount(&ndev) != hipSuccess || ndev == 0)
         GTEST_SKIP() << "no HIP device";
+    // The atomic_fadd wrapper uses a CAS loop with the per-semantics add, so it is
+    // correct for every algebraic model (mod n), not just the Triton's mod 2^w.
     auto   in  = make_inputs();
     float* dIn = to_dev(in);
-    using V    = Value<float, Semantics::Triton, kCC>;
-    V* dSlot;
-    HIP_CHECK(hipMalloc(&dSlot, sizeof(V)));
-    V init{0.f};
-    HIP_CHECK(hipMemcpy(dSlot, &init, sizeof(V), hipMemcpyHostToDevice));
-    k_atomic_fadd<Semantics::Triton><<<1, LANES>>>(dSlot, dIn);
-    HIP_CHECK(hipDeviceSynchronize());
-    V got{0.f};
-    HIP_CHECK(hipMemcpy(&got, dSlot, sizeof(V), hipMemcpyDeviceToHost));
-    V acc{0.f};
-    for(float x : in)
-        acc = acc + V{x};
-    EXPECT_EQ(got.fpsan_payload(), acc.fpsan_payload());
+    fpsan_test::for_each_fpsan_semantics([&](auto sem) {
+        using V = Value<float, decltype(sem)::value, kCC>;
+        V* dSlot;
+        HIP_CHECK(hipMalloc(&dSlot, sizeof(V)));
+        V init{0.f};
+        HIP_CHECK(hipMemcpy(dSlot, &init, sizeof(V), hipMemcpyHostToDevice));
+        k_atomic_fadd<decltype(sem)::value><<<1, LANES>>>(dSlot, dIn);
+        HIP_CHECK(hipDeviceSynchronize());
+        V got{0.f};
+        HIP_CHECK(hipMemcpy(&got, dSlot, sizeof(V), hipMemcpyDeviceToHost));
+        V acc{0.f};
+        for(float x : in)
+            acc = acc + V{x};
+        EXPECT_EQ(got.fpsan_payload(), acc.fpsan_payload());
+        (void)hipFree(dSlot);
+    });
     (void)hipFree(dIn);
-    (void)hipFree(dSlot);
 }
 
 // ---- atomic_fmin / atomic_fmax: final value = min / max of all lanes -------
@@ -225,22 +230,24 @@ TEST(Atomic, FminFpsanMatchesScalarPayloadMin)
         GTEST_SKIP() << "no HIP device";
     auto   in  = make_inputs();
     float* dIn = to_dev(in);
-    using V    = Value<float, Semantics::Triton, kCC>;
-    V* dSlot;
-    HIP_CHECK(hipMalloc(&dSlot, sizeof(V)));
-    // Seed with a payload that is signed-greater than any input's payload.
-    V init{1e30f};
-    HIP_CHECK(hipMemcpy(dSlot, &init, sizeof(V), hipMemcpyHostToDevice));
-    k_atomic_fmin<Semantics::Triton><<<1, LANES>>>(dSlot, dIn);
-    HIP_CHECK(hipDeviceSynchronize());
-    V got{0.f};
-    HIP_CHECK(hipMemcpy(&got, dSlot, sizeof(V), hipMemcpyDeviceToHost));
-    V acc = init;
-    for(float x : in)
-        acc = fpsan::min(acc, V{x});
-    EXPECT_EQ(got.fpsan_payload(), acc.fpsan_payload());
+    fpsan_test::for_each_fpsan_semantics([&](auto sem) {
+        using V = Value<float, decltype(sem)::value, kCC>;
+        V* dSlot;
+        HIP_CHECK(hipMalloc(&dSlot, sizeof(V)));
+        // Seed with a payload that is signed-greater than any input's payload.
+        V init{1e30f};
+        HIP_CHECK(hipMemcpy(dSlot, &init, sizeof(V), hipMemcpyHostToDevice));
+        k_atomic_fmin<decltype(sem)::value><<<1, LANES>>>(dSlot, dIn);
+        HIP_CHECK(hipDeviceSynchronize());
+        V got{0.f};
+        HIP_CHECK(hipMemcpy(&got, dSlot, sizeof(V), hipMemcpyDeviceToHost));
+        V acc = init;
+        for(float x : in)
+            acc = fpsan::min(acc, V{x});
+        EXPECT_EQ(got.fpsan_payload(), acc.fpsan_payload());
+        (void)hipFree(dSlot);
+    });
     (void)hipFree(dIn);
-    (void)hipFree(dSlot);
 }
 
 // ---- atomic_fadd returned-old correctness (single thread, no contention) ----
@@ -287,21 +294,23 @@ TEST(Atomic, FmaxFpsanMatchesScalarPayloadMax)
         GTEST_SKIP() << "no HIP device";
     auto   in  = make_inputs();
     float* dIn = to_dev(in);
-    using V    = Value<float, Semantics::Triton, kCC>;
-    V* dSlot;
-    HIP_CHECK(hipMalloc(&dSlot, sizeof(V)));
-    V init{-1e30f};
-    HIP_CHECK(hipMemcpy(dSlot, &init, sizeof(V), hipMemcpyHostToDevice));
-    k_atomic_fmax<Semantics::Triton><<<1, LANES>>>(dSlot, dIn);
-    HIP_CHECK(hipDeviceSynchronize());
-    V got{0.f};
-    HIP_CHECK(hipMemcpy(&got, dSlot, sizeof(V), hipMemcpyDeviceToHost));
-    V acc = init;
-    for(float x : in)
-        acc = fpsan::max(acc, V{x});
-    EXPECT_EQ(got.fpsan_payload(), acc.fpsan_payload());
+    fpsan_test::for_each_fpsan_semantics([&](auto sem) {
+        using V = Value<float, decltype(sem)::value, kCC>;
+        V* dSlot;
+        HIP_CHECK(hipMalloc(&dSlot, sizeof(V)));
+        V init{-1e30f};
+        HIP_CHECK(hipMemcpy(dSlot, &init, sizeof(V), hipMemcpyHostToDevice));
+        k_atomic_fmax<decltype(sem)::value><<<1, LANES>>>(dSlot, dIn);
+        HIP_CHECK(hipDeviceSynchronize());
+        V got{0.f};
+        HIP_CHECK(hipMemcpy(&got, dSlot, sizeof(V), hipMemcpyDeviceToHost));
+        V acc = init;
+        for(float x : in)
+            acc = fpsan::max(acc, V{x});
+        EXPECT_EQ(got.fpsan_payload(), acc.fpsan_payload());
+        (void)hipFree(dSlot);
+    });
     (void)hipFree(dIn);
-    (void)hipFree(dSlot);
 }
 
 // ===========================================================================
@@ -336,23 +345,26 @@ TEST(Atomic, Fadd64FpsanMatchesScalarRingSum)
     int ndev = 0;
     if(hipGetDeviceCount(&ndev) != hipSuccess || ndev == 0)
         GTEST_SKIP() << "no HIP device";
+    // CAS-loop wrapper makes atomic_fadd64 correct for every algebraic model.
     auto    in  = make_inputs64();
     double* dIn = to_dev(in);
-    using V     = Value<double, Semantics::Triton, kCC>;
-    V* dSlot;
-    HIP_CHECK(hipMalloc(&dSlot, sizeof(V)));
-    V init{0.0};
-    HIP_CHECK(hipMemcpy(dSlot, &init, sizeof(V), hipMemcpyHostToDevice));
-    k_atomic_fadd64<Semantics::Triton><<<1, LANES>>>(dSlot, dIn);
-    HIP_CHECK(hipDeviceSynchronize());
-    V got{0.0};
-    HIP_CHECK(hipMemcpy(&got, dSlot, sizeof(V), hipMemcpyDeviceToHost));
-    V acc{0.0};
-    for(double x : in)
-        acc = acc + V{x};
-    EXPECT_EQ(got.fpsan_payload(), acc.fpsan_payload());
+    fpsan_test::for_each_fpsan_semantics([&](auto sem) {
+        using V = Value<double, decltype(sem)::value, kCC>;
+        V* dSlot;
+        HIP_CHECK(hipMalloc(&dSlot, sizeof(V)));
+        V init{0.0};
+        HIP_CHECK(hipMemcpy(dSlot, &init, sizeof(V), hipMemcpyHostToDevice));
+        k_atomic_fadd64<decltype(sem)::value><<<1, LANES>>>(dSlot, dIn);
+        HIP_CHECK(hipDeviceSynchronize());
+        V got{0.0};
+        HIP_CHECK(hipMemcpy(&got, dSlot, sizeof(V), hipMemcpyDeviceToHost));
+        V acc{0.0};
+        for(double x : in)
+            acc = acc + V{x};
+        EXPECT_EQ(got.fpsan_payload(), acc.fpsan_payload());
+        (void)hipFree(dSlot);
+    });
     (void)hipFree(dIn);
-    (void)hipFree(dSlot);
 }
 
 TEST(Atomic, Fmin64FloatMatchesScalarMin)
@@ -406,21 +418,23 @@ TEST(Atomic, Fmin64FpsanMatchesScalarPayloadMin)
         GTEST_SKIP() << "no HIP device";
     auto    in  = make_inputs64();
     double* dIn = to_dev(in);
-    using V     = Value<double, Semantics::Triton, kCC>;
-    V* dSlot;
-    HIP_CHECK(hipMalloc(&dSlot, sizeof(V)));
-    V init{1e300};
-    HIP_CHECK(hipMemcpy(dSlot, &init, sizeof(V), hipMemcpyHostToDevice));
-    k_atomic_fmin64<Semantics::Triton><<<1, LANES>>>(dSlot, dIn);
-    HIP_CHECK(hipDeviceSynchronize());
-    V got{0.0};
-    HIP_CHECK(hipMemcpy(&got, dSlot, sizeof(V), hipMemcpyDeviceToHost));
-    V acc = init;
-    for(double x : in)
-        acc = fpsan::min(acc, V{x});
-    EXPECT_EQ(got.fpsan_payload(), acc.fpsan_payload());
+    fpsan_test::for_each_fpsan_semantics([&](auto sem) {
+        using V = Value<double, decltype(sem)::value, kCC>;
+        V* dSlot;
+        HIP_CHECK(hipMalloc(&dSlot, sizeof(V)));
+        V init{1e300};
+        HIP_CHECK(hipMemcpy(dSlot, &init, sizeof(V), hipMemcpyHostToDevice));
+        k_atomic_fmin64<decltype(sem)::value><<<1, LANES>>>(dSlot, dIn);
+        HIP_CHECK(hipDeviceSynchronize());
+        V got{0.0};
+        HIP_CHECK(hipMemcpy(&got, dSlot, sizeof(V), hipMemcpyDeviceToHost));
+        V acc = init;
+        for(double x : in)
+            acc = fpsan::min(acc, V{x});
+        EXPECT_EQ(got.fpsan_payload(), acc.fpsan_payload());
+        (void)hipFree(dSlot);
+    });
     (void)hipFree(dIn);
-    (void)hipFree(dSlot);
 }
 
 TEST(Atomic, Fmax64FpsanMatchesScalarPayloadMax)
@@ -430,21 +444,23 @@ TEST(Atomic, Fmax64FpsanMatchesScalarPayloadMax)
         GTEST_SKIP() << "no HIP device";
     auto    in  = make_inputs64();
     double* dIn = to_dev(in);
-    using V     = Value<double, Semantics::Triton, kCC>;
-    V* dSlot;
-    HIP_CHECK(hipMalloc(&dSlot, sizeof(V)));
-    V init{-1e300};
-    HIP_CHECK(hipMemcpy(dSlot, &init, sizeof(V), hipMemcpyHostToDevice));
-    k_atomic_fmax64<Semantics::Triton><<<1, LANES>>>(dSlot, dIn);
-    HIP_CHECK(hipDeviceSynchronize());
-    V got{0.0};
-    HIP_CHECK(hipMemcpy(&got, dSlot, sizeof(V), hipMemcpyDeviceToHost));
-    V acc = init;
-    for(double x : in)
-        acc = fpsan::max(acc, V{x});
-    EXPECT_EQ(got.fpsan_payload(), acc.fpsan_payload());
+    fpsan_test::for_each_fpsan_semantics([&](auto sem) {
+        using V = Value<double, decltype(sem)::value, kCC>;
+        V* dSlot;
+        HIP_CHECK(hipMalloc(&dSlot, sizeof(V)));
+        V init{-1e300};
+        HIP_CHECK(hipMemcpy(dSlot, &init, sizeof(V), hipMemcpyHostToDevice));
+        k_atomic_fmax64<decltype(sem)::value><<<1, LANES>>>(dSlot, dIn);
+        HIP_CHECK(hipDeviceSynchronize());
+        V got{0.0};
+        HIP_CHECK(hipMemcpy(&got, dSlot, sizeof(V), hipMemcpyDeviceToHost));
+        V acc = init;
+        for(double x : in)
+            acc = fpsan::max(acc, V{x});
+        EXPECT_EQ(got.fpsan_payload(), acc.fpsan_payload());
+        (void)hipFree(dSlot);
+    });
     (void)hipFree(dIn);
-    (void)hipFree(dSlot);
 }
 
 // ===========================================================================
@@ -505,7 +521,9 @@ TEST(Atomic, PkAddF16Float)
 }
 TEST(Atomic, PkAddF16Fpsan)
 {
-    run_pk_add<v2h_t, _Float16, Semantics::Triton>(k_atomic_pk_f16<Semantics::Triton>);
+    fpsan_test::for_each_fpsan_semantics([](auto sem) {
+        run_pk_add<v2h_t, _Float16, decltype(sem)::value>(k_atomic_pk_f16<decltype(sem)::value>);
+    });
 }
 TEST(Atomic, PkAddBf16Float)
 {
@@ -513,5 +531,7 @@ TEST(Atomic, PkAddBf16Float)
 }
 TEST(Atomic, PkAddBf16Fpsan)
 {
-    run_pk_add<v2bf_t, __bf16, Semantics::Triton>(k_atomic_pk_bf16<Semantics::Triton>);
+    fpsan_test::for_each_fpsan_semantics([](auto sem) {
+        run_pk_add<v2bf_t, __bf16, decltype(sem)::value>(k_atomic_pk_bf16<decltype(sem)::value>);
+    });
 }

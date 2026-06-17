@@ -24,7 +24,7 @@
 //   smfmac_f32_16x16x64_{fp8,bf8}_{fp8,bf8}     (fp8-insts)
 //   smfmac_f32_32x32x32_{fp8,bf8}_{fp8,bf8}     (fp8-insts)
 //
-// Float mode forwards to the matching __builtin_amdgcn_smfmac_*.  FPSan mode
+// Native mode forwards to the matching __builtin_amdgcn_smfmac_*.  FPSan mode
 // runs the sparse software dataflow: it decodes the per-lane `index` operand
 // (2-bit selectors naming the 2-of-4 live K positions) and accumulates over the
 // live positions in the payload ring. Implemented + silicon-verified for EVERY
@@ -554,7 +554,7 @@ namespace fpsan
     } // namespace detail
 
 // =============================================================================
-// SMFMAC wrappers.  Float-mode forwards to the builtin.  FPSan-mode runs the
+// SMFMAC wrappers.  Native-mode forwards to the builtin.  FPSan-mode runs the
 // sparse software dataflow (all four CDNA f16/bf16 shapes + the CDNA3 fp8
 // shapes) or, for
 // shapes not yet ported, is a hard compile error in FPSan mode -- see note.
@@ -598,7 +598,7 @@ namespace fpsan
                           "fpsan: SMFMAC FPSan dataflow for this shape is not implemented "  \
                           "yet; the wrapper is intentionally a hard error in FPSan mode so " \
                           "it "                                                              \
-                          "cannot return a silently-wrong result. Use Float mode, or wait "  \
+                          "cannot return a silently-wrong result. Use Native mode, or wait " \
                           "for "                                                             \
                           "the ported shape.");                                              \
             return c;                                                                        \
@@ -856,7 +856,7 @@ namespace fpsan
 #undef FPSAN_DEFINE_SMFMAC_FP8
 
 // gfx950 fp8-insts SMFMAC (K=128 16x16, K=64 32x32): A = v16 fp8 (=v4i), B =
-// v32 fp8 (=v8i).  Float mode forwards to the builtin; FPSan mode runs the
+// v32 fp8 (=v8i).  Native mode forwards to the builtin; FPSan mode runs the
 // per-shape software dataflow (smfmac_software_16x16x128_fp8 /
 // smfmac_software_32x32x64_fp8) -- both silicon-verified (single-hot probe +
 // multi-seed full-random LayoutMatchesHardware).

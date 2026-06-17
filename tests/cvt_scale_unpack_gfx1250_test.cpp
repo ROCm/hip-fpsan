@@ -20,7 +20,8 @@
 //           from the builtin. Any implementation that diverges from the host
 //           reference fails here.
 //   FPSan : the wrapper equals an independent payload-domain reference
-//           (subbyte sign-resize, NO scale -- block scale is Float-only).
+//           (FP8/BF8 payload cast, subbyte FP4/FP6 resize, NO scale -- block
+//           scale is Float-only).
 // Each kernel runs a SINGLE lane (<<<1,1>>>), so ScaleSel=0 selects byte 0 of
 // the scale operand for that lane, and every output element i is
 // decode(code i) * scale, self-contained per lane.
@@ -31,6 +32,7 @@
 #include "fpsan/amdgcn_cvt.hpp"
 #include "fpsan/fpsan.hpp"
 
+#include "fpsan_semantics.hpp"
 #include "hip_test_utils.hpp"
 
 #include <hip/hip_runtime.h>
@@ -102,6 +104,20 @@ namespace
         }
         return w;
     }
+    template <Semantics S, class FP8>
+    std::array<unsigned, 2> host_pack_payload_bytes8(const std::vector<float>& in,
+                                                     const FpFormat&           fmt)
+    {
+        using V = Value<FP8, S, kCC>;
+        std::array<unsigned, 2> w{0u, 0u};
+        for(int i = 0; i < 8; ++i)
+        {
+            const auto raw = static_cast<std::uint8_t>(f32_to_narrow(in[i], fmt) & 0xFFu);
+            const auto p   = static_cast<std::uint8_t>(V{FP8{raw}}.fpsan_payload());
+            w[i / 4] |= static_cast<unsigned>(p) << (8 * (i % 4));
+        }
+        return w;
+    }
     // Host pack of 8 fp4 nibbles -> u32 (nibble i = code i).
     unsigned host_pack_nibbles8(const std::vector<float>& in)
     {
@@ -130,7 +146,7 @@ namespace
 
 #if !defined(__HIP_DEVICE_COMPILE__) || __has_builtin(__builtin_amdgcn_cvt_scale_pk8_f32_fp8)
 
-// ============================ Float-mode golden =============================
+// ============================ Native-mode golden =============================
 // One real kernel + TEST per wrapper, scale operand pinned to E8M0 x1, decoding
 // the packed stream and comparing each element to the host OCP decode.
 
@@ -274,54 +290,66 @@ TEST(CvtScalePk8Unpack, Fp8ScaleMultiplies)
 }
 
 // ============================ FPSan mode ====================================
-// Plain payload widen, NO scale (block scale is Float-only). The wrapper equals
-// an independent payload reference built from the public Value algebra.
+// Payload-domain FP8 cast, NO scale (block scale is Float-only). The wrapper
+// equals an independent payload reference built from the public Value algebra.
 
-__global__ void k_fpsan_pk8_fp8(const unsigned* in, unsigned scale, int* out)
+template <Semantics S>
+__global__ void k_fpsan_pk8_fp8(const unsigned* in, unsigned scale, unsigned* out)
 {
     fpsan::v2u32_native p;
     p[0]   = in[0];
     p[1]   = in[1];
-    auto r = fpsan::amdgcn_cvt_scale_pk8_f32_fp8<0, Semantics::Triton, kCC>(p, scale);
+    auto r = fpsan::amdgcn_cvt_scale_pk8_f32_fp8<0, S, kCC>(p, scale);
     for(int i = 0; i < 8; ++i)
         out[i] = r.get(i).fpsan_payload();
 }
 
-TEST(CvtScalePk8Unpack, FpsanFp8Payload)
+template <Semantics S>
+void run_fpsan_pk8_fp8_payload()
 {
     if(!have_device())
         GTEST_SKIP() << "no HIP device";
     auto      in  = exact8();
-    auto      w   = host_pack_bytes8(in, kFp8E4M3);
+    auto      w   = host_pack_payload_bytes8<S, fpsan::fp8_e4m3>(in, kFp8E4M3);
     unsigned* dIn = to_dev(std::vector<unsigned>(w.begin(), w.end()));
-    int*      dO;
-    HIP_CHECK(hipMalloc(&dO, 8 * sizeof(int)));
-    k_fpsan_pk8_fp8<<<1, 1>>>(dIn, kE8M0_x2, dO);
+    unsigned* dO;
+    HIP_CHECK(hipMalloc(&dO, 8 * sizeof(unsigned)));
+    k_fpsan_pk8_fp8<S><<<1, 1>>>(dIn, kE8M0_x2, dO);
     HIP_CHECK(hipDeviceSynchronize());
     auto got = from_dev(dO, 8);
     for(int i = 0; i < 8; ++i)
     {
-        // Independent reference: sign-extend the 8-bit code, ignore scale.
-        std::uint32_t code = f32_to_narrow(in[i], kFp8E4M3) & 0xFFu;
-        int           want = static_cast<int>(static_cast<std::int32_t>(code << 24) >> 24);
+        using Src       = Value<fpsan::fp8_e4m3, S, kCC>;
+        const auto raw  = static_cast<std::uint8_t>(f32_to_narrow(in[i], kFp8E4M3) & 0xFFu);
+        const auto src  = Src{fpsan::fp8_e4m3{raw}};
+        const auto want = static_cast<unsigned>(fpsan::cast<float>(src).fpsan_payload());
         EXPECT_EQ(got[i], want) << "elem " << i;
     }
     (void)hipFree(dIn);
     (void)hipFree(dO);
 }
 
+TEST(CvtScalePk8Unpack, FpsanFp8Payload)
+{
+    FPSAN_RUN_ALL_VARIANTS(run_fpsan_pk8_fp8_payload);
+}
+
+template <Semantics S>
 __global__ void k_fpsan_pk16_fp6(const unsigned* in, unsigned scale, int* out)
 {
+    // FP6 has no scalar Value<> element type; this pins the storage-payload
+    // convention rather than an algebraic cast.
     fpsan::v3u32_native p;
     p[0]   = in[0];
     p[1]   = in[1];
     p[2]   = in[2];
-    auto r = fpsan::amdgcn_cvt_scale_pk16_f32_fp6<0, Semantics::Triton, kCC>(p, scale);
+    auto r = fpsan::amdgcn_cvt_scale_pk16_f32_fp6<0, S, kCC>(p, scale);
     for(int i = 0; i < 16; ++i)
         out[i] = r.get(i).fpsan_payload();
 }
 
-TEST(CvtScalePk16Unpack, FpsanFp6Payload)
+template <Semantics S>
+void run_fpsan_pk16_fp6_payload()
 {
     if(!have_device())
         GTEST_SKIP() << "no HIP device";
@@ -330,17 +358,22 @@ TEST(CvtScalePk16Unpack, FpsanFp6Payload)
     unsigned* dIn = to_dev(std::vector<unsigned>(w.begin(), w.end()));
     int*      dO;
     HIP_CHECK(hipMalloc(&dO, 16 * sizeof(int)));
-    k_fpsan_pk16_fp6<<<1, 1>>>(dIn, kE8M0_x1, dO);
+    k_fpsan_pk16_fp6<S><<<1, 1>>>(dIn, kE8M0_x1, dO);
     HIP_CHECK(hipDeviceSynchronize());
     auto got = from_dev(dO, 16);
     for(int i = 0; i < 16; ++i)
     {
         std::uint32_t code = f32_to_narrow(in[i], kFp6E2M3) & 0x3Fu;
-        int           want = static_cast<int>(static_cast<std::int32_t>(code << 26) >> 26);
+        int want = static_cast<int>(fpsan::detail::subbyte_widen<6, S, kCC>(code).fpsan_payload());
         EXPECT_EQ(got[i], want) << "elem " << i;
     }
     (void)hipFree(dIn);
     (void)hipFree(dO);
+}
+
+TEST(CvtScalePk16Unpack, FpsanFp6Payload)
+{
+    FPSAN_RUN_ALL_VARIANTS(run_fpsan_pk16_fp6_payload);
 }
 
 #endif // has builtin

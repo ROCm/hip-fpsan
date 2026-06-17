@@ -46,7 +46,7 @@ namespace fpsan
     // we bit_cast at the call boundary and keep the int public API.
     using v2s16_native = short __attribute__((ext_vector_type(2)));
 
-    // Pack two f32 values into a v2f16 with round-to-zero. Float mode forwards to
+    // Pack two f32 values into a v2f16 with round-to-zero. Native mode forwards to
     // the builtin; FPSan mode uses two scalar fpsan::cast<_Float16>(...) and
     // assembles them into the v2h fragment (cast does signed-truncate of the
     // payload 32->16, which is the FPSan model of an f32 -> f16 conversion).
@@ -82,7 +82,7 @@ namespace fpsan
     // both result lanes are produced (lane0 <- a, lane1 <- b). FPSan model is two
     // scalar fpsan::cast<{_Float16,__bf16}>(...) (payload signed-truncate 32->16,
     // the f32->f16/bf16 narrowing model); the seed is opaque to that deterministic
-    // answer, exactly like every other SR wrapper here. Float mode forwards to the
+    // answer, exactly like every other SR wrapper here. Native mode forwards to the
     // builtin and the tests assert against the host narrowing at exactly
     // representable inputs (where SR is exact) plus a neighbor-bracket property for
     // non-representable inputs.
@@ -137,7 +137,7 @@ namespace fpsan
     // fp8 (or bf8) bytes. The byte position is selected by a constexpr index.
     // Customers wire them up at the byte level, and the FPSan wrappers preserve
     // that: the int argument is opaque to FPSan (it's a raw register holding
-    // either real fp8 bytes in Float mode or fp8 PAYLOAD bytes in FPSan mode,
+    // either real fp8 bytes in Native mode or fp8 PAYLOAD bytes in FPSan mode,
     // the customer's choice consistent within their kernel).
     // =============================================================================
 
@@ -174,7 +174,7 @@ namespace fpsan
     } // namespace detail
 
 // cvt_f32_fp8 / cvt_f32_bf8: read byte ByteIdx of a packed int as an fp8 value
-// and convert it to f32. Float mode forwards to the builtin; FPSan mode
+// and convert it to f32. Native mode forwards to the builtin; FPSan mode
 // reinterprets the byte as an fp8 payload and uses fpsan::cast<float> (which
 // is signed-extend 8 -> 32).
 #define FPSAN_DEFINE_CVT_F32_FP8(name, FP8, BUILTIN)                                               \
@@ -267,12 +267,12 @@ namespace fpsan
     //   packed_old, which is the destination register, so both paths agree that
     //   packed_old is `old`.)
     //
-    // FPSan model: stochastic rounding is just rounding with an extra randomness
-    // source.  Since FPSan cast<FP8> already truncates the payload deterministic-
-    // ally (Triton ext/trunc), the seed parameter is opaque -- it doesn't change
-    // the payload-domain answer.  We splice the cast<FP8>(val) payload into the
-    // chosen byte of `packed_old`, matching the cvt_pk_fp8_f32 contract for the
-    // chosen byte slot.
+    // FPSan-family model: stochastic rounding is just rounding with an extra
+    // randomness source. Since fpsan::cast<FP8> is deterministic in every
+    // semantics, the seed parameter is opaque -- it does not change the
+    // payload-domain answer. We splice the cast<FP8>(val) payload into the chosen
+    // byte of `packed_old`, matching the cvt_pk_fp8_f32 contract for the chosen
+    // byte slot.
     // =============================================================================
 
     namespace detail
@@ -315,11 +315,11 @@ namespace fpsan
     // gfx1250 adds direct f16<->fp8 paths (RDNA4/CDNA only had f32<->fp8). The
     // fp8 formats are the SAME OCP encodings as the f32 ops -- fp8 = e4m3, bf8 =
     // e5m2 -- so we reuse fp8_e4m3 / fp8_e5m2 and the existing payload-ring cast
-    // (fpsan::cast<FP8> truncates, fpsan::cast<_Float16> resizes). Float mode
-    // forwards to the builtin; FPSan mode is the deterministic Triton ext/trunc
-    // cast, identical in spirit to the f32 family. Every fp8 value is exactly
-    // representable in f16, so the decode direction is lossless. Each block is
-    // __has_builtin-gated (gfx1250-exclusive).
+    // (fpsan::cast<FP8> narrows, fpsan::cast<_Float16> widens). Native mode
+    // forwards to the builtin; FPSan-family semantics use their selected
+    // deterministic cast policy. Every fp8 value is exactly representable in f16,
+    // so the decode direction is lossless. Each block is __has_builtin-gated
+    // (gfx1250-exclusive).
 
     // cvt_f16_fp8 / cvt_f16_bf8: read byte ByteIdx of a packed int as fp8 -> f16.
 #if !defined(__HIP_DEVICE_COMPILE__) || __has_builtin(__builtin_amdgcn_cvt_f16_fp8)
@@ -408,8 +408,8 @@ namespace fpsan
 
 // cvt_sr_{f16,bf16}_f32: stochastic rounding f32 -> packed f16/bf16, splicing
 // into the lo or hi half of a v2 fragment (DstLo selects). gfx950-specific
-// ('f32-to-f16bf16-cvt-sr-insts').  Same FPSan story: seed is opaque, the
-// payload-domain answer is the deterministic Triton-style cast.
+// ('f32-to-f16bf16-cvt-sr-insts'). Same FPSan-family story: seed is opaque, the
+// payload-domain answer is the selected deterministic cast.
 #if !defined(__HIP_DEVICE_COMPILE__) || __has_builtin(__builtin_amdgcn_cvt_sr_f16_f32)
     template <bool DstLo, Semantics S = Semantics::Native, Conversions C = Conversions::Explicit>
     FPSAN_DEVICE Value<v2h_native, S, C> amdgcn_cvt_sr_f16_f32(Value<v2h_native, S, C> old,
@@ -722,7 +722,7 @@ namespace fpsan
 // position ByteIdx of `old`. Silicon-verified on gfx950: byte ByteIdx is
 // written directly (NO +1 offset, unlike the non-scaled cvt_sr_fp8) and the
 // stored value is val/scale (e.g. sr(4.0, scale=2)=fp8 code of 2.0). FPSan
-// model: seed is opaque to the deterministic Triton truncate, so the answer is
+// model: seed is opaque to the deterministic FPSan-family cast, so the answer is
 // the same byte the scaled non-SR pack would write -- cast<FP8>(val/scale).
 #if !defined(__HIP_DEVICE_COMPILE__) || __has_builtin(__builtin_amdgcn_cvt_scalef32_sr_fp8_f32)
 #define FPSAN_DEFINE_CVT_SCALEF32_SR_FP8(NAME, FP8, SRC, BUILTIN)                                  \
@@ -775,19 +775,19 @@ namespace fpsan
     // nibble (2*Sel+1). Scale DIRECTION matches the fp8 family: UNPACK multiplies
     // by scale, PACK divides by scale.
     //
-    // In FPSan mode the packed u32 holds fp4 PAYLOADS (4-bit) per nibble, exactly
-    // as the fp8 cvt wrappers treat bytes as fp8 payloads. The cast between an fp4
-    // nibble and f32 is the Triton sign-resize on the payload (sign-extend 4->32 on
-    // widen; keep the low 4 bits on narrow) -- there is no Value<fp4> (sub-byte is
-    // never a Value element type), so we resize the payload directly. All scale
-    // arithmetic happens in the f32 payload ring (the scale operand is f32), with
-    // the f16/bf16 in/out variants widening to / narrowing from f32 around it.
+    // In FPSan-family semantics the packed u32 holds fp4 storage payloads (4-bit)
+    // per nibble, exactly as the fp8 cvt wrappers treat bytes as fp8 payloads.
+    // There is no Value<fp4> (sub-byte is never a Value element type), so widening
+    // embeds the sign-extended storage value into the selected f32 payload
+    // semantics and narrowing keeps the low 4 bits. All scale arithmetic happens
+    // in the f32 payload ring (the scale operand is f32), with the f16/bf16 in/out
+    // variants widening to / narrowing from f32 around it.
     // =============================================================================
     namespace detail
     {
 
-        // Sign-resize a 4-bit fp4 payload (low nibble of `nib`) to a 32-bit f32 payload
-        // (FPSan widen, == fpsan::cast<float> on a hypothetical Value<fp4>).
+        // Widen a 4-bit fp4 storage payload (low nibble of `nib`) into the selected
+        // f32 payload semantics.
         template <Semantics S, Conversions C>
         FPSAN_DEVICE Value<float, S, C> fp4_nibble_to_f32(std::uint32_t nib)
         {
@@ -893,7 +893,7 @@ namespace fpsan
 #undef FPSAN_DEFINE_CVT_SCALEF32_PACK_FP4
 
 // ---- Stochastic-rounding fp4 pack (sr_pk_fp4_*): seed is opaque to the
-// payload-domain answer (deterministic Triton truncate), exactly like the
+// payload-domain answer (deterministic FPSan-family narrowing), exactly like the
 // fp8 SR family. The PR flags the reversed-operand encoding (data in src1);
 // the wrapper passes operands in the builtin's order so the Float path is the
 // hardware truth and the FPSan path is the matching deterministic pack.
@@ -923,7 +923,7 @@ namespace fpsan
 // ---- SR pack to fp4 from f16/bf16 (sr_pk_fp4_{f16,bf16}): widen the v2 source
 // to f32, divide by scale, narrow to fp4 nibble pair Sel (a -> low nibble
 // 2*Sel, b -> high nibble 2*Sel+1; silicon-verified, no operand swap). seed is
-// opaque to the deterministic Triton truncate (same as the f32-source SR pack).
+// opaque to the deterministic FPSan-family narrowing (same as the f32-source SR pack).
 #if !defined(__HIP_DEVICE_COMPILE__) || __has_builtin(__builtin_amdgcn_cvt_scalef32_sr_pk_fp4_f16)
 #define FPSAN_DEFINE_CVT_SCALEF32_SR_PK_FP4(NAME, VEC, BUILTIN)                                \
     template <int Sel, Semantics S = Semantics::Native, Conversions C = Conversions::Explicit> \
@@ -997,7 +997,7 @@ namespace fpsan
             if(off > 26)
                 w[wi + 1] |= v6 >> (32 - off);
         }
-        // Sign-resize a 6-bit payload to a 32-bit f32 payload (FPSan widen).
+        // Widen a 6-bit storage payload into the selected f32 payload semantics.
         template <Semantics S, Conversions C>
         FPSAN_DEVICE Value<float, S, C> sub6_to_f32(std::uint32_t f)
         {
@@ -1243,6 +1243,13 @@ namespace fpsan
                 out |= (static_cast<std::uint32_t>(n[i]) & 0xFu) << (4 * i);
             return out;
         }
+        template <class FP8, class DstFT, Semantics S, Conversions C>
+        FPSAN_DEVICE Value<DstFT, S, C> widen_fp8_payload_byte(std::uint32_t byte)
+        {
+            using Src = Value<FP8, S, C>;
+            return fpsan::cast<DstFT>(
+                Src::from_fpsan_payload(static_cast<typename Src::bits_type>(byte & 0xFFu)));
+        }
     } // namespace detail
 
 #if !defined(__HIP_DEVICE_COMPILE__) || __has_builtin(__builtin_amdgcn_cvt_scalef32_pk8_fp8_f32)
@@ -1316,7 +1323,7 @@ namespace fpsan
 #undef FPSAN_DEFINE_CVT_SCALEF32_PK8_FP4
 
     // ---- pk16 -> fp6/bf6: 16 lanes -> v3u32 (16 6-bit codes, contiguous), each
-    // /scale. fp6 vs bf6 differ only in the Float-mode builtin (the FPSan payload
+    // /scale. fp6 vs bf6 differ only in the Native-mode builtin (the FPSan payload
     // narrow is a width-6 truncate either way), exactly like the gfx950 pk32 pack.
 #define FPSAN_DEFINE_CVT_SCALEF32_PK16_FP6(NAME, VEC, BUILTIN)                                \
     template <Semantics S = Semantics::Native, Conversions C = Conversions::Explicit>         \
@@ -1474,17 +1481,15 @@ namespace fpsan
     // is NOT in LLVM APFloat). The hardware reaches it by OVERLOADING the ordinary
     // f32<->fp8 convert opcodes via the CLAMP bit -- exposed in LLVM/Clang as the
     // dedicated *_e5m3 builtins whose signatures are byte-identical to the
-    // non-e5m3 cvt_{f32_fp8,pk_fp8_f32,sr_fp8_f32}. Float mode forwards to the
+    // non-e5m3 cvt_{f32_fp8,pk_fp8_f32,sr_fp8_f32}. Native mode forwards to the
     // builtin; the tests assert against the HOST E5M3 codec (detail::kFp8E5M3),
     // which is the authoritative reference.
     //
     // FPSan model: E5M3 cannot be a Value<> element type (1 + 5 + 3 != 8, since it
-    // has no sign bit), so there is no Value<fp8_e5m3>. The payload ring only ever
-    // cares about STORAGE WIDTH for a resize, and that is 8 bits -- identical to
-    // e4m3/e5m2. So the FPSan path is the same width-8 deterministic resize as its
-    // siblings (decode = subbyte_widen<8>; encode = low 8 payload bits), keeping
-    // mixed e4m3/e5m2/e5m3 FPSan kernels uniform; the format's unsignedness is only
-    // modeled in (authoritative) Float mode.
+    // has no sign bit), so there is no Value<fp8_e5m3>. The FPSan path therefore
+    // remains a width-8 deterministic storage-payload resize (decode =
+    // storage_payload_widen<8>; encode = low 8 payload bits). The format's
+    // unsignedness is modeled only in (authoritative) Native mode.
     // =============================================================================
 #if !defined(__HIP_DEVICE_COMPILE__) || __has_builtin(__builtin_amdgcn_cvt_f32_fp8_e5m3)
     // Decode: byte ByteIdx of `packed`, interpreted as E5M3, -> f32.
@@ -1497,7 +1502,7 @@ namespace fpsan
         {
             const std::uint8_t byte = static_cast<std::uint8_t>(
                 (static_cast<std::uint32_t>(packed) >> (ByteIdx * 8)) & 0xFFu);
-            return detail::subbyte_widen<8, S, C>(byte);
+            return detail::storage_payload_widen<8, S, C>(byte);
         }
     }
 #endif
@@ -1558,18 +1563,20 @@ namespace fpsan
     //   pk8  fp4     : u32   (8 nibbles,  nib  i  = code i) -> v8.
     //   pk16 fp6/bf6 : v3u32 (16 codes,   contiguous 6-bit) -> v16.
     //
-    // Float mode forwards to the hardware builtin (authoritative). FPSan mode is a
-    // plain payload WIDEN of each narrow code (detail::subbyte_widen<8/6/4>) with
-    // NO scale applied: the block scale is a magnitude-only Float-domain effect,
-    // and the payload ring tracks precision/width, not the E8M0 multiply
-    // (Float-only -- a single-lane payload model cannot reproduce the
-    // per-lane byte selection anyway). Tests pin the Float scale operand to
-    // all-0x7f (E8M0 127 == x1) so Float and FPSan agree on an exact decode, plus
-    // a separate Float-only case for a 2^n scale.
+    // Native mode forwards to the hardware builtin (authoritative). FPSan-family
+    // mode ignores the block scale: the scale is a magnitude-only Float-domain
+    // effect, and the payload model tracks precision/width, not the E8M0 multiply
+    // (Float-only -- a single-lane payload model cannot reproduce the per-lane
+    // byte selection anyway). FP8/BF8 unpack widens a packed fp8 payload byte via
+    // fpsan::cast from Value<fp8_*, S>; fp4/fp6 still use the sub-byte signed
+    // payload-resize convention because they are not Value element types.
+    // Tests pin the Float scale operand to all-0x7f (E8M0 127 == x1) so Float and
+    // FPSan agree on an exact decode, plus a separate Float-only case for a 2^n
+    // scale.
     // =============================================================================
 #if !defined(__HIP_DEVICE_COMPILE__) || __has_builtin(__builtin_amdgcn_cvt_scale_pk8_f32_fp8)
     // ---- pk8 unpack from fp8/bf8: v2u32 (8 bytes) -> v8, each * scale (width-8).
-#define FPSAN_DEFINE_CVT_SCALE_UNPACK_PK8_FP8(NAME, DstFT, VEC, BUILTIN)             \
+#define FPSAN_DEFINE_CVT_SCALE_UNPACK_PK8_FP8(NAME, SrcFT, DstFT, VEC, BUILTIN)      \
     template <int         ScaleSel,                                                  \
               Semantics   S = Semantics::Native,                                     \
               Conversions C = Conversions::Explicit>                                 \
@@ -1584,32 +1591,38 @@ namespace fpsan
             for(int i = 0; i < 8; ++i)                                               \
             {                                                                        \
                 const std::uint32_t byte = (packed[i / 4] >> (8 * (i % 4))) & 0xFFu; \
-                r.set(i, fpsan::cast<DstFT>(detail::subbyte_widen<8, S, C>(byte)));  \
+                r.set(i, detail::widen_fp8_payload_byte<SrcFT, DstFT, S, C>(byte));  \
             }                                                                        \
             return r;                                                                \
         }                                                                            \
     }
     FPSAN_DEFINE_CVT_SCALE_UNPACK_PK8_FP8(amdgcn_cvt_scale_pk8_f32_fp8,
+                                          fp8_e4m3,
                                           float,
                                           v8f_native,
                                           __builtin_amdgcn_cvt_scale_pk8_f32_fp8)
     FPSAN_DEFINE_CVT_SCALE_UNPACK_PK8_FP8(amdgcn_cvt_scale_pk8_f32_bf8,
+                                          fp8_e5m2,
                                           float,
                                           v8f_native,
                                           __builtin_amdgcn_cvt_scale_pk8_f32_bf8)
     FPSAN_DEFINE_CVT_SCALE_UNPACK_PK8_FP8(amdgcn_cvt_scale_pk8_f16_fp8,
+                                          fp8_e4m3,
                                           _Float16,
                                           v8h_native,
                                           __builtin_amdgcn_cvt_scale_pk8_f16_fp8)
     FPSAN_DEFINE_CVT_SCALE_UNPACK_PK8_FP8(amdgcn_cvt_scale_pk8_f16_bf8,
+                                          fp8_e5m2,
                                           _Float16,
                                           v8h_native,
                                           __builtin_amdgcn_cvt_scale_pk8_f16_bf8)
     FPSAN_DEFINE_CVT_SCALE_UNPACK_PK8_FP8(amdgcn_cvt_scale_pk8_bf16_fp8,
+                                          fp8_e4m3,
                                           __bf16,
                                           v8bf_native,
                                           __builtin_amdgcn_cvt_scale_pk8_bf16_fp8)
     FPSAN_DEFINE_CVT_SCALE_UNPACK_PK8_FP8(amdgcn_cvt_scale_pk8_bf16_bf8,
+                                          fp8_e5m2,
                                           __bf16,
                                           v8bf_native,
                                           __builtin_amdgcn_cvt_scale_pk8_bf16_bf8)
@@ -1651,8 +1664,8 @@ namespace fpsan
 #undef FPSAN_DEFINE_CVT_SCALE_UNPACK_PK8_FP4
 
     // ---- pk16 unpack from fp6/bf6: v3u32 (16 contiguous 6-bit codes) -> v16, each
-    // * scale (width-6). fp6 vs bf6 differ only in the Float-mode builtin; the
-    // FPSan payload widen is a width-6 sign-resize either way.
+    // * scale (width-6). fp6 vs bf6 differ only in the Native-mode builtin; the
+    // FPSan-family payload widen uses the same width-6 storage convention either way.
 #define FPSAN_DEFINE_CVT_SCALE_UNPACK_PK16_FP6(NAME, DstFT, VEC, BUILTIN)                \
     template <int         ScaleSel,                                                      \
               Semantics   S = Semantics::Native,                                         \

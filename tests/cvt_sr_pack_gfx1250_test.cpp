@@ -17,7 +17,7 @@
 // successive sr calls (each feeding the previous result in as `old`). This test
 // locks the correct behavior:
 //   * 4 chained sr calls (byte_sel 0..3) must build a register whose 4 bytes
-//     decode back to the 4 inputs (Float mode, host-referenced).
+//     decode back to the 4 inputs (Native mode, host-referenced).
 //   * a single sr call must preserve the other 3 bytes of a nonzero `old`.
 // All references are host-computed and independent of the device builtin.
 #include "fpsan/amdgcn_cvt.hpp"

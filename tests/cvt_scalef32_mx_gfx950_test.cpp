@@ -13,7 +13,7 @@
 // the host reference shows up as a failure here.
 //
 // We exercise the raw __builtin_amdgcn_cvt_scalef32_* directly (in fpsan's
-// Float mode these wrappers are exactly the builtin) because the FPSan
+// Native mode these wrappers are exactly the builtin) because the FPSan
 // payload-ring dataflow for sub-byte packed fragments is a separate, larger
 // build-out; for validating the conversion *instructions* the builtin-vs-OCP
 // comparison is the relevant property.

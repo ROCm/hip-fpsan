@@ -17,14 +17,17 @@
 //   Float : wrapper == hardware, checked against the INDEPENDENT host OCP
 //           reference (detail::narrow_to_f32 / f32_to_narrow), NOT the builtin.
 //   FPSan : wrapper == an independent payload-domain reference built from the
-//           public Value arithmetic (widen sign-resizes; pack DIVIDES by scale,
-//           unpack MULTIPLIES -- the silicon-verified MX direction). The scale
+//           public Value arithmetic (sub-byte operands use storage-payload
+//           widening; pack DIVIDES by scale, unpack MULTIPLIES -- the
+//           silicon-verified MX direction). The scale
 //           is deliberately != 1 so a flipped mul/div direction is caught (a
 //           pack->unpack round-trip would cancel it; these do not round-trip).
 //           For the SR ops the seed is varied to confirm it is opaque to the
 //           deterministic answer for exactly-representable inputs.
 #include "fpsan/amdgcn_cvt.hpp"
 #include "fpsan/fpsan.hpp"
+
+#include "fpsan_semantics.hpp"
 
 #include "hip_test_utils.hpp"
 #include "test_random.hpp"
@@ -51,7 +54,6 @@ using fpsan::detail::kFp8E5M2;
 using fpsan::detail::narrow_to_f32;
 
 static constexpr Conversions kCC = Conversions::Explicit;
-using VF                         = Value<float, Semantics::Triton, kCC>;
 using v6u                        = unsigned __attribute__((ext_vector_type(6)));
 
 namespace
@@ -224,15 +226,16 @@ TEST(CvtScalef32Sr, A_FloatSelLoHiScale_Bf8)
 
 // FPSan: src holds fp8 PAYLOAD bytes; the chosen half = cast<_Float16>(
 // cast<float>(payload) * scale) and the other half is preserved from old.
-template <class FP8>
+template <Semantics S, class FP8>
 __global__ void k_a_fpsan(int src, float scale, unsigned* out)
 {
-    using VV = Value<fpsan::v2h_native, Semantics::Triton, kCC>;
+    using VF = Value<float, S, kCC>;
+    using VV = Value<fpsan::v2h_native, S, kCC>;
     VV old{};
-    old.set(0, Value<_Float16, Semantics::Triton, kCC>::from_fpsan_payload(0x1234));
-    old.set(1, Value<_Float16, Semantics::Triton, kCC>::from_fpsan_payload(0x5678));
-    auto lo = F16Fp8<FP8>::template call<1, false, Semantics::Triton>(old, src, VF{scale});
-    auto hi = F16Fp8<FP8>::template call<2, true, Semantics::Triton>(old, src, VF{scale});
+    old.set(0, Value<_Float16, S, kCC>::from_fpsan_payload(0x1234));
+    old.set(1, Value<_Float16, S, kCC>::from_fpsan_payload(0x5678));
+    auto lo = F16Fp8<FP8>::template call<1, false, S>(old, src, VF{scale});
+    auto hi = F16Fp8<FP8>::template call<2, true, S>(old, src, VF{scale});
     out[0]  = lo.get(0).fpsan_payload();
     out[1]  = lo.get(1).fpsan_payload();
     out[2]  = hi.get(0).fpsan_payload();
@@ -244,27 +247,31 @@ void run_a_fpsan()
 {
     if(!have_device())
         GTEST_SKIP() << "no HIP device";
-    using V8 = Value<FP8, Semantics::Triton, kCC>;
     // payload bytes 0xA3 (byte1) and 0x5C (byte2).
     unsigned    byte1 = 0xA3, byte2 = 0x5C;
     int         src   = static_cast<int>((byte1 << 8) | (byte2 << 16));
     const float scale = 2.0f;
-    unsigned*   dO;
-    HIP_CHECK(hipMalloc(&dO, 4 * sizeof(unsigned)));
-    k_a_fpsan<FP8><<<1, 1>>>(src, scale, dO);
-    HIP_CHECK(hipDeviceSynchronize());
-    auto     g = from_dev(dO, 4);
-    unsigned ref_lo
-        = fpsan::cast<_Float16>(fpsan::cast<float>(V8::from_fpsan_payload(byte1)) * VF{scale})
-              .fpsan_payload();
-    unsigned ref_hi
-        = fpsan::cast<_Float16>(fpsan::cast<float>(V8::from_fpsan_payload(byte2)) * VF{scale})
-              .fpsan_payload();
-    EXPECT_EQ(g[0], ref_lo); // lo: lane0 written
-    EXPECT_EQ(g[1], 0x5678u); // lo: lane1 preserved
-    EXPECT_EQ(g[2], 0x1234u); // hi: lane0 preserved
-    EXPECT_EQ(g[3], ref_hi); // hi: lane1 written
-    (void)hipFree(dO);
+    fpsan_test::for_each_fpsan_semantics([&](auto sem) {
+        constexpr Semantics S = decltype(sem)::value;
+        using VF              = Value<float, S, kCC>;
+        using V8              = Value<FP8, S, kCC>;
+        unsigned* dO;
+        HIP_CHECK(hipMalloc(&dO, 4 * sizeof(unsigned)));
+        k_a_fpsan<S, FP8><<<1, 1>>>(src, scale, dO);
+        HIP_CHECK(hipDeviceSynchronize());
+        auto     g = from_dev(dO, 4);
+        unsigned ref_lo
+            = fpsan::cast<_Float16>(fpsan::cast<float>(V8::from_fpsan_payload(byte1)) * VF{scale})
+                  .fpsan_payload();
+        unsigned ref_hi
+            = fpsan::cast<_Float16>(fpsan::cast<float>(V8::from_fpsan_payload(byte2)) * VF{scale})
+                  .fpsan_payload();
+        EXPECT_EQ(g[0], ref_lo); // lo: lane0 written
+        EXPECT_EQ(g[1], 0x5678u); // lo: lane1 preserved
+        EXPECT_EQ(g[2], 0x1234u); // hi: lane0 preserved
+        EXPECT_EQ(g[3], ref_hi); // hi: lane1 written
+        (void)hipFree(dO);
+    });
 }
 
 TEST(CvtScalef32Sr, A_FpsanUnpackMulAndLane_Fp8)
@@ -365,12 +372,14 @@ void run_b(const fpsan::detail::FpFormat& fmt)
         (void)hipFree(dO);
     }
     // ---- FPSan: byte == cast<FP8>(cast<float>(v)/scale) payload; seed opaque.
-    {
-        using VS = Value<SrcElem, Semantics::Triton, kCC>;
+    fpsan_test::for_each_fpsan_semantics([&](auto sem) {
+        constexpr Semantics S = decltype(sem)::value;
+        using VF              = Value<float, S, kCC>;
+        using VS              = Value<SrcElem, S, kCC>;
         unsigned* dO;
         HIP_CHECK(hipMalloc(&dO, N * sizeof(unsigned)));
         // A different seed must give the same answer (opaque).
-        k_b<Semantics::Triton, FP8, SrcElem, unsigned><<<1, N>>>(old, dV, 0x12345u, scale, dO);
+        k_b<S, FP8, SrcElem, unsigned><<<1, N>>>(old, dV, 0x12345u, scale, dO);
         HIP_CHECK(hipDeviceSynchronize());
         auto g = from_dev(dO, N);
         for(int l = 0; l < N; ++l)
@@ -385,7 +394,7 @@ void run_b(const fpsan::detail::FpFormat& fmt)
             EXPECT_EQ(g[l], expect) << "FPSan lane " << l;
         }
         (void)hipFree(dO);
-    }
+    });
     (void)hipFree(dV);
 }
 
@@ -509,10 +518,12 @@ void run_c(const fpsan::detail::FpFormat& fmt)
     }
     // ---- FPSan: contiguous stream of (cast<float>(v)/scale) payloads & 0x3F;
     // seed opaque.
-    k_c<Semantics::Triton, SrcElem, VEC, IsFp6><<<1, 1>>>(dIn, 0x999u, scale, dO);
-    HIP_CHECK(hipDeviceSynchronize());
-    {
-        using VS       = Value<SrcElem, Semantics::Triton, kCC>;
+    fpsan_test::for_each_fpsan_semantics([&](auto sem) {
+        constexpr Semantics S = decltype(sem)::value;
+        using VF              = Value<float, S, kCC>;
+        k_c<S, SrcElem, VEC, IsFp6><<<1, 1>>>(dIn, 0x999u, scale, dO);
+        HIP_CHECK(hipDeviceSynchronize());
+        using VS       = Value<SrcElem, S, kCC>;
         auto         g = from_dev(dO, 6);
         std::uint8_t codes[32];
         for(int i = 0; i < 32; ++i)
@@ -526,7 +537,7 @@ void run_c(const fpsan::detail::FpFormat& fmt)
         host_pack6(codes, 32, expect);
         for(int i = 0; i < 6; ++i)
             EXPECT_EQ(g[i], expect[i]) << "FPSan word " << i;
-    }
+    });
     (void)hipFree(dIn);
     (void)hipFree(dO);
 }
@@ -625,10 +636,12 @@ void run_d()
             EXPECT_EQ(g, na | (nb << 4)) << "Float a=" << a << " b=" << b;
         }
         // ---- FPSan: byte0 = (a/scale)payload | (b/scale)payload<<4; seed opaque.
-        k_d<Semantics::Triton, SrcElem, VEC><<<1, 1>>>(old, a, b, 0x777u + t, scale, dO);
-        HIP_CHECK(hipDeviceSynchronize());
-        {
-            using VS   = Value<SrcElem, Semantics::Triton, kCC>;
+        fpsan_test::for_each_fpsan_semantics([&](auto sem) {
+            constexpr Semantics S = decltype(sem)::value;
+            using VF              = Value<float, S, kCC>;
+            k_d<S, SrcElem, VEC><<<1, 1>>>(old, a, b, 0x777u + t, scale, dO);
+            HIP_CHECK(hipDeviceSynchronize());
+            using VS   = Value<SrcElem, S, kCC>;
             unsigned g = from_dev(dO, 1)[0] & 0xFF;
             unsigned na
                 = (fpsan::cast<float>(VS{static_cast<SrcElem>(a)}) / VF{scale}).fpsan_payload()
@@ -637,7 +650,7 @@ void run_d()
                 = (fpsan::cast<float>(VS{static_cast<SrcElem>(b)}) / VF{scale}).fpsan_payload()
                   & 0xF;
             EXPECT_EQ(g, na | (nb << 4)) << "FPSan a=" << a << " b=" << b;
-        }
+        });
     }
     (void)hipFree(dO);
 }

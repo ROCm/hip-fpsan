@@ -14,7 +14,7 @@
 // 64-bit index (v2i32) names, per compressed slot, which of the 4 K positions
 // in its group is live (2 bits each).
 //
-// Float mode: bit-exact pass-through to __builtin_amdgcn_swmmac_*.
+// Native mode: bit-exact pass-through to __builtin_amdgcn_swmmac_*.
 //
 // FPSan mode: wave-cooperative software dataflow in the payload ring.
 //   * A_comp[i][c] (c = compressed K 0..63) uses Swmmac16x16x128CompressedALayout

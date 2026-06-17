@@ -6,9 +6,9 @@
 // Silicon tests for the gfx12 (RDNA4) sparse WMMA wrappers in
 // fpsan/amdgcn_swmmac_gfx12.hpp. Three layers:
 //
-//   * *FloatMatchesBuiltin: the wrapper in Float mode is a bit-exact
+//   * *FloatMatchesBuiltin: the wrapper in Native mode is a bit-exact
 //     pass-through to the underlying __builtin_amdgcn_swmmac_*.
-//   * *LayoutMatchesHardware: the software dataflow in Float mode produces
+//   * *LayoutMatchesHardware: the software dataflow in Native mode produces
 //     the same D fragment as the hardware builtin, byte-for-byte. This is
 //     the load-bearing layout proof -- if A/B/D/idx-lane mapping or the
 //     sparse-K selection were off by one, this fails.
@@ -22,6 +22,7 @@
 // gfx12 architecture.
 #include "fpsan/amdgcn_swmmac_gfx12.hpp"
 #include "fpsan/fpsan.hpp"
+#include "fpsan_semantics.hpp"
 #include "test_random.hpp"
 
 #include <hip/hip_runtime.h>
@@ -88,7 +89,7 @@ __global__ void k_swmmac_f16_pair(const std::uint16_t* a_in,
     for(int s = 0; s < 8; ++s)
         raw_out[lane * 8 + s] = raw[s];
 
-    // --- via fpsan wrapper (Float mode) ---
+    // --- via fpsan wrapper (Native mode) ---
     Value<fpsan::v8h_native, Semantics::Native, kCC>         av{a};
     Value<fpsan::v16h_swmmac_native, Semantics::Native, kCC> bv{b};
     Value<fpsan::v8f_native, Semantics::Native, kCC>         cv{c};
@@ -713,12 +714,12 @@ std::vector<CScalar> sw_reference_h(const SwData& d)
 
 // FPSan-domain reference using scalar Value arithmetic. Uses the same scalar
 // types the kernel uses (AScalar/BScalar/CScalar = element types).
-template <class AScalar, class BScalar, class CScalar>
+template <Semantics S, class AScalar, class BScalar, class CScalar>
 std::vector<std::uint64_t> sw_reference_fpsan_h(const SwData& d)
 {
-    using VA = Value<AScalar, Semantics::Triton, kCC>;
-    using VB = Value<BScalar, Semantics::Triton, kCC>;
-    using VC = Value<CScalar, Semantics::Triton, kCC>;
+    using VA = Value<AScalar, S, kCC>;
+    using VB = Value<BScalar, S, kCC>;
+    using VC = Value<CScalar, S, kCC>;
     std::vector<std::uint64_t> ref(kSwM * kSwN);
     for(int m = 0; m < kSwM; ++m)
         for(int n = 0; n < kSwN; ++n)
@@ -755,6 +756,7 @@ __global__ void k_swmmac_f16_float(const float*         A,
     swmmac_h_dataflow<Semantics::Native, _Float16, _Float16, float, float>(
         A, B, C, p0, p1, idx, D, fn);
 }
+template <Semantics S>
 __global__ void k_swmmac_f16_fpsan(const float*         A,
                                    const float*         B,
                                    const float*         C,
@@ -764,10 +766,9 @@ __global__ void k_swmmac_f16_fpsan(const float*         A,
                                    std::uint32_t*       D)
 {
     auto fn = [](auto av, auto bv, auto cv, std::uint16_t i) {
-        return fpsan::amdgcn_swmmac_f32_16x16x32_f16_w32<Semantics::Triton, kCC>(av, bv, cv, i);
+        return fpsan::amdgcn_swmmac_f32_16x16x32_f16_w32<S, kCC>(av, bv, cv, i);
     };
-    swmmac_h_dataflow<Semantics::Triton, _Float16, _Float16, float, std::uint32_t>(
-        A, B, C, p0, p1, idx, D, fn);
+    swmmac_h_dataflow<S, _Float16, _Float16, float, std::uint32_t>(A, B, C, p0, p1, idx, D, fn);
 }
 
 TEST(SwmmacGfx12, F32_F16_LayoutMatchesHardware)
@@ -800,27 +801,30 @@ TEST(SwmmacGfx12, F32_F16_FpsanMatchesScalarReference)
 {
     if(!have_device())
         GTEST_SKIP() << "no HIP device";
-    SwData                     d   = make_sw_data(0x100, encode_idx_h);
-    std::vector<std::uint64_t> ref = sw_reference_fpsan_h<_Float16, _Float16, float>(d);
-    float *                    dA = to_dev(d.A), *dB = to_dev(d.B), *dC = to_dev(d.C);
-    int *                      dp0 = to_dev(d.p0), *dp1 = to_dev(d.p1);
-    std::uint16_t*             dI = to_dev(d.idx);
-    std::uint32_t*             dD = nullptr;
-    HIP_CHECK(hipMalloc(&dD, kSwM * kSwN * sizeof(std::uint32_t)));
-    k_swmmac_f16_fpsan<<<1, WAVE>>>(dA, dB, dC, dp0, dp1, dI, dD);
-    HIP_CHECK(hipDeviceSynchronize());
-    std::vector<std::uint32_t> got(kSwM * kSwN);
-    HIP_CHECK(
-        hipMemcpy(got.data(), dD, kSwM * kSwN * sizeof(std::uint32_t), hipMemcpyDeviceToHost));
-    for(int t = 0; t < kSwM * kSwN; ++t)
-        EXPECT_EQ(static_cast<std::uint64_t>(got[t]), ref[t]) << "at " << t;
+    SwData         d  = make_sw_data(0x100, encode_idx_h);
+    float *        dA = to_dev(d.A), *dB = to_dev(d.B), *dC = to_dev(d.C);
+    int *          dp0 = to_dev(d.p0), *dp1 = to_dev(d.p1);
+    std::uint16_t* dI = to_dev(d.idx);
+    fpsan_test::for_each_fpsan_semantics([&](auto sem) {
+        constexpr Semantics        S   = decltype(sem)::value;
+        std::vector<std::uint64_t> ref = sw_reference_fpsan_h<S, _Float16, _Float16, float>(d);
+        std::uint32_t*             dD  = nullptr;
+        HIP_CHECK(hipMalloc(&dD, kSwM * kSwN * sizeof(std::uint32_t)));
+        k_swmmac_f16_fpsan<S><<<1, WAVE>>>(dA, dB, dC, dp0, dp1, dI, dD);
+        HIP_CHECK(hipDeviceSynchronize());
+        std::vector<std::uint32_t> got(kSwM * kSwN);
+        HIP_CHECK(
+            hipMemcpy(got.data(), dD, kSwM * kSwN * sizeof(std::uint32_t), hipMemcpyDeviceToHost));
+        for(int t = 0; t < kSwM * kSwN; ++t)
+            EXPECT_EQ(static_cast<std::uint64_t>(got[t]), ref[t]) << "at " << t;
+        (void)hipFree(dD);
+    });
     (void)hipFree(dA);
     (void)hipFree(dB);
     (void)hipFree(dC);
     (void)hipFree(dp0);
     (void)hipFree(dp1);
     (void)hipFree(dI);
-    (void)hipFree(dD);
 }
 
 // ---- bf16 layout + payload --------------------------------------------------
@@ -837,6 +841,7 @@ __global__ void k_swmmac_bf16_float(const float*         A,
     };
     swmmac_h_dataflow<Semantics::Native, __bf16, __bf16, float, float>(A, B, C, p0, p1, idx, D, fn);
 }
+template <Semantics S>
 __global__ void k_swmmac_bf16_fpsan(const float*         A,
                                     const float*         B,
                                     const float*         C,
@@ -846,10 +851,9 @@ __global__ void k_swmmac_bf16_fpsan(const float*         A,
                                     std::uint32_t*       D)
 {
     auto fn = [](auto av, auto bv, auto cv, std::uint16_t i) {
-        return fpsan::amdgcn_swmmac_f32_16x16x32_bf16_w32<Semantics::Triton, kCC>(av, bv, cv, i);
+        return fpsan::amdgcn_swmmac_f32_16x16x32_bf16_w32<S, kCC>(av, bv, cv, i);
     };
-    swmmac_h_dataflow<Semantics::Triton, __bf16, __bf16, float, std::uint32_t>(
-        A, B, C, p0, p1, idx, D, fn);
+    swmmac_h_dataflow<S, __bf16, __bf16, float, std::uint32_t>(A, B, C, p0, p1, idx, D, fn);
 }
 
 TEST(SwmmacGfx12, F32_BF16_LayoutMatchesHardware)
@@ -882,27 +886,30 @@ TEST(SwmmacGfx12, F32_BF16_FpsanMatchesScalarReference)
 {
     if(!have_device())
         GTEST_SKIP() << "no HIP device";
-    SwData                     d   = make_sw_data(0x200, encode_idx_h);
-    std::vector<std::uint64_t> ref = sw_reference_fpsan_h<__bf16, __bf16, float>(d);
-    float *                    dA = to_dev(d.A), *dB = to_dev(d.B), *dC = to_dev(d.C);
-    int *                      dp0 = to_dev(d.p0), *dp1 = to_dev(d.p1);
-    std::uint16_t*             dI = to_dev(d.idx);
-    std::uint32_t*             dD = nullptr;
-    HIP_CHECK(hipMalloc(&dD, kSwM * kSwN * sizeof(std::uint32_t)));
-    k_swmmac_bf16_fpsan<<<1, WAVE>>>(dA, dB, dC, dp0, dp1, dI, dD);
-    HIP_CHECK(hipDeviceSynchronize());
-    std::vector<std::uint32_t> got(kSwM * kSwN);
-    HIP_CHECK(
-        hipMemcpy(got.data(), dD, kSwM * kSwN * sizeof(std::uint32_t), hipMemcpyDeviceToHost));
-    for(int t = 0; t < kSwM * kSwN; ++t)
-        EXPECT_EQ(static_cast<std::uint64_t>(got[t]), ref[t]) << "at " << t;
+    SwData         d  = make_sw_data(0x200, encode_idx_h);
+    float *        dA = to_dev(d.A), *dB = to_dev(d.B), *dC = to_dev(d.C);
+    int *          dp0 = to_dev(d.p0), *dp1 = to_dev(d.p1);
+    std::uint16_t* dI = to_dev(d.idx);
+    fpsan_test::for_each_fpsan_semantics([&](auto sem) {
+        constexpr Semantics        S   = decltype(sem)::value;
+        std::vector<std::uint64_t> ref = sw_reference_fpsan_h<S, __bf16, __bf16, float>(d);
+        std::uint32_t*             dD  = nullptr;
+        HIP_CHECK(hipMalloc(&dD, kSwM * kSwN * sizeof(std::uint32_t)));
+        k_swmmac_bf16_fpsan<S><<<1, WAVE>>>(dA, dB, dC, dp0, dp1, dI, dD);
+        HIP_CHECK(hipDeviceSynchronize());
+        std::vector<std::uint32_t> got(kSwM * kSwN);
+        HIP_CHECK(
+            hipMemcpy(got.data(), dD, kSwM * kSwN * sizeof(std::uint32_t), hipMemcpyDeviceToHost));
+        for(int t = 0; t < kSwM * kSwN; ++t)
+            EXPECT_EQ(static_cast<std::uint64_t>(got[t]), ref[t]) << "at " << t;
+        (void)hipFree(dD);
+    });
     (void)hipFree(dA);
     (void)hipFree(dB);
     (void)hipFree(dC);
     (void)hipFree(dp0);
     (void)hipFree(dp1);
     (void)hipFree(dI);
-    (void)hipFree(dD);
 }
 
 // ---- f16 -> f16 layout + payload --------------------------------------------
@@ -920,6 +927,7 @@ __global__ void k_swmmac_f16h_float(const float*         A,
     swmmac_h_dataflow<Semantics::Native, _Float16, _Float16, _Float16, _Float16>(
         A, B, C, p0, p1, idx, D, fn);
 }
+template <Semantics S>
 __global__ void k_swmmac_f16h_fpsan(const float*         A,
                                     const float*         B,
                                     const float*         C,
@@ -929,10 +937,9 @@ __global__ void k_swmmac_f16h_fpsan(const float*         A,
                                     std::uint16_t*       D)
 {
     auto fn = [](auto av, auto bv, auto cv, std::uint16_t i) {
-        return fpsan::amdgcn_swmmac_f16_16x16x32_f16_w32<Semantics::Triton, kCC>(av, bv, cv, i);
+        return fpsan::amdgcn_swmmac_f16_16x16x32_f16_w32<S, kCC>(av, bv, cv, i);
     };
-    swmmac_h_dataflow<Semantics::Triton, _Float16, _Float16, _Float16, std::uint16_t>(
-        A, B, C, p0, p1, idx, D, fn);
+    swmmac_h_dataflow<S, _Float16, _Float16, _Float16, std::uint16_t>(A, B, C, p0, p1, idx, D, fn);
 }
 
 TEST(SwmmacGfx12, F16_F16_LayoutMatchesHardware)
@@ -965,27 +972,30 @@ TEST(SwmmacGfx12, F16_F16_FpsanMatchesScalarReference)
 {
     if(!have_device())
         GTEST_SKIP() << "no HIP device";
-    SwData                     d   = make_sw_data(0x300, encode_idx_h);
-    std::vector<std::uint64_t> ref = sw_reference_fpsan_h<_Float16, _Float16, _Float16>(d);
-    float *                    dA = to_dev(d.A), *dB = to_dev(d.B), *dC = to_dev(d.C);
-    int *                      dp0 = to_dev(d.p0), *dp1 = to_dev(d.p1);
-    std::uint16_t*             dI = to_dev(d.idx);
-    std::uint16_t*             dD = nullptr;
-    HIP_CHECK(hipMalloc(&dD, kSwM * kSwN * sizeof(std::uint16_t)));
-    k_swmmac_f16h_fpsan<<<1, WAVE>>>(dA, dB, dC, dp0, dp1, dI, dD);
-    HIP_CHECK(hipDeviceSynchronize());
-    std::vector<std::uint16_t> got(kSwM * kSwN);
-    HIP_CHECK(
-        hipMemcpy(got.data(), dD, kSwM * kSwN * sizeof(std::uint16_t), hipMemcpyDeviceToHost));
-    for(int t = 0; t < kSwM * kSwN; ++t)
-        EXPECT_EQ(static_cast<std::uint64_t>(got[t]), ref[t]) << "at " << t;
+    SwData         d  = make_sw_data(0x300, encode_idx_h);
+    float *        dA = to_dev(d.A), *dB = to_dev(d.B), *dC = to_dev(d.C);
+    int *          dp0 = to_dev(d.p0), *dp1 = to_dev(d.p1);
+    std::uint16_t* dI = to_dev(d.idx);
+    fpsan_test::for_each_fpsan_semantics([&](auto sem) {
+        constexpr Semantics        S   = decltype(sem)::value;
+        std::vector<std::uint64_t> ref = sw_reference_fpsan_h<S, _Float16, _Float16, _Float16>(d);
+        std::uint16_t*             dD  = nullptr;
+        HIP_CHECK(hipMalloc(&dD, kSwM * kSwN * sizeof(std::uint16_t)));
+        k_swmmac_f16h_fpsan<S><<<1, WAVE>>>(dA, dB, dC, dp0, dp1, dI, dD);
+        HIP_CHECK(hipDeviceSynchronize());
+        std::vector<std::uint16_t> got(kSwM * kSwN);
+        HIP_CHECK(
+            hipMemcpy(got.data(), dD, kSwM * kSwN * sizeof(std::uint16_t), hipMemcpyDeviceToHost));
+        for(int t = 0; t < kSwM * kSwN; ++t)
+            EXPECT_EQ(static_cast<std::uint64_t>(got[t]), ref[t]) << "at " << t;
+        (void)hipFree(dD);
+    });
     (void)hipFree(dA);
     (void)hipFree(dB);
     (void)hipFree(dC);
     (void)hipFree(dp0);
     (void)hipFree(dp1);
     (void)hipFree(dI);
-    (void)hipFree(dD);
 }
 
 // ============================================================================
@@ -1080,12 +1090,12 @@ std::vector<float> sw_reference_fp8(const SwData& d)
     return ref;
 }
 
-template <class AScalar, class BScalar>
+template <Semantics S, class AScalar, class BScalar>
 std::vector<std::uint32_t> sw_reference_fp8_fpsan(const SwData& d)
 {
-    using VA = Value<AScalar, Semantics::Triton, kCC>;
-    using VB = Value<BScalar, Semantics::Triton, kCC>;
-    using VF = Value<float, Semantics::Triton, kCC>;
+    using VA = Value<AScalar, S, kCC>;
+    using VB = Value<BScalar, S, kCC>;
+    using VF = Value<float, S, kCC>;
     std::vector<std::uint32_t> ref(kSwM * kSwN);
     for(int m = 0; m < kSwM; ++m)
         for(int n = 0; n < kSwN; ++n)
@@ -1108,8 +1118,13 @@ std::vector<std::uint32_t> sw_reference_fp8_fpsan(const SwData& d)
 }
 
 // Generic fp8/bf8 layout + fpsan test runner.
-template <class AScalar, class BScalar, class WrapFloatFn, class WrapFpsanFn>
-void run_fp8_layout_and_fpsan(std::uint32_t seed, WrapFloatFn wf, WrapFpsanFn wp)
+//
+// `wf` is the Native-semantics wrapper lambda (the hardware oracle, run once).
+// `make_wp` is a generic functor that, given a std::integral_constant<Semantics,
+// S>, returns the FPSan wrapper lambda specialized to that semantics; it is
+// invoked once per FPSan-family variant.
+template <class AScalar, class BScalar, class WrapFloatFn, class MakeFpsanFn>
+void run_fp8_layout_and_fpsan(std::uint32_t seed, WrapFloatFn wf, MakeFpsanFn make_wp)
 {
     if(!have_device())
         GTEST_SKIP() << "no HIP device";
@@ -1129,18 +1144,22 @@ void run_fp8_layout_and_fpsan(std::uint32_t seed, WrapFloatFn wf, WrapFpsanFn wp
         EXPECT_EQ(bits_of(got[t]), bits_of(ref[t])) << "Layout at " << t;
     (void)hipFree(dDf);
 
-    std::vector<std::uint32_t> ref_p = sw_reference_fp8_fpsan<AScalar, BScalar>(d);
-    std::uint32_t*             dDp   = nullptr;
-    HIP_CHECK(hipMalloc(&dDp, kSwM * kSwN * sizeof(std::uint32_t)));
-    k_swmmac_fp8_kernel<Semantics::Triton, AScalar, BScalar, std::uint32_t>
-        <<<1, WAVE>>>(dA, dB, dC, dp0, dp1, dI, dDp, wp);
-    HIP_CHECK(hipDeviceSynchronize());
-    std::vector<std::uint32_t> got_p(kSwM * kSwN);
-    HIP_CHECK(
-        hipMemcpy(got_p.data(), dDp, kSwM * kSwN * sizeof(std::uint32_t), hipMemcpyDeviceToHost));
-    for(int t = 0; t < kSwM * kSwN; ++t)
-        EXPECT_EQ(got_p[t], ref_p[t]) << "FPSan at " << t;
-    (void)hipFree(dDp);
+    fpsan_test::for_each_fpsan_semantics([&](auto sem) {
+        constexpr Semantics        S     = decltype(sem)::value;
+        auto                       wp    = make_wp(sem);
+        std::vector<std::uint32_t> ref_p = sw_reference_fp8_fpsan<S, AScalar, BScalar>(d);
+        std::uint32_t*             dDp   = nullptr;
+        HIP_CHECK(hipMalloc(&dDp, kSwM * kSwN * sizeof(std::uint32_t)));
+        k_swmmac_fp8_kernel<S, AScalar, BScalar, std::uint32_t>
+            <<<1, WAVE>>>(dA, dB, dC, dp0, dp1, dI, dDp, wp);
+        HIP_CHECK(hipDeviceSynchronize());
+        std::vector<std::uint32_t> got_p(kSwM * kSwN);
+        HIP_CHECK(hipMemcpy(
+            got_p.data(), dDp, kSwM * kSwN * sizeof(std::uint32_t), hipMemcpyDeviceToHost));
+        for(int t = 0; t < kSwM * kSwN; ++t)
+            EXPECT_EQ(got_p[t], ref_p[t]) << "FPSan at " << t;
+        (void)hipFree(dDp);
+    });
 
     (void)hipFree(dA);
     (void)hipFree(dB);
@@ -1155,38 +1174,50 @@ TEST(SwmmacGfx12, F32_FP8_FP8_LayoutAndFpsan)
     auto wf = [](auto av, auto bv, auto cv, std::uint16_t i) {
         return fpsan::amdgcn_swmmac_f32_16x16x32_fp8_fp8_w32<Semantics::Native, kCC>(av, bv, cv, i);
     };
-    auto wp = [](auto av, auto bv, auto cv, std::uint16_t i) {
-        return fpsan::amdgcn_swmmac_f32_16x16x32_fp8_fp8_w32<Semantics::Triton, kCC>(av, bv, cv, i);
+    auto make_wp = [](auto sem) {
+        constexpr Semantics S = decltype(sem)::value;
+        return [](auto av, auto bv, auto cv, std::uint16_t i) {
+            return fpsan::amdgcn_swmmac_f32_16x16x32_fp8_fp8_w32<S, kCC>(av, bv, cv, i);
+        };
     };
-    run_fp8_layout_and_fpsan<fpsan::fp8_e4m3, fpsan::fp8_e4m3>(0x400, wf, wp);
+    run_fp8_layout_and_fpsan<fpsan::fp8_e4m3, fpsan::fp8_e4m3>(0x400, wf, make_wp);
 }
 TEST(SwmmacGfx12, F32_FP8_BF8_LayoutAndFpsan)
 {
     auto wf = [](auto av, auto bv, auto cv, std::uint16_t i) {
         return fpsan::amdgcn_swmmac_f32_16x16x32_fp8_bf8_w32<Semantics::Native, kCC>(av, bv, cv, i);
     };
-    auto wp = [](auto av, auto bv, auto cv, std::uint16_t i) {
-        return fpsan::amdgcn_swmmac_f32_16x16x32_fp8_bf8_w32<Semantics::Triton, kCC>(av, bv, cv, i);
+    auto make_wp = [](auto sem) {
+        constexpr Semantics S = decltype(sem)::value;
+        return [](auto av, auto bv, auto cv, std::uint16_t i) {
+            return fpsan::amdgcn_swmmac_f32_16x16x32_fp8_bf8_w32<S, kCC>(av, bv, cv, i);
+        };
     };
-    run_fp8_layout_and_fpsan<fpsan::fp8_e4m3, fpsan::fp8_e5m2>(0x500, wf, wp);
+    run_fp8_layout_and_fpsan<fpsan::fp8_e4m3, fpsan::fp8_e5m2>(0x500, wf, make_wp);
 }
 TEST(SwmmacGfx12, F32_BF8_FP8_LayoutAndFpsan)
 {
     auto wf = [](auto av, auto bv, auto cv, std::uint16_t i) {
         return fpsan::amdgcn_swmmac_f32_16x16x32_bf8_fp8_w32<Semantics::Native, kCC>(av, bv, cv, i);
     };
-    auto wp = [](auto av, auto bv, auto cv, std::uint16_t i) {
-        return fpsan::amdgcn_swmmac_f32_16x16x32_bf8_fp8_w32<Semantics::Triton, kCC>(av, bv, cv, i);
+    auto make_wp = [](auto sem) {
+        constexpr Semantics S = decltype(sem)::value;
+        return [](auto av, auto bv, auto cv, std::uint16_t i) {
+            return fpsan::amdgcn_swmmac_f32_16x16x32_bf8_fp8_w32<S, kCC>(av, bv, cv, i);
+        };
     };
-    run_fp8_layout_and_fpsan<fpsan::fp8_e5m2, fpsan::fp8_e4m3>(0x600, wf, wp);
+    run_fp8_layout_and_fpsan<fpsan::fp8_e5m2, fpsan::fp8_e4m3>(0x600, wf, make_wp);
 }
 TEST(SwmmacGfx12, F32_BF8_BF8_LayoutAndFpsan)
 {
     auto wf = [](auto av, auto bv, auto cv, std::uint16_t i) {
         return fpsan::amdgcn_swmmac_f32_16x16x32_bf8_bf8_w32<Semantics::Native, kCC>(av, bv, cv, i);
     };
-    auto wp = [](auto av, auto bv, auto cv, std::uint16_t i) {
-        return fpsan::amdgcn_swmmac_f32_16x16x32_bf8_bf8_w32<Semantics::Triton, kCC>(av, bv, cv, i);
+    auto make_wp = [](auto sem) {
+        constexpr Semantics S = decltype(sem)::value;
+        return [](auto av, auto bv, auto cv, std::uint16_t i) {
+            return fpsan::amdgcn_swmmac_f32_16x16x32_bf8_bf8_w32<S, kCC>(av, bv, cv, i);
+        };
     };
-    run_fp8_layout_and_fpsan<fpsan::fp8_e5m2, fpsan::fp8_e5m2>(0x700, wf, wp);
+    run_fp8_layout_and_fpsan<fpsan::fp8_e5m2, fpsan::fp8_e5m2>(0x700, wf, make_wp);
 }

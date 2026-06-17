@@ -6,7 +6,7 @@
 // FPSan wrappers for AMDGPU math intrinsics (rcp, rsq, sqrt, sin, cos, log,
 // exp2, fract, tanh, fmed3, ...). Opt-in (not pulled by <fpsan/fpsan.hpp>).
 //
-// Float mode forwards to the matching __builtin_amdgcn_*. FPSan mode dispatches
+// Native mode forwards to the matching __builtin_amdgcn_*. FPSan mode dispatches
 // to the corresponding fpsan:: tagged op in math.hpp -- deterministic, op-
 // distinct, payload-domain math that captures "I called this transcendental"
 // without trying to actually evaluate it in the payload ring.
@@ -45,7 +45,7 @@
 namespace fpsan
 {
 
-// Define one unary FPSan wrapper for an AMD intrinsic. Float mode calls the
+// Define one unary FPSan wrapper for an AMD intrinsic. Native mode calls the
 // builtin; FPSan mode delegates to the named fpsan:: tagged op.
 #define FPSAN_DEFINE_AMDGCN_UNARY(name, type, FPSAN_OP, BUILTIN)                      \
     template <Semantics S = Semantics::Native, Conversions C = Conversions::Explicit> \
@@ -68,6 +68,31 @@ namespace fpsan
             return fpsan::FPSAN_OP(a, b, c);                                             \
     }
 
+// Like the above, but for an intrinsic with NO modeled identity (a new/opaque
+// op). Native mode calls the builtin; FPSan/algebraic mode tags it generically by
+// its symbol name via the Triton-parity extern fallback (fpsan::extern_tagged),
+// so adding such an intrinsic needs no bespoke payload semantics -- this one
+// line is the whole integration, and it is independent of the gfx arch.
+#define FPSAN_DEFINE_AMDGCN_UNARY_EXTERN(name, type, BUILTIN)                         \
+    template <Semantics S = Semantics::Native, Conversions C = Conversions::Explicit> \
+    FPSAN_DEVICE Value<type, S, C> name(Value<type, S, C> v)                          \
+    {                                                                                 \
+        if constexpr(S == Semantics::Native)                                          \
+            return Value<type, S, C>(BUILTIN(v.to_float()));                          \
+        else                                                                          \
+            return fpsan::extern_tagged(fpsan::detail::stable_string_hash(#name), v); \
+    }
+
+#define FPSAN_DEFINE_AMDGCN_BINARY_EXTERN(name, type, BUILTIN)                           \
+    template <Semantics S = Semantics::Native, Conversions C = Conversions::Explicit>    \
+    FPSAN_DEVICE Value<type, S, C> name(Value<type, S, C> a, Value<type, S, C> b)        \
+    {                                                                                    \
+        if constexpr(S == Semantics::Native)                                             \
+            return Value<type, S, C>(BUILTIN(a.to_float(), b.to_float()));               \
+        else                                                                             \
+            return fpsan::extern_tagged(fpsan::detail::stable_string_hash(#name), a, b); \
+    }
+
     // ---- reciprocal ----
     FPSAN_DEFINE_AMDGCN_UNARY(amdgcn_rcpf, float, rcp, __builtin_amdgcn_rcpf)
     FPSAN_DEFINE_AMDGCN_UNARY(amdgcn_rcp, double, rcp, __builtin_amdgcn_rcp)
@@ -84,7 +109,7 @@ namespace fpsan
     FPSAN_DEFINE_AMDGCN_UNARY(amdgcn_rsqh, _Float16, rsqrt, __builtin_amdgcn_rsqh)
 
     // rsq_clamp: clamp variant; we model it as plain rsqrt in FPSan (no
-    // distinct payload semantics in the existing tagged set).
+    // distinct fpsan semantics in the existing tagged set).
     FPSAN_DEFINE_AMDGCN_UNARY(amdgcn_rsq_clampf, float, rsqrt, __builtin_amdgcn_rsq_clampf)
     FPSAN_DEFINE_AMDGCN_UNARY(amdgcn_rsq_clamp, double, rsqrt, __builtin_amdgcn_rsq_clamp)
 
@@ -126,7 +151,7 @@ namespace fpsan
     // ---- bf16 transcendentals (gfx1250 "bf16-trans-insts") ----
     // gfx1250 adds native bf16 rcp / rsq / sqrt / sin / cos / exp2 / log / tanh
     // (each is __bf16(__bf16)). These features are exclusive to gfx1250: RDNA4
-    // and CDNA have no bf16 transcendental unit. Float mode calls the builtin;
+    // and CDNA have no bf16 transcendental unit. Native mode calls the builtin;
     // FPSan mode routes to the SAME tagged op as the f16/f32 variants -- in the
     // FPSan ring it is the op identity (sin vs cos vs rsqrt ...), not the element
     // type, that determines the payload, so the bf16 wrapper is just another
@@ -212,7 +237,7 @@ namespace fpsan
 #endif
 
 // fdot2_bf16_bf16: a, b are v2bf; acc is __bf16.  Clang exposes the
-// BF16-valued builtin through short/v2short ABI types, so Float mode bit-casts
+// BF16-valued builtin through short/v2short ABI types, so Native mode bit-casts
 // at the boundary and the public wrapper stays typed as __bf16.
 #if !defined(__HIP_DEVICE_COMPILE__) || __has_builtin(__builtin_amdgcn_fdot2_bf16_bf16)
     template <Semantics S = Semantics::Native, Conversions C = Conversions::Explicit>
@@ -339,7 +364,7 @@ namespace fpsan
 #undef FPSAN_DEFINE_AMDGCN_DOT4_FP8
 
 // =============================================================================
-// ldexp: v * 2^n (n is an integer exponent, not a Value). Float mode forwards
+// ldexp: v * 2^n (n is an integer exponent, not a Value). Native mode forwards
 // to the builtin. FPSan mode models it as a payload-ring multiply by the
 // constant 2^n -- the SAME "scale by a power of two" operation the MX scaled
 // cvt wrappers use (`v * scale`). This is the natural and consistent FPSan

@@ -57,21 +57,33 @@ namespace fpsan
         {
             static_assert(always_false<T>,
                           "fpsan: unsupported floating-point type. Supported: float, "
-                          "double, _Float16, __bf16 (the latter two where available).");
+                          "double, _Float16, __bf16, and the fpsan FP8 scalar "
+                          "types where available.");
         };
 
-#define FPSAN_DEFINE_FP_TRAITS(T, MANT, EXP, BIAS)                                               \
+#define FPSAN_DEFINE_FP_TRAITS_FORMAT(                                                           \
+    T, MANT, EXP, BIAS, CAST_TAG, HAS_INFINITY, HAS_NAN, NAN_AS_NEG_ZERO)                        \
     template <>                                                                                  \
     struct fp_traits<T>                                                                          \
     {                                                                                            \
-        using value_type                        = T;                                             \
-        using bits_type                         = typename uint_by_size<sizeof(T)>::type;        \
-        static constexpr unsigned bit_width     = sizeof(T) * 8;                                 \
-        static constexpr unsigned mantissa_bits = (MANT);                                        \
-        static constexpr unsigned exponent_bits = (EXP);                                         \
-        static constexpr int      bias          = (BIAS);                                        \
+        using value_type                          = T;                                           \
+        using bits_type                           = typename uint_by_size<sizeof(T)>::type;      \
+        static constexpr unsigned bit_width       = sizeof(T) * 8;                               \
+        static constexpr unsigned mantissa_bits   = (MANT);                                      \
+        static constexpr unsigned exponent_bits   = (EXP);                                       \
+        static constexpr int      bias            = (BIAS);                                      \
+        static constexpr unsigned cast_tag        = (CAST_TAG);                                  \
+        static constexpr bool     has_infinity    = (HAS_INFINITY);                              \
+        static constexpr bool     has_nan         = (HAS_NAN);                                   \
+        static constexpr bool     nan_as_neg_zero = (NAN_AS_NEG_ZERO);                           \
         static_assert(1 + (EXP) + (MANT) == bit_width, "fpsan: inconsistent fp_traits for " #T); \
     }
+
+#define FPSAN_DEFINE_FP_TRAITS_WITH_CAST_TAG(T, MANT, EXP, BIAS, CAST_TAG) \
+    FPSAN_DEFINE_FP_TRAITS_FORMAT(T, MANT, EXP, BIAS, CAST_TAG, true, true, false)
+
+#define FPSAN_DEFINE_FP_TRAITS(T, MANT, EXP, BIAS) \
+    FPSAN_DEFINE_FP_TRAITS_WITH_CAST_TAG(T, MANT, EXP, BIAS, 0)
 
         FPSAN_DEFINE_FP_TRAITS(float, 23, 8, 127);
         FPSAN_DEFINE_FP_TRAITS(double, 52, 11, 1023);
@@ -118,7 +130,7 @@ namespace fpsan
         FPSAN_DEFINE_FP_TRAITS(_Float16, 10, 5, 15);
 #endif
 #if FPSAN_HAS_BF16
-        FPSAN_DEFINE_FP_TRAITS(__bf16, 7, 8, 127);
+        FPSAN_DEFINE_FP_TRAITS_WITH_CAST_TAG(__bf16, 7, 8, 127, 1);
 #endif
 
         // True when fp_traits<T> is a usable (defined) specialization.
@@ -151,8 +163,15 @@ namespace fpsan
             = std::remove_cv_t<std::remove_reference_t<decltype(std::declval<T&>()[0])>>;
 
         // Build an unsigned vector type with `Bytes` total size and the given lane.
+        // The helper struct keeps GCC from warning about applying vector_size to a
+        // dependent type in an alias declaration while preserving Clang's type.
         template <class LaneBits, unsigned long Bytes>
-        using uint_vector_t = LaneBits __attribute__((__vector_size__(Bytes)));
+        struct uint_vector
+        {
+            typedef LaneBits type __attribute__((__vector_size__(Bytes)));
+        };
+        template <class LaneBits, unsigned long Bytes>
+        using uint_vector_t = typename uint_vector<LaneBits, Bytes>::type;
 
         // Lane (scalar) type of a possibly-vector bits type.
         template <class B, bool = is_clang_vector_v<B>>

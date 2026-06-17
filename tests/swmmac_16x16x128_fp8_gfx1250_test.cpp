@@ -22,6 +22,7 @@
 #include "fpsan/amdgcn_swmmac_gfx1250.hpp"
 #include "fpsan/fpsan.hpp"
 
+#include "fpsan_semantics.hpp"
 #include "hip_test_utils.hpp"
 #include "test_random.hpp"
 
@@ -148,22 +149,22 @@ __global__ void k_float_dataflow(const typename Harness<Traits>::AElem* A,
         D[(e + 8 * (lane >> 4)) * N + (lane & 15)] = d.get(e).to_float();
 }
 
-template <class Traits>
+template <class Traits, Semantics S>
 __global__ void k_fpsan(const typename Harness<Traits>::AElem* A,
                         const typename Harness<Traits>::BElem* B,
                         const typename Harness<Traits>::CElem* C,
                         const int*                             IDX,
                         typename Harness<Traits>::CBits*       Dpay)
 {
-    int                                                           lane = threadIdx.x;
-    Value<typename Harness<Traits>::AVec, Semantics::Triton, kCC> a;
-    Value<typename Harness<Traits>::BVec, Semantics::Triton, kCC> b;
-    Value<typename Harness<Traits>::CVec, Semantics::Triton, kCC> c;
-    load_frags<Traits, Semantics::Triton>(A, B, C, lane, a, b, c);
+    int                                           lane = threadIdx.x;
+    Value<typename Harness<Traits>::AVec, S, kCC> a;
+    Value<typename Harness<Traits>::BVec, S, kCC> b;
+    Value<typename Harness<Traits>::CVec, S, kCC> c;
+    load_frags<Traits, S>(A, B, C, lane, a, b, c);
     v2i32_native idx;
     idx[0] = IDX[lane * 2 + 0];
     idx[1] = IDX[lane * 2 + 1];
-    auto d = Traits::template call<Semantics::Triton, kCC>(a, b, c, idx);
+    auto d = Traits::template call<S, kCC>(a, b, c, idx);
     for(int e = 0; e < 8; ++e)
         Dpay[(e + 8 * (lane >> 4)) * N + (lane & 15)] = d.get(e).fpsan_payload();
 }
@@ -259,7 +260,7 @@ void run_layout_matches_hardware()
     (void)hipFree(dOurs);
 }
 
-template <class Traits>
+template <class Traits, Semantics S>
 void run_fpsan_matches_scalar_reference()
 {
     using AE    = typename Harness<Traits>::AElem;
@@ -271,9 +272,9 @@ void run_fpsan_matches_scalar_reference()
         GTEST_SKIP() << "no HIP device";
     Mats<Traits> m = make_inputs<Traits>();
 
-    using VA = Value<AE, Semantics::Triton, kCC>;
-    using VB = Value<BE, Semantics::Triton, kCC>;
-    using VC = Value<CE, Semantics::Triton, kCC>;
+    using VA = Value<AE, S, kCC>;
+    using VB = Value<BE, S, kCC>;
+    using VC = Value<CE, S, kCC>;
     std::vector<CBits> ref(M * N);
     for(int i = 0; i < M; ++i)
         for(int j = 0; j < N; ++j)
@@ -294,7 +295,7 @@ void run_fpsan_matches_scalar_reference()
     int*   dI = to_dev(m.IDX);
     CBits* dD;
     HIP_CHECK(hipMalloc(&dD, M * N * sizeof(CBits)));
-    k_fpsan<Traits><<<1, 32>>>(dA, dB, dC, dI, dD);
+    k_fpsan<Traits, S><<<1, 32>>>(dA, dB, dC, dI, dD);
     HIP_CHECK(hipDeviceSynchronize());
     std::vector<CBits> got(M * N);
     HIP_CHECK(hipMemcpy(got.data(), dD, M * N * sizeof(CBits), hipMemcpyDeviceToHost));
@@ -307,28 +308,29 @@ void run_fpsan_matches_scalar_reference()
     (void)hipFree(dD);
 }
 
-#define SWMMAC_TRAITS(NAME, AVEC, BVEC, CVEC, WRAP)                       \
-    struct NAME                                                           \
-    {                                                                     \
-        using AVec = AVEC;                                                \
-        using BVec = BVEC;                                                \
-        using CVec = CVEC;                                                \
-        template <Semantics S, Conversions C>                             \
-        __device__ static Value<CVec, S, C> call(Value<AVec, S, C>   a,   \
-                                                 Value<BVec, S, C>   b,   \
-                                                 Value<CVec, S, C>   c,   \
-                                                 fpsan::v2i32_native idx) \
-        {                                                                 \
-            return fpsan::WRAP(a, b, c, idx);                             \
-        }                                                                 \
-    };                                                                    \
-    TEST(NAME, LayoutMatchesHardware)                                     \
-    {                                                                     \
-        run_layout_matches_hardware<NAME>();                              \
-    }                                                                     \
-    TEST(NAME, FpsanMatchesScalarReference)                               \
-    {                                                                     \
-        run_fpsan_matches_scalar_reference<NAME>();                       \
+#define SWMMAC_TRAITS(NAME, AVEC, BVEC, CVEC, WRAP)                                              \
+    struct NAME                                                                                  \
+    {                                                                                            \
+        using AVec = AVEC;                                                                       \
+        using BVec = BVEC;                                                                       \
+        using CVec = CVEC;                                                                       \
+        template <Semantics S, Conversions C>                                                    \
+        __device__ static Value<CVec, S, C> call(Value<AVec, S, C>   a,                          \
+                                                 Value<BVec, S, C>   b,                          \
+                                                 Value<CVec, S, C>   c,                          \
+                                                 fpsan::v2i32_native idx)                        \
+        {                                                                                        \
+            return fpsan::WRAP(a, b, c, idx);                                                    \
+        }                                                                                        \
+    };                                                                                           \
+    TEST(NAME, LayoutMatchesHardware)                                                            \
+    {                                                                                            \
+        run_layout_matches_hardware<NAME>();                                                     \
+    }                                                                                            \
+    TEST(NAME, FpsanMatchesScalarReference)                                                      \
+    {                                                                                            \
+        fpsan_test::for_each_fpsan_semantics(                                                    \
+            [](auto sem) { run_fpsan_matches_scalar_reference<NAME, decltype(sem)::value>(); }); \
     }
 
 #if !defined(__HIP_DEVICE_COMPILE__) || __has_builtin(__builtin_amdgcn_swmmac_f32_16x16x128_fp8_fp8)

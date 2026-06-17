@@ -20,6 +20,7 @@
 #include "fpsan/amdgcn_matrix.hpp"
 #include "fpsan/fpsan.hpp"
 
+#include "fpsan_semantics.hpp"
 #include "hip_test_utils.hpp"
 #include "test_random.hpp"
 
@@ -131,18 +132,18 @@ __global__ void k_float_dataflow(const typename Harness<Traits>::AElem* A,
         D[(e + 8 * (lane >> 4)) * N + (lane & 15)] = d.get(e).to_float();
 }
 
-template <class Traits>
+template <class Traits, Semantics S>
 __global__ void k_fpsan(const typename Harness<Traits>::AElem* A,
                         const typename Harness<Traits>::BElem* B,
                         const typename Harness<Traits>::CElem* C,
                         typename Harness<Traits>::CBits*       Dpay)
 {
-    int                                                           lane = threadIdx.x;
-    Value<typename Harness<Traits>::AVec, Semantics::Triton, kCC> a;
-    Value<typename Harness<Traits>::BVec, Semantics::Triton, kCC> b;
-    Value<typename Harness<Traits>::CVec, Semantics::Triton, kCC> c;
-    load_frags<Traits, Semantics::Triton>(A, B, C, lane, a, b, c);
-    auto d = Traits::template call<Semantics::Triton, kCC>(a, b, c);
+    int                                           lane = threadIdx.x;
+    Value<typename Harness<Traits>::AVec, S, kCC> a;
+    Value<typename Harness<Traits>::BVec, S, kCC> b;
+    Value<typename Harness<Traits>::CVec, S, kCC> c;
+    load_frags<Traits, S>(A, B, C, lane, a, b, c);
+    auto d = Traits::template call<S, kCC>(a, b, c);
     for(int e = 0; e < 8; ++e)
         Dpay[(e + 8 * (lane >> 4)) * N + (lane & 15)] = d.get(e).fpsan_payload();
 }
@@ -210,7 +211,7 @@ void run_layout_matches_hardware()
     (void)hipFree(dOurs);
 }
 
-template <class Traits>
+template <class Traits, Semantics S>
 void run_fpsan_matches_scalar_reference()
 {
     using AE    = typename Harness<Traits>::AElem;
@@ -222,9 +223,9 @@ void run_fpsan_matches_scalar_reference()
         GTEST_SKIP() << "no HIP device";
     Mats<Traits> m = make_inputs<Traits>();
 
-    using VA = Value<AE, Semantics::Triton, kCC>;
-    using VB = Value<BE, Semantics::Triton, kCC>;
-    using VC = Value<CE, Semantics::Triton, kCC>;
+    using VA = Value<AE, S, kCC>;
+    using VB = Value<BE, S, kCC>;
+    using VC = Value<CE, S, kCC>;
     std::vector<CBits> ref(M * N);
     for(int mm = 0; mm < M; ++mm)
         for(int nn = 0; nn < N; ++nn)
@@ -241,7 +242,7 @@ void run_fpsan_matches_scalar_reference()
     CE*    dC = to_dev(m.C);
     CBits* dD;
     HIP_CHECK(hipMalloc(&dD, M * N * sizeof(CBits)));
-    k_fpsan<Traits><<<1, 32>>>(dA, dB, dC, dD);
+    k_fpsan<Traits, S><<<1, 32>>>(dA, dB, dC, dD);
     HIP_CHECK(hipDeviceSynchronize());
     std::vector<CBits> got(M * N);
     HIP_CHECK(hipMemcpy(got.data(), dD, M * N * sizeof(CBits), hipMemcpyDeviceToHost));
@@ -277,7 +278,9 @@ TEST(WmmaF32F16_32, LayoutMatchesHardware)
 }
 TEST(WmmaF32F16_32, FpsanMatchesScalarReference)
 {
-    run_fpsan_matches_scalar_reference<WmmaF32F16_32>();
+    fpsan_test::for_each_fpsan_semantics([](auto sem) {
+        run_fpsan_matches_scalar_reference<WmmaF32F16_32, decltype(sem)::value>();
+    });
 }
 
 struct WmmaF16F16_32
@@ -301,7 +304,9 @@ TEST(WmmaF16F16_32, LayoutMatchesHardware)
 }
 TEST(WmmaF16F16_32, FpsanMatchesScalarReference)
 {
-    run_fpsan_matches_scalar_reference<WmmaF16F16_32>();
+    fpsan_test::for_each_fpsan_semantics([](auto sem) {
+        run_fpsan_matches_scalar_reference<WmmaF16F16_32, decltype(sem)::value>();
+    });
 }
 
 struct WmmaF32BF16_32
@@ -325,7 +330,9 @@ TEST(WmmaF32BF16_32, LayoutMatchesHardware)
 }
 TEST(WmmaF32BF16_32, FpsanMatchesScalarReference)
 {
-    run_fpsan_matches_scalar_reference<WmmaF32BF16_32>();
+    fpsan_test::for_each_fpsan_semantics([](auto sem) {
+        run_fpsan_matches_scalar_reference<WmmaF32BF16_32, decltype(sem)::value>();
+    });
 }
 
 struct WmmaBF16BF16_32
@@ -349,7 +356,9 @@ TEST(WmmaBF16BF16_32, LayoutMatchesHardware)
 }
 TEST(WmmaBF16BF16_32, FpsanMatchesScalarReference)
 {
-    run_fpsan_matches_scalar_reference<WmmaBF16BF16_32>();
+    fpsan_test::for_each_fpsan_semantics([](auto sem) {
+        run_fpsan_matches_scalar_reference<WmmaBF16BF16_32, decltype(sem)::value>();
+    });
 }
 
 // ---- WMMA C-accumulator modifier coverage (gfx1250) --------------------------
@@ -359,7 +368,7 @@ TEST(WmmaBF16BF16_32, FpsanMatchesScalarReference)
 // rejects nonzero -- so the C-modifier is the only live numeric WMMA modifier.)
 // These tests exercise non-default modifier values against fully independent
 // host oracles, so they assert real intrinsic correctness on the device:
-//  - Float mode: wrapper (real builtin, modifier applied in silicon) vs a host
+//  - Native mode: wrapper (real builtin, modifier applied in silicon) vs a host
 //    float matmul that applies mod(C) with std::fabs/negate -- bit-for-bit.
 //  - FPSan mode: shipped payload path vs a host FPSan matmul that pre-applies
 //    mod(C) in the payload ring.
@@ -387,21 +396,21 @@ __global__ void k_f16_mod_builtin(const _Float16* A, const _Float16* B, const fl
         D[(e + 8 * (lane >> 4)) * N + (lane & 15)] = d.get(e).to_float();
 }
 
-template <int Cmod>
+template <int Cmod, Semantics S>
 __global__ void
     k_f16_mod_fpsan(const _Float16* A, const _Float16* B, const float* C, std::uint32_t* D)
 {
-    int                                        lane = threadIdx.x;
-    Value<v16h_native, Semantics::Triton, kCC> a;
-    Value<v16h_native, Semantics::Triton, kCC> b;
-    Value<v8f_native, Semantics::Triton, kCC>  c;
-    load_frags<WmmaF32F16_32, Semantics::Triton>(A, B, C, lane, a, b, c);
-    auto d = fpsan::amdgcn_wmma_f32_16x16x32_f16<Semantics::Triton, kCC, Cmod>(a, b, c);
+    int                        lane = threadIdx.x;
+    Value<v16h_native, S, kCC> a;
+    Value<v16h_native, S, kCC> b;
+    Value<v8f_native, S, kCC>  c;
+    load_frags<WmmaF32F16_32, S>(A, B, C, lane, a, b, c);
+    auto d = fpsan::amdgcn_wmma_f32_16x16x32_f16<S, kCC, Cmod>(a, b, c);
     for(int e = 0; e < 8; ++e)
         D[(e + 8 * (lane >> 4)) * N + (lane & 15)] = d.get(e).fpsan_payload();
 }
 
-template <int Cmod>
+template <int Cmod, Semantics S>
 void run_modifier_f16()
 {
     int ndev = 0;
@@ -420,8 +429,8 @@ void run_modifier_f16()
             fref[mm * N + nn] = acc;
         }
     // FPSan oracle: payload matmul with mod(C) pre-applied in the ring.
-    using VA = Value<_Float16, Semantics::Triton, kCC>;
-    using VF = Value<float, Semantics::Triton, kCC>;
+    using VA = Value<_Float16, S, kCC>;
+    using VF = Value<float, S, kCC>;
     std::vector<std::uint32_t> pref(M * N);
     for(int mm = 0; mm < M; ++mm)
         for(int nn = 0; nn < N; ++nn)
@@ -447,7 +456,7 @@ void run_modifier_f16()
     HIP_CHECK(hipMalloc(&dF, M * N * sizeof(float)));
     HIP_CHECK(hipMalloc(&dP, M * N * sizeof(std::uint32_t)));
     k_f16_mod_builtin<Cmod><<<1, 32>>>(dA, dB, dC, dF);
-    k_f16_mod_fpsan<Cmod><<<1, 32>>>(dA, dB, dC, dP);
+    k_f16_mod_fpsan<Cmod, S><<<1, 32>>>(dA, dB, dC, dP);
     HIP_CHECK(hipDeviceSynchronize());
     std::vector<float>         gotF(M * N);
     std::vector<std::uint32_t> gotP(M * N);
@@ -469,15 +478,18 @@ void run_modifier_f16()
 
 TEST(WmmaF32F16_32, ModifierNegC)
 {
-    run_modifier_f16<1>();
+    fpsan_test::for_each_fpsan_semantics(
+        [](auto sem) { run_modifier_f16<1, decltype(sem)::value>(); });
 }
 TEST(WmmaF32F16_32, ModifierAbsC)
 {
-    run_modifier_f16<2>();
+    fpsan_test::for_each_fpsan_semantics(
+        [](auto sem) { run_modifier_f16<2, decltype(sem)::value>(); });
 }
 TEST(WmmaF32F16_32, ModifierNegAbsC)
 {
-    run_modifier_f16<3>();
+    fpsan_test::for_each_fpsan_semantics(
+        [](auto sem) { run_modifier_f16<3, decltype(sem)::value>(); });
 }
 
 // ---- bf16f32 mixed variant: A,B bf16; C f32 accumulator; D bf16 output -------
@@ -533,14 +545,15 @@ __global__ void k_bf16f32_dataflow(const __bf16* A, const __bf16* B, const float
         D[(e + 8 * (lane >> 4)) * N + (lane & 15)] = static_cast<__bf16>(d.get(e));
 }
 
+template <Semantics S>
 __global__ void k_bf16f32_fpsan(const __bf16* A, const __bf16* B, const float* C, std::uint16_t* D)
 {
-    int                                         lane = threadIdx.x;
-    Value<v16bf_native, Semantics::Triton, kCC> a;
-    Value<v16bf_native, Semantics::Triton, kCC> b;
-    Value<v8f_native, Semantics::Triton, kCC>   c;
-    load_frags_bf16f32<Semantics::Triton>(A, B, C, lane, a, b, c);
-    auto d = fpsan::amdgcn_wmma_bf16f32_16x16x32_bf16<Semantics::Triton, kCC>(a, b, c);
+    int                         lane = threadIdx.x;
+    Value<v16bf_native, S, kCC> a;
+    Value<v16bf_native, S, kCC> b;
+    Value<v8f_native, S, kCC>   c;
+    load_frags_bf16f32<S>(A, B, C, lane, a, b, c);
+    auto d = fpsan::amdgcn_wmma_bf16f32_16x16x32_bf16<S, kCC>(a, b, c);
     for(int e = 0; e < 8; ++e)
         D[(e + 8 * (lane >> 4)) * N + (lane & 15)] = d.get(e).fpsan_payload();
 }
@@ -580,7 +593,8 @@ TEST(WmmaBF16F32_32, LayoutMatchesHardware)
     (void)hipFree(dOurs);
 }
 
-TEST(WmmaBF16F32_32, FpsanMatchesScalarReference)
+template <Semantics S>
+void run_bf16f32_fpsan_matches_scalar_reference()
 {
     int ndev = 0;
     if(hipGetDeviceCount(&ndev) != hipSuccess || ndev == 0)
@@ -595,8 +609,8 @@ TEST(WmmaBF16F32_32, FpsanMatchesScalarReference)
     for(auto& x : C)
         x = fpsan_test::pick_int_valued<float>(rng, -4, 4);
 
-    using VBF = Value<__bf16, Semantics::Triton, kCC>;
-    using VF  = Value<float, Semantics::Triton, kCC>;
+    using VBF = Value<__bf16, S, kCC>;
+    using VF  = Value<float, S, kCC>;
     std::vector<std::uint16_t> ref(M * N);
     for(int mm = 0; mm < M; ++mm)
         for(int nn = 0; nn < N; ++nn)
@@ -613,7 +627,7 @@ TEST(WmmaBF16F32_32, FpsanMatchesScalarReference)
     float*         dC = to_dev(C);
     std::uint16_t* dD;
     HIP_CHECK(hipMalloc(&dD, M * N * sizeof(std::uint16_t)));
-    k_bf16f32_fpsan<<<1, 32>>>(dA, dB, dC, dD);
+    k_bf16f32_fpsan<S><<<1, 32>>>(dA, dB, dC, dD);
     HIP_CHECK(hipDeviceSynchronize());
     std::vector<std::uint16_t> got(M * N);
     HIP_CHECK(hipMemcpy(got.data(), dD, M * N * sizeof(std::uint16_t), hipMemcpyDeviceToHost));
@@ -623,4 +637,10 @@ TEST(WmmaBF16F32_32, FpsanMatchesScalarReference)
     (void)hipFree(dB);
     (void)hipFree(dC);
     (void)hipFree(dD);
+}
+
+TEST(WmmaBF16F32_32, FpsanMatchesScalarReference)
+{
+    fpsan_test::for_each_fpsan_semantics(
+        [](auto sem) { run_bf16f32_fpsan_matches_scalar_reference<decltype(sem)::value>(); });
 }

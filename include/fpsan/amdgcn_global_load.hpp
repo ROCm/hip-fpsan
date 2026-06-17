@@ -18,8 +18,8 @@
 //
 // Like ds_read_tr*, this is *pure data movement*: no arithmetic touches the
 // loaded values, the hardware just relocates whole 16-bit slots across lanes
-// in a defined permutation. So Float mode and FPSan mode share one
-// implementation -- the lane's stored bits (IEEE float bits in Float mode,
+// in a defined permutation. So Native mode and FPSan mode share one
+// implementation -- the lane's stored bits (IEEE float bits in Native mode,
 // the FPSan payload in FPSan mode) are moved verbatim and rebuilt with
 // Value::from_storage_bits. Whatever was staged in global memory (a Value's
 // storage) is exactly what comes back, transposed.

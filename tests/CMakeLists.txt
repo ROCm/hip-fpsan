@@ -91,6 +91,29 @@ function(fpsan_enable_gfx11_wave64 name)
   fpsan_enable_wave64(${name})
 endfunction()
 
+# Helper: a standalone host test that owns its main() and reports failure via a
+# nonzero exit code (no gtest). Compiled as plain C++ -- these are host-only and
+# need no GPU -- and registered to run directly.
+function(fpsan_add_plain_test name src)
+  add_executable(${name} ${src})
+  target_link_libraries(${name} PRIVATE fpsan::fpsan)
+  target_compile_features(${name} PRIVATE cxx_std_17)
+  add_test(NAME ${name} COMMAND ${name})
+endfunction()
+
+# Helper: a compile-only codegen test -- the source MUST compile (here, forcing
+# device codegen of an intrinsic through every Semantics). Built on demand via
+# ctest as an OBJECT (the source has no main); a compile failure fails the test.
+function(fpsan_add_codegen_test name src)
+  add_library(${name} OBJECT EXCLUDE_FROM_ALL ${src})
+  set_source_files_properties(${src} PROPERTIES LANGUAGE ${FPSAN_TEST_LANG})
+  target_link_libraries(${name} PRIVATE fpsan::fpsan)
+  set_target_properties(${name} PROPERTIES EXCLUDE_FROM_DEFAULT_BUILD TRUE)
+  add_test(NAME ${name}
+           COMMAND ${CMAKE_COMMAND} --build ${CMAKE_BINARY_DIR}
+                   --target ${name} --config $<CONFIG>)
+endfunction()
+
 # ---- build canary: proves the toolchain + INTERFACE target + ctest work even
 # before gtest is present.  Always built. -----------------------------------
 fpsan_add_test(fpsan_build_canary build_canary.cpp)
@@ -101,11 +124,18 @@ fpsan_add_compile_fail_test(fpsan_neg_explicit_ctor neg_explicit_ctor.cpp)
 fpsan_add_compile_fail_test(fpsan_neg_explicit_mixed_pod neg_explicit_mixed_pod.cpp)
 fpsan_add_compile_fail_test(fpsan_neg_non_float_type neg_non_float_type.cpp)
 
+# ---- algebraic tests (host-only, own main(), no gtest) ---------
+# Exhaustive checks of the algebraic Semantics across ALL variants including the
+# independent-prime "2" twins (the dedicated home for full-variant coverage).
+fpsan_add_plain_test(fpsan_algebraic_proto_test algebraic_proto_test.cpp)
+fpsan_add_plain_test(fpsan_algebraic_value_test algebraic_value_test.cpp)
+
 # ---- real test suite (requires gtest) --------------------------------------
 if(TARGET GTest::gtest_main)
   fpsan_add_test(fpsan_core_test core_test.cpp)
   fpsan_add_test(fpsan_drop_in_test drop_in_test.cpp)
   fpsan_add_test(fpsan_math_test math_test.cpp)
+  fpsan_add_test(fpsan_extern_tagged_test extern_tagged_test.cpp)
   fpsan_add_test(fpsan_vector_test vector_test.cpp)
   fpsan_add_test(fpsan_cast_test cast_test.cpp)
   fpsan_add_test(fpsan_fp8_test fp8_test.cpp)
@@ -211,6 +241,11 @@ if(TARGET GTest::gtest_main)
       fpsan_add_test(fpsan_xlane_gfx12_w64_test xlane_test.cpp TEST_PREFIX GFX12W64.)
       fpsan_add_test(fpsan_classify_gfx12_w64_test classify_test.cpp TEST_PREFIX GFX12W64.)
       fpsan_add_test(fpsan_wave_gfx12_w64_test wave_test.cpp TEST_PREFIX GFX12W64.)
+      # Compile-only: force the RDNA4 K=16 WMMA codegen through every Semantics
+      # (incl. the algebraic variants and their "2" twins) -- orthogonality at
+      # the GPU level. The kernel uses amdgcn_wmma_f32_16x16x16_f16_w32, the
+      # RDNA4-only K=16 builtin, so it is gated with the other RDNA4 WMMA tests.
+      fpsan_add_codegen_test(fpsan_algebraic_device_test algebraic_device_test.cpp)
       set_target_properties(fpsan_wmma_gfx12_test
                             fpsan_global_load_tr_gfx12_w64_test
                             fpsan_wmma_gfx12_w64_test
@@ -219,13 +254,15 @@ if(TARGET GTest::gtest_main)
                             fpsan_xlane_gfx12_w64_test
                             fpsan_classify_gfx12_w64_test
                             fpsan_wave_gfx12_w64_test
+                            fpsan_algebraic_device_test
                             PROPERTIES HIP_ARCHITECTURES "${_fpsan_rdna4_arches}")
       target_compile_definitions(fpsan_wmma_gfx12_w64_test
                                  PRIVATE FPSAN_TEST_GFX12_WAVE64=1)
       target_compile_definitions(fpsan_global_load_tr_gfx12_w64_test
                                  PRIVATE FPSAN_TEST_GLOBAL_LOAD_TR_W64=1)
       target_compile_definitions(fpsan_wave_gfx12_w64_test
-                                 PRIVATE FPSAN_TEST_ENABLE_WAVE_F64=1)
+                                 PRIVATE FPSAN_TEST_ENABLE_WAVE_F64=1
+                                         FPSAN_TEST_SKIP_FLOAT_WAVE_REDUCE=1)
       fpsan_enable_wave64(fpsan_global_load_tr_gfx12_w64_test)
       fpsan_enable_wave64(fpsan_wmma_gfx12_w64_test)
       fpsan_enable_wave64(fpsan_swmmac_gfx12_w64_test)
