@@ -304,6 +304,39 @@ if(TARGET GTest::gtest_main)
     endif()
     if(_fpsan_has_cdna3)
       fpsan_add_test(fpsan_mfma_cdna3_test mfma_cdna3_test.cpp)
+      fpsan_add_test(fpsan_mfma_cdna3_f16_16x16x4_test
+                     mfma_cdna3_f16_16x16x4_test.cpp)
+      fpsan_add_test(fpsan_mfma_cdna3_f16_wide_test
+                     mfma_cdna3_f16_wide_test.cpp)
+      fpsan_add_test(fpsan_mfma_cdna3_f16_32x32x4_test
+                     mfma_cdna3_f16_32x32x4_test.cpp)
+      fpsan_add_test(fpsan_mfma_cdna3_f16_4x4x4_test
+                     mfma_cdna3_f16_4x4x4_test.cpp)
+      fpsan_add_test(fpsan_mfma_cdna3_bf16_test mfma_cdna3_bf16_test.cpp)
+      fpsan_add_test(fpsan_mfma_cdna3_bf16_16x16x4_test
+                     mfma_cdna3_bf16_16x16x4_test.cpp)
+      fpsan_add_test(fpsan_mfma_cdna3_bf16_wide_test
+                     mfma_cdna3_bf16_wide_test.cpp)
+      fpsan_add_test(fpsan_mfma_cdna3_bf16_32x32x4_test
+                     mfma_cdna3_bf16_32x32x4_test.cpp)
+      fpsan_add_test(fpsan_mfma_cdna3_bf16_4x4x4_test
+                     mfma_cdna3_bf16_4x4x4_test.cpp)
+      fpsan_add_test(fpsan_mfma_cdna3_fp8_test mfma_cdna3_fp8_test.cpp)
+      fpsan_add_test(fpsan_mfma_cdna3_fp8_16x16x32_bf8_test
+                     mfma_cdna3_fp8_16x16x32_bf8_test.cpp)
+      fpsan_add_test(fpsan_mfma_cdna3_fp8_32x32x16_fp8_test
+                     mfma_cdna3_fp8_32x32x16_fp8_test.cpp)
+      fpsan_add_test(fpsan_mfma_cdna3_fp8_32x32x16_bf8_test
+                     mfma_cdna3_fp8_32x32x16_bf8_test.cpp)
+      fpsan_add_test(fpsan_mfma_cdna3_xf32_test mfma_cdna3_xf32_test.cpp)
+      fpsan_add_test(fpsan_mfma_cdna3_f32_test mfma_cdna3_f32_test.cpp)
+      fpsan_add_test(fpsan_mfma_cdna3_f32_32x32_test
+                     mfma_cdna3_f32_32x32_test.cpp)
+      fpsan_add_test(fpsan_mfma_cdna3_f32_4x4_test
+                     mfma_cdna3_f32_4x4_test.cpp)
+      fpsan_add_test(fpsan_mfma_cdna3_f64_test mfma_cdna3_f64_test.cpp)
+      fpsan_add_test(fpsan_mfma_cdna3_f64_4x4_test
+                     mfma_cdna3_f64_4x4_test.cpp)
       fpsan_add_test(fpsan_smfmac_cdna3_test smfmac_cdna3_test.cpp)
     endif()
     # gfx1250-only tests (builtins exclusive to gfx1250: bf16 transcendentals,
@@ -351,6 +384,10 @@ if(TARGET GTest::gtest_main)
     # gfx950 (CDNA4) MFMA / smfmac / scaled-cvt tests.
     if(_fpsan_has_gfx950)
       fpsan_add_test(fpsan_mfma_gfx950_test mfma_gfx950_test.cpp)
+      fpsan_add_test(fpsan_mfma_gfx950_scaled_test
+                     mfma_gfx950_scaled_test.cpp)
+      fpsan_add_test(fpsan_mfma_gfx950_smfmac_test
+                     mfma_gfx950_smfmac_test.cpp)
       fpsan_add_test(fpsan_ds_read_tr_test ds_read_tr_test.cpp)
       fpsan_add_test(fpsan_cvt_gfx950_test cvt_gfx950_test.cpp)
       fpsan_add_test(fpsan_cvt_scalef32_mx_gfx950_test
