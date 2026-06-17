@@ -44,11 +44,12 @@
 \begin{abstract}
 FPSan is a dynamic testing technique for numerical programs: replace each
 floating-point value by a same-width fingerprint, run the program in a finite
-abstract arithmetic, and compare the resulting fingerprints.  The original
+target ring, and compare the resulting fingerprints.  The original
 Triton FPSan introduced this idea using a tuned bijection from source-format bit
-patterns into \(\Z/2^w\Z\), where \(w\) is the source width.  That scramble is
-useful, but it is not a homomorphism from the represented numeric values, so
-identities such as \(2+2=4\) or \(x+x=2x\) need not hold.
+patterns into \(\Z/2^w\Z\), where \(w\) is the source width
+\cite{triton-fpsan-source,goucher-fpsan-blog}.  That scramble is useful, but it
+is not a homomorphism from the represented numeric values, so identities such as
+\(2+2=4\) or \(x+x=2x\) need not hold.
 
 This paper studies algebraic FPSan: a homomorphic alternative to Triton's FPSan
 scramble on finite binary floating-point values.  The observation is simple:
@@ -75,9 +76,10 @@ floating-point results bit-for-bit is too strict: a value-preserving algebraic
 rewrite can change rounding.  Tolerance tests, on the other hand, are often too
 weak and too problem-specific.
 
-Triton's FPSan introduced a useful third option.  Instead of asking whether two
-rounded floating-point executions are bitwise equal, FPSan asks whether the two
-computations have the same fingerprint under a chosen abstract arithmetic.  Each
+Triton's FPSan introduced a useful third option
+\cite{triton-fpsan-source}.  Instead of asking whether two rounded
+floating-point executions are bitwise equal, FPSan asks whether the two
+computations have the same fingerprint in a chosen target ring.  Each
 source value is replaced by a fingerprint, and each source operation is replaced
 by a deterministic operation on fingerprints.  The resulting semantics are
 designed to be compact and invariant under formal laws such as associativity and
@@ -85,25 +87,28 @@ distributivity.  They are not a reference implementation of floating-point
 rounding.
 
 The invariant throughout this document is width preservation.  If the original
-floating-point type has \(w\) bits, then every FPSan semantics discussed here,
-including Triton's semantics and the algebraic variants, stores its fingerprint
-in exactly \(w\) bits.
+floating-point type has \(w\) bits, then every FPSan semantics discussed here
+stores its fingerprint in exactly \(w\) bits.  The central design choice is the
+target ring together with the leaf map.  One chooses a target ring encodable in
+the same bit width, possibly with distinguished sentinel codes adjoined to the
+finite ring, and one chooses how each source floating-point value is sent into
+that target ring.
 
-The central design choice is the leaf map: how a source floating-point value is
-sent into the rewritten arithmetic.
-
-For a source format of width \(w\), Triton's FPSan uses a bijection
+Triton's concrete semantics instantiate this design by choosing the target ring
+\(\Z/2^w\Z\) and a tuned bijection, not a ring homomorphism,
 \[
-  E:\{\text{source-format bit patterns of width }w\}\longrightarrow \Z/2^w\Z
+  E:\{\text{source-format bit patterns of width }w\}\longrightarrow \Z/2^w\Z.
 \]
-with special tuning.  The construction itself is mostly indifferent to the
+The construction itself is mostly indifferent to the
 details of a particular floating-point standard: what matters is that the
 sanitizer receives fixed-width bit patterns.  Writing \(0\) and \(1\) for the
 bit patterns of those values, and writing \(-x\) for source-format sign
 negation of a bit pattern \(x\), Triton's tuning gives \(E(0)=0\), \(E(1)=1\),
 and \(E(-x)=-E(x)\) in the target ring.  After applying \(E\), arithmetic is
 performed with ring operations in \(\Z/2^w\Z\), with special handlers for
-operations such as division, exponentials, and trigonometry.
+operations such as division, exponentials, and trigonometry.  The Triton
+author's blog discusses the algebraic intentions of this construction
+\cite{goucher-fpsan-blog}.
 
 Because \(E\) is a bijection, one can always define an artificial operation on
 bit patterns by transporting the target-ring operation back through \(E\):
@@ -126,11 +131,40 @@ nonzero \(x\).
 
 The contribution of algebraic FPSan is that the opposite leaf-map choice is
 possible.  We can keep compact same-width fingerprints, but choose the leaf map
-to be a genuine homomorphism on exact finite values.  The price is that a single
+to be a ring homomorphism on exact finite values.  The price is that a single
 same-width reduction is no longer injective.  The benefit is that its collisions
 are ordinary modular collisions in a characteristic-zero calculation reduced
 modulo a prime, not artifacts of an unrelated transported arithmetic.  The next
 section gives the algebraic observation that makes this possible.
+
+In the \texttt{hip-fpsan} C++ API, these choices appear as the
+\texttt{Semantics} enum.  Its enumerators are
+\[
+\begin{gathered}
+\texttt{Native},\quad
+\texttt{Triton},\\
+\texttt{Field},\quad
+\texttt{Field2},\quad
+\texttt{FieldFast},\quad
+\texttt{FieldFast2},\quad
+\texttt{FieldWithMulCasts},\quad
+\texttt{FieldWithMulCasts2},\\
+\texttt{SophieGermainRing},\quad
+\texttt{SophieGermainRing2},\quad
+\texttt{PythagoreanRing},\quad
+\texttt{PythagoreanRing2}.
+\end{gathered}
+\]
+\texttt{Native} is ordinary floating-point arithmetic.  \texttt{Triton} is the
+Triton FPSan semantics discussed above in this introduction.  All remaining
+enum values are collectively called algebraic FPSan.  The Field-family semantics
+\texttt{Field}, \texttt{FieldFast}, and \texttt{FieldWithMulCasts}, together
+with their \(2\)-suffixed variants, are discussed in Sections~2--6.
+\texttt{SophieGermainRing} and \texttt{SophieGermainRing2} are discussed in
+Section~7, and \texttt{PythagoreanRing} and \texttt{PythagoreanRing2} in
+Section~8.  A \(2\)-suffix means a second choice of primes or moduli under the
+same design constraints: it rerolls the collision set without changing the
+intended algebraic contract.
 
 \section{Finite binary floats live in \texorpdfstring{\(\Z[1/2]\)}{Z[1/2]}}
 
@@ -148,14 +182,15 @@ This is the localization of \(\Z\) obtained by inverting \(2\).
 
 The maximal ideals of \(\Z[1/2]\) are exactly the ideals generated by odd primes.
 Equivalently, an odd prime \(p\) is precisely a prime modulo which \(2\) remains
-invertible.  We will write
+invertible.  The resulting residue homomorphism
 \[
-  \phi_p:\Z[1/2]\to\F_p,\qquad
-  \phi_p(2^e M)= 2^e\,(M\bmod p) \pmod p
+  \Z[1/2]\longrightarrow\F_p
 \]
-for the resulting reduction homomorphism.  For negative \(e\), \(2^e\) means
-\((2^{-1})^{-e}\) in \(\F_p\).  This is the only algebraic fact about finite
-binary floats that the Field-family semantics need.
+is the leaf map used by the Field-family semantics: a finite source value is
+sent to its residue in the target field.  Concretely, this homomorphism is
+determined by the image of \(1/2\), which is taken to be the inverse of \(2\) in
+\(\F_p\).  This is the only algebraic fact about finite binary floats that the
+Field-family semantics need.
 
 This is the mathematical core of the Field-family semantics.  The fingerprint of
 a finite value is the residue of its exact dyadic value.  Addition, subtraction,
@@ -216,13 +251,15 @@ be checked against a different set of primes or composite moduli:
 
 The non-injectivity of a single reduction should not be confused with loss of
 the characteristic-zero arithmetic.  If \(p_1,\ldots,p_r\) are distinct odd
-primes and \(P=\prod_i p_i\), then the combined map
+primes and \(P=\prod_i p_i\), then the combined map can be displayed as
 \[
   \Z[1/2]\longrightarrow \prod_i \F_{p_i}
+  \xrightarrow{\mathrm{CRT}} \Z/P\Z.
 \]
-is, by the CRT, the same as reduction modulo \(P\), with \(2\) still invertible.
-Thus several algebraic FPSan runs can be interpreted as a single wider residue
-computation.  If an exact dyadic result is known to be \(a/2^k\) with
+The second arrow is Chinese remainder theorem (CRT) reconstruction, identifying
+the product of residue fields with reduction modulo \(P\), where \(2\) is still
+invertible.  Thus several algebraic FPSan runs can be interpreted as a single
+wider residue computation.  If an exact dyadic result is known to be \(a/2^k\) with
 \(|a|<P/2\), then the residues determine \(a\) uniquely by the symmetric CRT
 representative, and hence determine the dyadic value itself.
 
@@ -233,9 +270,7 @@ is the original characteristic-zero calculation.  Algebraic FPSan goes the other
 way: one prime is not injective, but different primes are all shadows of the
 same calculation in \(\Z[1/2]\).
 
-As a concrete bound, consider OCP FP8 E5M2.\footnote{OCP 8-bit Floating Point
-Specification (OFP8), Revision 1.0:
-\url{https://www.opencompute.org/documents/ocp-8-bit-floating-point-specification-ofp8-revision-1-0-2023-12-01-pdf-1}.}
+As a concrete bound, consider OCP FP8 E5M2 \cite{ocp-ofp8}.
 It has exponent bias \(15\) and two mantissa bits.  Every finite value is
 \(A/2^{16}\), and the maximum finite magnitude is
 \[
@@ -273,7 +308,7 @@ principle, remove them within any known magnitude bound.  Rounding is a separate
 semantic choice: the algebraic fingerprints track the exact dyadic expression
 between whatever rounded values the instrumented program presents as leaves.
 
-\section{How the Field primes are chosen}
+\section{Prime choices for the Field-family semantics}
 
 The statement ``reduce modulo an odd prime'' leaves many possible primes.  The
 implementation chooses primes satisfying several constraints simultaneously.
@@ -387,7 +422,7 @@ groups of nonzero residues.
 
 The multiplicative construction below applies only to finite nonzero
 fingerprints.  Zero is mapped to zero, and the infinity/NaN sentinels map to the
-corresponding sentinels.  The \texttt{fp32}\(\leftrightarrow\)\texttt{fp64} edge
+corresponding sentinels.  The \texttt{FP32}\(\leftrightarrow\)\texttt{FP64} edge
 uses Pohlig--Hellman discrete logs because a linear scan over a group of size
 about \(2^{32}\) would be too expensive; the group orders are chosen to make this
 feasible.
@@ -406,7 +441,7 @@ prime at a tower width and \(m_i=p_i-1\).  For each format class \(\alpha\) at
 that width, choose a primitive root \(g_{i,\alpha}\) of
 \(\F_{p_i}^\times\).  There is usually only one such class; the important
 exceptions are the two FP8 families, E4M3 and E5M2, and the two 16-bit
-families, f16 and bf16.  The implementation uses \(g_i\) for one class and
+families, FP16 and BF16.  The implementation uses \(g_i\) for one class and
 \(g_i^3\) for the other.  Since the Field primes are \(11\pmod {12}\), \(3\) is
 coprime to \(m_i\), so \(g_i^3\) is again a primitive root.  Let
 \[
@@ -458,7 +493,7 @@ logarithm-coordinate rule gives the automorphism
 \[
   L_{i,\beta}(C_{i\alpha,i\beta}(x))=L_{i,\alpha}(x).
 \]
-Thus f16 and bf16, or E4M3 and E5M2, are not silently identified even
+Thus FP16 and BF16, or E4M3 and E5M2, are not silently identified even
 though they share a bit width and a Field prime.
 
 \begin{proposition}[The Field cast tower]
@@ -499,6 +534,37 @@ sections \(\sigma_{ij}\), and it turns ``zero modulo each step cofactor'' into
 ``zero modulo their product,'' so stepwise widening agrees with direct widening.
 \end{proof}
 
+\subsection{Actual constants}
+
+The actual Field-family prime choices are as follows.  Variant \(1\) is used by
+\texttt{Field}, \FieldFast{}, and \FieldMC{}; variant \(2\) is used by
+\texttt{Field2}, \texttt{FieldFast2}, and \texttt{FieldWithMulCasts2}.  The
+\(4\)-bit prime is shared because it is the only \(11\bmod 12\) prime at that
+width.  The \(6\)-bit prime is standalone and is not part of the cast tower.
+\[
+\begin{array}{c|r@{\quad}r|r@{\quad}r|c}
+  & \multicolumn{2}{c|}{\text{variant 1}}
+  & \multicolumn{2}{c|}{\text{variant 2}}
+  & \text{cast tower}\\
+w & p & g & p & g & \\
+\hline
+4  & 11 & 2  & 11 & 2 & \text{yes}\\
+6  & 59 & 2  & 47 & 5 & \text{standalone}\\
+8  & 191 & 19 & 131 & 2 & \text{yes}\\
+16 & 65171 & 2 & 64871 & 7 & \text{yes}\\
+32 & 4284862331 & 2 & 4291215371 & 2 & \text{yes}\\
+64 & 18446743887391934171 & 2 & 18446743217995397111 & 7 & \text{yes}
+\end{array}
+\]
+Here \(g\) is the primitive root used for multiplicative casts in
+\FieldMC{}.  At a bit width with two supported format classes, the
+implementation uses \(g\) for the first class and \(g^3\) for the second:
+FP8 E4M3 uses \(g\), FP8 E5M2 uses \(g^3\), FP16 uses \(g\), and
+BF16 uses \(g^3\).  Since every Field-family prime is \(11\bmod 12\), \(3\) is
+coprime to \(p-1\), so \(g^3\) is again a primitive root.  This is the concrete
+mechanism that makes same-width casts such as FP16\(\leftrightarrow\)BF16
+visible to \FieldMC{} instead of collapsing them to the identity.
+
 \section{Why finite fields cannot model exponential laws}
 
 In any finite field \(\F_q\), with \(q\) any prime power, any group homomorphism
@@ -525,13 +591,41 @@ a field.
 
 \section{The Sophie Germain ring}
 
-\texttt{Semantics::SophieGermainRing} uses
+\texttt{Semantics::SophieGermainRing} takes its target ring to be
+\(\Z/n\Z\).  The modulus has the form
 \[
   n=pd,\qquad p=2d+1,
 \]
-with \(p\) and \(d\) prime.  Strictly speaking, \(d\) is the Sophie Germain prime
-and \(p\) is the corresponding safe prime; the semantics name refers to the
-pair.
+with \(p\) and \(d\) prime.  Strictly speaking, \(d\) is the Sophie Germain
+prime and \(p\) is the corresponding safe prime; the semantics name refers to
+the pair.
+
+For widths below \(8\), the implementation does not use a composite Sophie
+Germain ring.  There is too little same-width room for two sentinels and a useful
+CRT exp/log channel.  Instead, the \(4\)- and \(6\)-bit cases use the
+corresponding Field-family prime: the target is just \(\F_p\), the auxiliary
+\(d\)-channel is absent, and exp/log operations are represented as tags.  Thus
+sub-\(8\)-bit \texttt{SophieGermainRing} behaves like the faithful Field
+semantics for finite algebraic arithmetic, but not for exp/log laws.
+
+At widths \(8,16,32,64\), the actual Sophie Germain choices are as follows;
+variant \(1\) is the unsuffixed semantics and variant \(2\) is
+\texttt{SophieGermainRing2}.
+\begin{center}
+\small
+\begin{tabular}{c|c|r|r|r}
+variant & \(w\) & \(d\) & \(p=2d+1\) & \(n=pd\)\\
+\hline
+1 & 8  & 11 & 23 & 253\\
+2 & 8  & 5 & 11 & 55\\
+1 & 16 & 179 & 359 & 64261\\
+2 & 16 & 173 & 347 & 60031\\
+1 & 32 & 46229 & 92459 & 4274287111\\
+2 & 32 & 46199 & 92399 & 4268741401\\
+1 & 64 & 3037000121 & 6074000243 & 18446739472945029403\\
+2 & 64 & 3036999209 & 6073998419 & 18446728393970250571
+\end{tabular}
+\end{center}
 
 Since \(d\mid p-1\), the group \(\F_p^\times\) contains a subgroup of order
 \(d\).  The implementation chooses an element \(g\in(\Z/n\Z)^\times\) whose
@@ -571,17 +665,62 @@ zero-divisors in Triton's \(\Z/2^w\Z\), but they are real.
 
 \section{The Pythagorean ring}
 
-\texttt{Semantics::PythagoreanRing} uses
+\texttt{Semantics::PythagoreanRing} takes its target ring to be
+\(\Z/n\Z\).  The modulus has the form
 \[
   n=pd,\qquad p=4d+1,
 \]
 again with \(p\) and \(d\) prime.  This still gives \(d\mid p-1\), so the
-exp/log channel remains available.  The new feature is that \(p\equiv 1\pmod 4\),
-so \(-1\) has a square root in \(\F_p\).  This allows a finite-ring analogue of
-complex rotations.
+exp/log channel remains available.  The new feature is that
+\(p\equiv 1\pmod 4\), so \(-1\) has a square root in \(\F_p\).  This allows a
+finite-ring analogue of complex rotations in the \(p\)-component of the CRT
+decomposition.
 
-The implementation works in \((\Z/n\Z)[i]\) with \(i^2=-1\).  It chooses an
-element
+For widths below \(8\), the implementation does not use a composite Pythagorean
+ring.  As in the Sophie Germain case, the \(4\)- and \(6\)-bit cases use the
+corresponding Field-family prime, with no auxiliary \(d\)-channel.  Exp/log and
+sin/cos operations are therefore represented as tags at those widths.  The usual
+Pythagorean tradeoff discussed below, including the loss of perfect
+\texttt{cbrt}, begins only at width \(8\); below that, finite algebraic
+arithmetic and roots follow the Field-family behavior.
+
+At widths \(8,16,32,64\), the actual Pythagorean choices are as follows; variant
+\(1\) is the unsuffixed semantics and variant \(2\) is
+\texttt{PythagoreanRing2}.
+\begin{center}
+\small
+\begin{tabular}{c|c|r|r|r}
+variant & \(w\) & \(d\) & \(p=4d+1\) & \(n=pd\)\\
+\hline
+1 & 8  & 7 & 29 & 203\\
+2 & 8  & 3 & 13 & 39\\
+1 & 16 & 127 & 509 & 64643\\
+2 & 16 & 97 & 389 & 37733\\
+1 & 32 & 32707 & 130829 & 4279024103\\
+2 & 32 & 32647 & 130589 & 4263339083\\
+1 & 64 & 2147483059 & 8589932237 & 18446733956915472983\\
+2 & 64 & 2147480707 & 8589922829 & 18446693549896360103
+\end{tabular}
+\end{center}
+
+The implementation writes the construction in the quadratic algebra
+\((\Z/n\Z)[i]\) with a formal \(i^2=-1\).  Here
+\(\F_p\) should be read as a CRT factor of \(\Z/n\Z\), not as a unital subring:
+\[
+  \Z/n\Z \simeq \F_p\times \F_d.
+\]
+A square root of \(-1\) in the \(\F_p\)-factor gives an element whose square is
+\((-1,0)\), not \((-1,-1)\).  To have a square root of \(-1\) in all of
+\(\Z/n\Z\), one would also need \(-1\) to be a square modulo \(d\), which is not
+part of the design constraint.  What the construction needs is weaker and more
+targeted: in
+\[
+  (\Z/n\Z)[i]\simeq \F_p[i]\times\F_d[i],
+\]
+the \(\F_p[i]\) factor splits and supplies the nontrivial rotation, while the
+\(\F_d[i]\) factor is kept at the identity.  The formal \(i\) keeps the
+real/imaginary bookkeeping uniform across both CRT factors.  The implementation
+chooses an element
 \[
   \omega=\omega_{\mathrm{re}}+i\,\omega_{\mathrm{im}}
 \]
@@ -608,7 +747,7 @@ factor of \(3\), so the cube map is not globally invertible by a power map.
 
 \section{Tags and genuinely opaque functions}
 
-Not every operation has a useful algebraic law in the chosen finite model.  For
+Not every operation has a useful algebraic law in the target ring.  For
 opaque libdevice calls, miscellaneous transcendentals, and Field-mode
 exp/log/trig calls, the implementation produces a deterministic tag.  In this
 document, a tag means the resulting fingerprint, while the operation identifier
@@ -619,7 +758,7 @@ implementation as choosing a deterministic map
 \[
   \tau_f:R^k\longrightarrow R
 \]
-for the current fingerprint ring \(R\), extended to the sentinel values by the
+for the current target ring \(R\), extended to the sentinel values by the
 algebraic NaN rules.  It promises congruence:
 \[
   f=g,\quad a_i=b_i\ \text{for all }i
@@ -635,7 +774,7 @@ channel implementing that law.
 This is not merely a weak fallback.  Algebraically, an opaque call is best
 viewed as adjoining a fresh formal generator \(t_{f,\mathbf a}\) for the
 operation and its argument tuple, then continuing the surrounding calculation in
-the chosen ring.  A fixed-width sanitizer cannot literally adjoin infinitely
+the target ring.  A fixed-width sanitizer cannot literally adjoin infinitely
 many independent generators, so the tag is the compact residue fingerprint of
 that formal-generator idea.  The same expression receives the same tag;
 unrelated opaque expressions are kept distinct except for the unavoidable
@@ -650,8 +789,8 @@ stable hash of the symbol name together with an argument-order-sensitive mix of
 the operand payloads.  These are tags in the same semantic sense as above:
 deterministic, operation-distinguishing, and deliberately uninterpreted.
 \texttt{hip-fpsan} matches those formulas in \texttt{Semantics::Triton}; in the
-algebraic modes the concrete mixing formula changes to live inside the chosen
-residue ring, but the contract is the same.
+algebraic modes the concrete mixing formula changes to live inside the target
+ring, but the contract is the same.
 
 No transcendence conjecture is involved in tags.  They behave like
 uninterpreted operation symbols with congruence, not like real transcendental
@@ -671,7 +810,7 @@ projective line
 \[
   \mathbb{P}^1(\F_p)=\F_p\cup\{\infty\},
 \]
-and the full carrier of the semantics is
+and the full target set of the semantics is
 \[
   \mathbb{P}^1(\F_p)\cup\{\mathrm{NaN}\}.
 \]
@@ -694,35 +833,19 @@ multiplication.  Consequently the algebraic semantics do not model IEEE-754
 numeric ordering.  Comparisons, \texttt{min}, and \texttt{max} use deterministic
 fingerprint ordering, as Triton FPSan does.
 
-\section{What the suffix ``2'' means}
-
-The suffix-2 variants are independent choices of moduli under the same design
-constraints:
-\[
-  \begin{gathered}
-  \texttt{Field2},\qquad
-  \texttt{FieldFast2},\qquad
-  \texttt{FieldWithMulCasts2},\\
-  \texttt{SophieGermainRing2},\qquad
-  \texttt{PythagoreanRing2}.
-  \end{gathered}
-\]
-They exist because the residue map is a fingerprint, not an injection.  If a
-check depends on a rare collision for one modulus, it should not depend on the
-corresponding collision for a second independently chosen modulus.  Rerunning
-with the suffix-2 semantics is the compact version of rerandomizing the prime.
-
 \section{Extension to irrational number schemes}
 
 The construction above used one special fact about ordinary binary floating
 point: finite values are dyadic rationals, hence elements of the localization
-\(\Z[1/2]\).  But many logarithmic-number-system variants make irrational
-algebraic values exactly representable by allowing fractional binary exponents:
-half-integral exponents give \(\sqrt2\), quarter-integral exponents give
-\(2^{1/4}\), and finer grids go further.  Such formats may or may not keep a
-mantissa.  Multiplication is then exponent addition, while addition is the hard
-operation.  For FPSan reduction, the only essential change is that the finite
-values now lie in a number field rather than in \(\Q\).
+\(\Z[1/2]\).  Logarithmic number systems are a long-standing alternative
+representation \cite{swartzlander-alexopoulos,alam-garland-gregg,nguyen-solovyev-gopalakrishnan},
+and many LNS-like variants make irrational algebraic values exactly
+representable by allowing fractional binary exponents: half-integral exponents
+give \(\sqrt2\), quarter-integral exponents give \(2^{1/4}\), and finer grids
+go further.  Such formats may or may not keep a mantissa.  Multiplication is
+then exponent addition, while addition is the hard operation.  For FPSan
+reduction, the only essential change is that the finite values now lie in a
+number field rather than in \(\Q\).
 
 In general, let \(K\) be a number field with ring of integers \(\mathcal O_K\),
 and suppose the representable finite values lie in a localization
@@ -734,22 +857,27 @@ and suppose the representable finite values lie in a localization
 \]
 The target is a finite field, not necessarily a prime field.  Thus ``reduce
 floats mod \(p\)'' is shorthand for reducing the localized ring of algebraic
-integers modulo a finite prime.
+integers modulo a finite prime.  The algebraic number theory used here is
+standard; see Neukirch \cite[Chapter I]{neukirch} for prime ideals,
+localization, ramification, and the Dedekind--Kummer theorem.
 
 Consider the concrete quarter-exponent example.  Let
 \[
   \alpha = 2^{1/4},\qquad K=\Q(\alpha),\qquad \alpha^4=2.
 \]
-A toy format with scale factors \(2^{k/4}\) and a binary mantissa has finite
-values in
+A format with scale factors \(2^{k/4}\) and a binary mantissa has finite values
+in the localized order
 \[
-  \Z[1/2,\alpha]=\Z[\alpha][1/2].
+  \Z[1/2,\alpha].
 \]
-Negative quarter-exponents introduce no new primes in the denominator, because
+Negative quarter-exponents are represented using
 \[
   \alpha^{-1}=\alpha^3/2,
 \]
-so inverting \(\alpha\) only inverts \(2\).  The polynomial \(X^4-2\) is
+so they introduce no new primes in the denominator beyond \(2\).  The same
+description covers the presence or absence of a binary mantissa, and any
+mantissa width, since mantissa bits introduce only integer coefficients and
+additional powers of \(2\) in the denominator.  The polynomial \(X^4-2\) is
 Eisenstein at \(2\), and the discriminant of the basis
 \(1,\alpha,\alpha^2,\alpha^3\) is
 \[
@@ -758,8 +886,9 @@ Eisenstein at \(2\), and the discriminant of the basis
 Thus ramification is confined to \(2\).  Every odd prime remains available for
 reduction, exactly as for dyadic rationals.
 
-For an odd rational prime \(p\), Dedekind's theorem reads the decomposition of
-\((p)\) from the factorization of \(X^4-2\) over \(\F_p\):
+For an odd rational prime \(p\), the Dedekind--Kummer theorem reads the
+decomposition of \((p)\) from the factorization of \(X^4-2\) over \(\F_p\)
+\cite[Chapter I]{neukirch}:
 \[
 \begin{array}{c|c|c}
 \text{condition on }p & X^4-2\text{ over }\F_p
@@ -790,7 +919,7 @@ field \(\F_{p^4}\).  The degree-two cases similarly produce residue fields
 \(\F_p\).
 
 For fingerprinting, any of these prime ideals can be a target.  If its residue
-degree is \(f\), the finite carrier is \(\F_{p^f}\), and the leaf map sends
+degree is \(f\), the finite target field is \(\F_{p^f}\), and the leaf map sends
 \[
   m\,\alpha^k\,2^{-r}
   \longmapsto
@@ -804,5 +933,50 @@ field \(\Q\); quarter-exponent LNS uses \(\Q(2^{1/4})\); other algebraic scale
 systems use other number fields.  Maximal ideals not inverted by the format
 still supply finite fields in which exact algebraic identities can be
 fingerprinted.
+
+\begin{thebibliography}{9}
+
+\bibitem{triton-fpsan-source}
+Triton language and compiler.
+\emph{Triton source tree}.
+GitHub repository.
+\url{https://github.com/triton-lang/triton}.
+
+\bibitem{goucher-fpsan-blog}
+Adam P. Goucher.
+\emph{Schanuel's Conjecture and the Semantics of FPSan}.
+Triton author's blog, 3 May 2026.
+\url{https://cp4space.hatsya.com/2026/05/03/schanuels-conjecture-and-the-semantics-of-fpsan/}.
+
+\bibitem{ocp-ofp8}
+Open Compute Project.
+\emph{OCP 8-bit Floating Point Specification (OFP8), Revision 1.0}.
+1 December 2023.
+\url{https://www.opencompute.org/documents/ocp-8-bit-floating-point-specification-ofp8-revision-1-0-2023-12-01-pdf-1}.
+
+\bibitem{swartzlander-alexopoulos}
+Earl E. Swartzlander, Jr. and Aristides G. Alexopoulos.
+\emph{The Sign/Logarithm Number System}.
+IEEE Transactions on Computers, C-24(12):1238--1242, 1975.
+
+\bibitem{alam-garland-gregg}
+Suneel A. Alam, John Garland, and David Gregg.
+\emph{Low-precision logarithmic number systems: beyond base-2}.
+arXiv:2102.06681, 2021.
+\url{https://arxiv.org/abs/2102.06681}.
+
+\bibitem{nguyen-solovyev-gopalakrishnan}
+Tuan-Hung Nguyen, Alexey Solovyev, and Ganesh Gopalakrishnan.
+\emph{Rigorous Error Analysis for Logarithmic Number Systems}.
+arXiv:2401.17184, 2024.
+\url{https://arxiv.org/abs/2401.17184}.
+
+\bibitem{neukirch}
+Jürgen Neukirch.
+\emph{Algebraic Number Theory}.
+Grundlehren der mathematischen Wissenschaften, volume 322.
+Springer, 1999.
+
+\end{thebibliography}
 
 \end{document}
