@@ -232,16 +232,18 @@ AMDGCN_MATH_FMED3_KERNEL(amdgcn_fmed3h, _Float16, __builtin_amdgcn_fmed3h)
         (void)hipFree(dPayWrapper);                                                                \
     }
 
-AMDGCN_MATH_UNARY_TEST(amdgcn_rcpf, float, make_positive_inputs)
-AMDGCN_MATH_UNARY_TEST(amdgcn_sqrtf, float, make_positive_inputs)
-AMDGCN_MATH_UNARY_TEST(amdgcn_rsqf, float, make_positive_inputs)
-AMDGCN_MATH_UNARY_TEST(amdgcn_rsq_clampf, float, make_positive_inputs)
-AMDGCN_MATH_UNARY_TEST(amdgcn_sinf, float, make_signed_inputs)
-AMDGCN_MATH_UNARY_TEST(amdgcn_cosf, float, make_signed_inputs)
-AMDGCN_MATH_UNARY_TEST(amdgcn_logf, float, make_positive_inputs)
-AMDGCN_MATH_UNARY_TEST(amdgcn_exp2f, float, make_signed_inputs)
-AMDGCN_MATH_UNARY_TEST(amdgcn_fractf, float, make_signed_inputs)
+AMDGCN_MATH_UNARY_TEST(amdgcn_rcp, double, make_positive_inputs)
+AMDGCN_MATH_UNARY_TEST(amdgcn_sqrt, double, make_positive_inputs)
+AMDGCN_MATH_UNARY_TEST(amdgcn_rsq, double, make_positive_inputs)
+AMDGCN_MATH_UNARY_TEST(amdgcn_rsq_clamp, double, make_positive_inputs)
+AMDGCN_MATH_UNARY_TEST(amdgcn_fract, double, make_signed_inputs)
 
+AMDGCN_MATH_UNARY_TEST(amdgcn_rcph, _Float16, make_positive_inputs)
+AMDGCN_MATH_UNARY_TEST(amdgcn_sqrth, _Float16, make_positive_inputs)
+AMDGCN_MATH_UNARY_TEST(amdgcn_rsqh, _Float16, make_positive_inputs)
+AMDGCN_MATH_UNARY_TEST(amdgcn_sinh, _Float16, make_signed_inputs)
+AMDGCN_MATH_UNARY_TEST(amdgcn_cosh, _Float16, make_signed_inputs)
+AMDGCN_MATH_UNARY_TEST(amdgcn_fracth, _Float16, make_signed_inputs)
 #undef AMDGCN_MATH_UNARY_TEST
 
 #define AMDGCN_MATH_FMED3_TEST(NAME, FT)                                                           \
@@ -289,6 +291,8 @@ AMDGCN_MATH_UNARY_TEST(amdgcn_fractf, float, make_signed_inputs)
         (void)hipFree(dPayWrapper);                                                                \
     }
 
+AMDGCN_MATH_FMED3_TEST(amdgcn_fmed3f, float)
+AMDGCN_MATH_FMED3_TEST(amdgcn_fmed3h, _Float16)
 #undef AMDGCN_MATH_FMED3_TEST
 
 // tanhf/tanhh need the tanh-insts feature and log_clampf is backend-deferred

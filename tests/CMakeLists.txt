@@ -203,11 +203,14 @@ if(TARGET GTest::gtest_main)
       # architecture subset where those builtins lower.
       fpsan_add_test(fpsan_cvt_test cvt_test.cpp)
       if(_fpsan_has_gfx12 OR _fpsan_has_cdna3)
-        fpsan_add_test(fpsan_cvt_fp8_test cvt_test.cpp)
-        target_compile_definitions(fpsan_cvt_fp8_test
-                                   PRIVATE FPSAN_TEST_ENABLE_PKRTZ_CVT=0
-                                           FPSAN_TEST_ENABLE_FP8_CVT=1)
+        fpsan_add_test(fpsan_cvt_fp8_test cvt_fp8_test.cpp)
+        fpsan_add_test(fpsan_cvt_fp8_pk_test cvt_fp8_pk_test.cpp)
+        fpsan_add_test(fpsan_cvt_fp8_pack_test cvt_fp8_pack_test.cpp)
+        fpsan_add_test(fpsan_cvt_fp8_sr_test cvt_fp8_sr_test.cpp)
         set_target_properties(fpsan_cvt_fp8_test
+                              fpsan_cvt_fp8_pk_test
+                              fpsan_cvt_fp8_pack_test
+                              fpsan_cvt_fp8_sr_test
                               PROPERTIES HIP_ARCHITECTURES "${_fpsan_fp8_cvt_arches}")
       endif()
     endif()
@@ -239,9 +242,32 @@ if(TARGET GTest::gtest_main)
       fpsan_add_test(fpsan_global_load_tr_gfx12_w64_test
                      global_load_tr_test.cpp TEST_PREFIX GFX12W64.)
       fpsan_add_test(fpsan_wmma_gfx12_test wmma_gfx12_test.cpp)
+      fpsan_add_test(fpsan_wmma_gfx12_acc16_test wmma_gfx12_acc16_test.cpp)
+      fpsan_add_test(fpsan_wmma_gfx12_fp8_test wmma_gfx12_fp8_test.cpp)
+      fpsan_add_test(fpsan_wmma_gfx12_fp8_bf8_test wmma_gfx12_fp8_bf8_test.cpp)
+      fpsan_add_test(fpsan_wmma_gfx12_fp8_mixed_test wmma_gfx12_fp8_mixed_test.cpp)
       fpsan_add_test(fpsan_wmma_gfx12_w64_test wmma_gfx12_test.cpp)
+      fpsan_add_test(fpsan_wmma_gfx12_acc16_w64_test wmma_gfx12_acc16_test.cpp)
+      fpsan_add_test(fpsan_wmma_gfx12_w64_fp8_test wmma_gfx12_fp8_test.cpp)
+      fpsan_add_test(fpsan_wmma_gfx12_w64_fp8_bf8_test wmma_gfx12_fp8_bf8_test.cpp)
+      fpsan_add_test(fpsan_wmma_gfx12_w64_fp8_mixed_test
+                     wmma_gfx12_fp8_mixed_test.cpp)
       fpsan_add_test(fpsan_swmmac_gfx12_test swmmac_gfx12_test.cpp)
+      fpsan_add_test(fpsan_swmmac_gfx12_h_test swmmac_gfx12_h_test.cpp)
+      fpsan_add_test(fpsan_swmmac_gfx12_h_bf16_test swmmac_gfx12_h_bf16_test.cpp)
+      fpsan_add_test(fpsan_swmmac_gfx12_h_f16out_test swmmac_gfx12_h_f16out_test.cpp)
+      fpsan_add_test(fpsan_swmmac_gfx12_fp8_test swmmac_gfx12_fp8_test.cpp)
+      fpsan_add_test(fpsan_swmmac_gfx12_fp8_mixed_test
+                     swmmac_gfx12_fp8_mixed_test.cpp)
       fpsan_add_test(fpsan_swmmac_gfx12_w64_test swmmac_gfx12_w64_test.cpp)
+      fpsan_add_test(fpsan_swmmac_gfx12_w64_16_test swmmac_gfx12_w64_16_test.cpp)
+      fpsan_add_test(fpsan_swmmac_gfx12_w64_fp8_test swmmac_gfx12_w64_fp8_test.cpp)
+      fpsan_add_test(fpsan_swmmac_gfx12_w64_fp8_bf8_test
+                     swmmac_gfx12_w64_fp8_bf8_test.cpp)
+      fpsan_add_test(fpsan_swmmac_gfx12_w64_fp8_mixed_test
+                     swmmac_gfx12_w64_fp8_mixed_test.cpp)
+      fpsan_add_test(fpsan_swmmac_gfx12_w64_fp8_bf8bf8_test
+                     swmmac_gfx12_w64_fp8_bf8bf8_test.cpp)
       fpsan_add_test(fpsan_xlane_gfx12_w64_test xlane_test.cpp TEST_PREFIX GFX12W64.)
       fpsan_add_test(fpsan_classify_gfx12_w64_test classify_test.cpp TEST_PREFIX GFX12W64.)
       fpsan_add_test(fpsan_wave_gfx12_w64_test wave_test.cpp TEST_PREFIX GFX12W64.)
@@ -252,15 +278,41 @@ if(TARGET GTest::gtest_main)
       fpsan_add_codegen_test(fpsan_algebraic_device_test algebraic_device_test.cpp)
       set_target_properties(fpsan_wmma_gfx12_test
                             fpsan_global_load_tr_gfx12_w64_test
+                            fpsan_wmma_gfx12_acc16_test
+                            fpsan_wmma_gfx12_fp8_test
+                            fpsan_wmma_gfx12_fp8_bf8_test
+                            fpsan_wmma_gfx12_fp8_mixed_test
                             fpsan_wmma_gfx12_w64_test
+                            fpsan_wmma_gfx12_acc16_w64_test
+                            fpsan_wmma_gfx12_w64_fp8_test
+                            fpsan_wmma_gfx12_w64_fp8_bf8_test
+                            fpsan_wmma_gfx12_w64_fp8_mixed_test
                             fpsan_swmmac_gfx12_test
+                            fpsan_swmmac_gfx12_h_test
+                            fpsan_swmmac_gfx12_h_bf16_test
+                            fpsan_swmmac_gfx12_h_f16out_test
+                            fpsan_swmmac_gfx12_fp8_test
+                            fpsan_swmmac_gfx12_fp8_mixed_test
                             fpsan_swmmac_gfx12_w64_test
+                            fpsan_swmmac_gfx12_w64_16_test
+                            fpsan_swmmac_gfx12_w64_fp8_test
+                            fpsan_swmmac_gfx12_w64_fp8_bf8_test
+                            fpsan_swmmac_gfx12_w64_fp8_mixed_test
+                            fpsan_swmmac_gfx12_w64_fp8_bf8bf8_test
                             fpsan_xlane_gfx12_w64_test
                             fpsan_classify_gfx12_w64_test
                             fpsan_wave_gfx12_w64_test
                             fpsan_algebraic_device_test
                             PROPERTIES HIP_ARCHITECTURES "${_fpsan_rdna4_arches}")
       target_compile_definitions(fpsan_wmma_gfx12_w64_test
+                                 PRIVATE FPSAN_TEST_GFX12_WAVE64=1)
+      target_compile_definitions(fpsan_wmma_gfx12_acc16_w64_test
+                                 PRIVATE FPSAN_TEST_GFX12_WAVE64=1)
+      target_compile_definitions(fpsan_wmma_gfx12_w64_fp8_test
+                                 PRIVATE FPSAN_TEST_GFX12_WAVE64=1)
+      target_compile_definitions(fpsan_wmma_gfx12_w64_fp8_bf8_test
+                                 PRIVATE FPSAN_TEST_GFX12_WAVE64=1)
+      target_compile_definitions(fpsan_wmma_gfx12_w64_fp8_mixed_test
                                  PRIVATE FPSAN_TEST_GFX12_WAVE64=1)
       target_compile_definitions(fpsan_global_load_tr_gfx12_w64_test
                                  PRIVATE FPSAN_TEST_GLOBAL_LOAD_TR_W64=1)
@@ -269,19 +321,50 @@ if(TARGET GTest::gtest_main)
                                          FPSAN_TEST_SKIP_FLOAT_WAVE_REDUCE=1)
       fpsan_enable_wave64(fpsan_global_load_tr_gfx12_w64_test)
       fpsan_enable_wave64(fpsan_wmma_gfx12_w64_test)
+      fpsan_enable_wave64(fpsan_wmma_gfx12_acc16_w64_test)
+      fpsan_enable_wave64(fpsan_wmma_gfx12_w64_fp8_test)
+      fpsan_enable_wave64(fpsan_wmma_gfx12_w64_fp8_bf8_test)
+      fpsan_enable_wave64(fpsan_wmma_gfx12_w64_fp8_mixed_test)
       fpsan_enable_wave64(fpsan_swmmac_gfx12_w64_test)
+      fpsan_enable_wave64(fpsan_swmmac_gfx12_w64_16_test)
+      fpsan_enable_wave64(fpsan_swmmac_gfx12_w64_fp8_test)
+      fpsan_enable_wave64(fpsan_swmmac_gfx12_w64_fp8_bf8_test)
+      fpsan_enable_wave64(fpsan_swmmac_gfx12_w64_fp8_mixed_test)
+      fpsan_enable_wave64(fpsan_swmmac_gfx12_w64_fp8_bf8bf8_test)
       fpsan_enable_wave64(fpsan_xlane_gfx12_w64_test)
       fpsan_enable_wave64(fpsan_classify_gfx12_w64_test)
       fpsan_enable_wave64(fpsan_wave_gfx12_w64_test)
     endif()
     if(_fpsan_has_gfx11)
       fpsan_add_test(fpsan_wmma_gfx11_test wmma_gfx11_test.cpp)
+      fpsan_add_test(fpsan_wmma_gfx11_acc16_test wmma_gfx11_acc16_test.cpp)
+      fpsan_add_test(fpsan_wmma_gfx11_tied_test wmma_gfx11_tied_test.cpp)
+      fpsan_add_test(fpsan_wmma_gfx11_tied_bf16_test wmma_gfx11_tied_bf16_test.cpp)
       fpsan_add_test(fpsan_wmma_gfx11_w64_test wmma_gfx11_test.cpp)
-      set_target_properties(fpsan_wmma_gfx11_test fpsan_wmma_gfx11_w64_test
+      fpsan_add_test(fpsan_wmma_gfx11_acc16_w64_test wmma_gfx11_acc16_test.cpp)
+      fpsan_add_test(fpsan_wmma_gfx11_tied_w64_test wmma_gfx11_tied_test.cpp)
+      fpsan_add_test(fpsan_wmma_gfx11_tied_bf16_w64_test wmma_gfx11_tied_bf16_test.cpp)
+      set_target_properties(fpsan_wmma_gfx11_test
+                            fpsan_wmma_gfx11_acc16_test
+                            fpsan_wmma_gfx11_tied_test
+                            fpsan_wmma_gfx11_tied_bf16_test
+                            fpsan_wmma_gfx11_w64_test
+                            fpsan_wmma_gfx11_acc16_w64_test
+                            fpsan_wmma_gfx11_tied_w64_test
+                            fpsan_wmma_gfx11_tied_bf16_w64_test
                             PROPERTIES HIP_ARCHITECTURES "${_fpsan_gfx11_arches}")
       target_compile_definitions(fpsan_wmma_gfx11_w64_test
                                  PRIVATE FPSAN_TEST_GFX11_WAVE64=1)
+      target_compile_definitions(fpsan_wmma_gfx11_acc16_w64_test
+                                 PRIVATE FPSAN_TEST_GFX11_WAVE64=1)
+      target_compile_definitions(fpsan_wmma_gfx11_tied_w64_test
+                                 PRIVATE FPSAN_TEST_GFX11_WAVE64=1)
+      target_compile_definitions(fpsan_wmma_gfx11_tied_bf16_w64_test
+                                 PRIVATE FPSAN_TEST_GFX11_WAVE64=1)
       fpsan_enable_gfx11_wave64(fpsan_wmma_gfx11_w64_test)
+      fpsan_enable_gfx11_wave64(fpsan_wmma_gfx11_acc16_w64_test)
+      fpsan_enable_gfx11_wave64(fpsan_wmma_gfx11_tied_w64_test)
+      fpsan_enable_gfx11_wave64(fpsan_wmma_gfx11_tied_bf16_w64_test)
     endif()
     if(_fpsan_has_gfx11)
       fpsan_add_test(fpsan_xlane_w64_test xlane_test.cpp TEST_PREFIX W64.)
@@ -413,20 +496,23 @@ if(TARGET GTest::gtest_main)
       endif()
       # ldexp{f,,h} builtins exist + lower on RDNA, CDNA3, and CDNA4.
       fpsan_add_test(fpsan_amdgcn_ldexp_test amdgcn_ldexp_test.cpp)
-      # Common scalar math builtins lower on RDNA3, RDNA4, CDNA3, and CDNA4. The same
-      # source also contains dot-product tests gated by compile definitions so
-      # the gfx12-only cases do not leak into CDNA/gfx1250 builds.
+      # Common scalar math builtins lower on RDNA3, RDNA4, CDNA3, and CDNA4. The
+      # dot-product wrappers are split into separate targets because they are
+      # among the slowest HIP translation units.
       fpsan_add_test(fpsan_amdgcn_math_test amdgcn_math_test.cpp)
+      fpsan_add_test(fpsan_amdgcn_math_extra_test amdgcn_math_extra_test.cpp)
       if(_fpsan_has_gfx11 OR _fpsan_has_rdna4 OR _fpsan_has_cdna3)
-        target_compile_definitions(fpsan_amdgcn_math_test
+        fpsan_add_test(fpsan_amdgcn_math_fdot2_test amdgcn_math_fdot2_test.cpp)
+        target_compile_definitions(fpsan_amdgcn_math_fdot2_test
                                    PRIVATE FPSAN_TEST_ENABLE_FDOT2=1)
       endif()
       if(_fpsan_has_gfx11 OR _fpsan_has_rdna4)
-        target_compile_definitions(fpsan_amdgcn_math_test
+        target_compile_definitions(fpsan_amdgcn_math_fdot2_test
                                    PRIVATE FPSAN_TEST_ENABLE_FDOT2_EXTENDED=1)
       endif()
       if(_fpsan_has_rdna4)
-        target_compile_definitions(fpsan_amdgcn_math_test
+        fpsan_add_test(fpsan_amdgcn_math_dot4_test amdgcn_math_dot4_test.cpp)
+        target_compile_definitions(fpsan_amdgcn_math_dot4_test
                                    PRIVATE FPSAN_TEST_ENABLE_GFX12_DOT_MATH=1)
       endif()
     endif()
