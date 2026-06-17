@@ -25,8 +25,10 @@ namespace fpsan
 {
     namespace detail
     {
-        // Sign-extend a storage payload field and encode the resulting integer in
-        // f32 payload semantics. Width is the source storage field's bit count; the
+        // Sign-extend a storage payload field into the destination payload bits.
+        // This is a storage-level resize, so even algebraic semantics preserve the
+        // raw sign-extended bits instead of reducing them modulo the algebraic ring.
+        // Width is the source storage field's bit count; the
         // high bits of `field` are ignored. Width==8 is reserved for storage-only
         // formats such as gfx1250 E5M3. Public FP8/BF8 Value formats must use
         // fpsan::cast so algebraic same-width format identity is preserved.
@@ -34,18 +36,7 @@ namespace fpsan
         FPSAN_HOST_DEVICE Value<float, S, C> storage_payload_widen(std::uint32_t field)
         {
             const std::int32_t e = static_cast<std::int32_t>(field << (32 - Width)) >> (32 - Width);
-            if constexpr(is_algebraic_semantics(S))
-            {
-                const auto c = Value<float, S, C>::alg_cfg();
-                const auto mag
-                    = static_cast<std::uint64_t>(e < 0 ? -static_cast<std::int64_t>(e) : e) % c.n;
-                const auto p = e < 0 && mag != 0 ? c.n - mag : mag;
-                return Value<float, S, C>::from_fpsan_payload(static_cast<std::uint32_t>(p));
-            }
-            else
-            {
-                return Value<float, S, C>::from_fpsan_payload(static_cast<std::uint32_t>(e));
-            }
+            return Value<float, S, C>::from_fpsan_payload(static_cast<std::uint32_t>(e));
         }
 
         // Sub-byte formats are storage-only, not scalar Value element types.

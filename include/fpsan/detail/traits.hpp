@@ -163,8 +163,15 @@ namespace fpsan
             = std::remove_cv_t<std::remove_reference_t<decltype(std::declval<T&>()[0])>>;
 
         // Build an unsigned vector type with `Bytes` total size and the given lane.
+        // The helper struct keeps GCC from warning about applying vector_size to a
+        // dependent type in an alias declaration while preserving Clang's type.
         template <class LaneBits, unsigned long Bytes>
-        using uint_vector_t = LaneBits __attribute__((__vector_size__(Bytes)));
+        struct uint_vector
+        {
+            typedef LaneBits type __attribute__((__vector_size__(Bytes)));
+        };
+        template <class LaneBits, unsigned long Bytes>
+        using uint_vector_t = typename uint_vector<LaneBits, Bytes>::type;
 
         // Lane (scalar) type of a possibly-vector bits type.
         template <class B, bool = is_clang_vector_v<B>>
