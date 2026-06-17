@@ -9,6 +9,7 @@
 #include "fpsan/math.hpp"
 #include "fpsan/value.hpp"
 
+#include <cmath>
 #include <cstdint>
 #include <cstdio>
 
@@ -56,6 +57,46 @@ static void checkf(bool ok, const char* tag, const char* what)
     std::snprintf(buf, sizeof buf, "%s: %s", tag, what);
     check(ok, buf);
 }
+
+template <class FP8, Semantics S>
+static void check_fp8_specials_exhaustive(const char* tag)
+{
+    using V        = Value<FP8, S, Conversions::Explicit>;
+    const auto cfg = V::alg_cfg();
+    for(unsigned b = 0; b < 256; ++b)
+    {
+        const FP8   x{static_cast<std::uint8_t>(b)};
+        const float f = static_cast<float>(x);
+        const auto  p = V{x}.fpsan_payload();
+        char        msg[192];
+        std::snprintf(msg, sizeof msg, "%s byte 0x%02x", tag, b);
+        if(std::isnan(f))
+            check(p == cfg.nan_code, msg);
+        else if(std::isinf(f))
+            check(p == cfg.inf_code, msg);
+        else
+            check(p < cfg.n, msg);
+    }
+}
+
+#define CHECK_FP8_SPECIALS_ALL(FP8, NAME)                                                          \
+    do                                                                                             \
+    {                                                                                              \
+        check_fp8_specials_exhaustive<FP8, Semantics::Field>(NAME " Field");                       \
+        check_fp8_specials_exhaustive<FP8, Semantics::Field2>(NAME " Field2");                     \
+        check_fp8_specials_exhaustive<FP8, Semantics::FieldFast>(NAME " FieldFast");               \
+        check_fp8_specials_exhaustive<FP8, Semantics::FieldFast2>(NAME " FieldFast2");             \
+        check_fp8_specials_exhaustive<FP8, Semantics::FieldWithMulCasts>(NAME                      \
+                                                                         " FieldWithMulCasts");    \
+        check_fp8_specials_exhaustive<FP8, Semantics::FieldWithMulCasts2>(NAME                     \
+                                                                          " FieldWithMulCasts2");  \
+        check_fp8_specials_exhaustive<FP8, Semantics::SophieGermainRing>(NAME                      \
+                                                                         " SophieGermainRing");    \
+        check_fp8_specials_exhaustive<FP8, Semantics::SophieGermainRing2>(NAME                     \
+                                                                          " SophieGermainRing2");  \
+        check_fp8_specials_exhaustive<FP8, Semantics::PythagoreanRing>(NAME " PythagoreanRing");   \
+        check_fp8_specials_exhaustive<FP8, Semantics::PythagoreanRing2>(NAME " PythagoreanRing2"); \
+    } while(false)
 
 // ===========================================================================
 // Scorecard batteries: one function per scorecard SECTION, run for EVERY
@@ -800,6 +841,11 @@ int main()
     // embed path must classify those raw source encodings before reducing finite
     // values modulo p.
     {
+        CHECK_FP8_SPECIALS_ALL(fp8_e4m3, "fp8 e4m3");
+        CHECK_FP8_SPECIALS_ALL(fp8_e5m2, "fp8 e5m2");
+        CHECK_FP8_SPECIALS_ALL(amd_fp8_e4m3, "amd fp8 e4m3 fnuz");
+        CHECK_FP8_SPECIALS_ALL(amd_fp8_e5m2, "amd fp8 e5m2 fnuz");
+
         using E4  = Value<fp8_e4m3, Semantics::Field, Conversions::Explicit>;
         using E5  = Value<fp8_e5m2, Semantics::Field, Conversions::Explicit>;
         using A4  = Value<amd_fp8_e4m3, Semantics::Field, Conversions::Explicit>;

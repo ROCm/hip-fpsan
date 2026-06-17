@@ -9,8 +9,8 @@
 // scalar wrapper:
 //   - Native mode forwards to the builtin (the wrapper produces the same bits
 //     as __builtin_amdgcn_{rcp,rsq,...}f directly).
-//   - FPSan mode matches fpsan::{rcp,rsqrt,...} payload-for-payload (the
-//     wrapper just routes to the tagged op).
+//   - FPSan-family semantics match fpsan::{rcp,rsqrt,...} payload-for-payload
+//     in the same semantics.
 //
 // The dot-product cases (fdot2 / dot4 fp8) are gated by compile definitions
 // (FPSAN_TEST_ENABLE_FDOT2 / FPSAN_TEST_ENABLE_GFX12_DOT_MATH) to the families
@@ -311,11 +311,11 @@ AMDGCN_MATH_FMED3_TEST(amdgcn_fmed3h, _Float16)
 // ============================================================================
 // fdot2 family.  Two properties per wrapper:
 //   - Native mode bit-exact matches the underlying builtin.
-//   - FPSan mode matches the expanded `acc + cast(a0)*cast(b0) +
-//     cast(a1)*cast(b1)` expression (payload-for-payload).  We compute the
-//     expanded expression in the same kernel using the FPSan tagged ops, so the
-//     test exercises the wrapper's contract rather than re-deriving the ring
-//     math host-side.
+//   - FPSan-family semantics match the expanded `acc + cast(a0)*cast(b0) +
+//     cast(a1)*cast(b1)` expression (payload-for-payload). We compute the
+//     expanded expression in the same kernel using FPSan operations, so the test
+//     exercises the wrapper's contract rather than re-deriving the payload
+//     arithmetic host-side.
 // ============================================================================
 
 using v2h   = _Float16 __attribute__((ext_vector_type(2)));

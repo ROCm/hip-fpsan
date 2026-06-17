@@ -334,20 +334,22 @@ TEST(CvtScalePk8Unpack, FpsanFp8Payload)
     FPSAN_RUN_ALL_VARIANTS(run_fpsan_pk8_fp8_payload);
 }
 
+template <Semantics S>
 __global__ void k_fpsan_pk16_fp6(const unsigned* in, unsigned scale, int* out)
 {
     // FP6 has no scalar Value<> element type; this pins the storage-payload
-    // signed-resize convention rather than an algebraic cast.
+    // convention rather than an algebraic cast.
     fpsan::v3u32_native p;
     p[0]   = in[0];
     p[1]   = in[1];
     p[2]   = in[2];
-    auto r = fpsan::amdgcn_cvt_scale_pk16_f32_fp6<0, Semantics::Triton, kCC>(p, scale);
+    auto r = fpsan::amdgcn_cvt_scale_pk16_f32_fp6<0, S, kCC>(p, scale);
     for(int i = 0; i < 16; ++i)
         out[i] = r.get(i).fpsan_payload();
 }
 
-TEST(CvtScalePk16Unpack, FpsanFp6Payload)
+template <Semantics S>
+void run_fpsan_pk16_fp6_payload()
 {
     if(!have_device())
         GTEST_SKIP() << "no HIP device";
@@ -356,17 +358,22 @@ TEST(CvtScalePk16Unpack, FpsanFp6Payload)
     unsigned* dIn = to_dev(std::vector<unsigned>(w.begin(), w.end()));
     int*      dO;
     HIP_CHECK(hipMalloc(&dO, 16 * sizeof(int)));
-    k_fpsan_pk16_fp6<<<1, 1>>>(dIn, kE8M0_x1, dO);
+    k_fpsan_pk16_fp6<S><<<1, 1>>>(dIn, kE8M0_x1, dO);
     HIP_CHECK(hipDeviceSynchronize());
     auto got = from_dev(dO, 16);
     for(int i = 0; i < 16; ++i)
     {
         std::uint32_t code = f32_to_narrow(in[i], kFp6E2M3) & 0x3Fu;
-        int           want = static_cast<int>(static_cast<std::int32_t>(code << 26) >> 26);
+        int want = static_cast<int>(fpsan::detail::subbyte_widen<6, S, kCC>(code).fpsan_payload());
         EXPECT_EQ(got[i], want) << "elem " << i;
     }
     (void)hipFree(dIn);
     (void)hipFree(dO);
+}
+
+TEST(CvtScalePk16Unpack, FpsanFp6Payload)
+{
+    FPSAN_RUN_ALL_VARIANTS(run_fpsan_pk16_fp6_payload);
 }
 
 #endif // has builtin

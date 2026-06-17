@@ -17,8 +17,9 @@
 //   Float : wrapper == hardware, checked against the INDEPENDENT host OCP
 //           reference (detail::narrow_to_f32 / f32_to_narrow), NOT the builtin.
 //   FPSan : wrapper == an independent payload-domain reference built from the
-//           public Value arithmetic (widen sign-resizes; pack DIVIDES by scale,
-//           unpack MULTIPLIES -- the silicon-verified MX direction). The scale
+//           public Value arithmetic (sub-byte operands use storage-payload
+//           widening; pack DIVIDES by scale, unpack MULTIPLIES -- the
+//           silicon-verified MX direction). The scale
 //           is deliberately != 1 so a flipped mul/div direction is caught (a
 //           pack->unpack round-trip would cancel it; these do not round-trip).
 //           For the SR ops the seed is varied to confirm it is opaque to the

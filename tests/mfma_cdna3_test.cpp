@@ -934,31 +934,35 @@ TEST(MfmaF64_16x16x4_NEG5, FpsanMatchesScalarReference)
         GTEST_SKIP() << "no HIP device";
     constexpr int NEG = 5;
     auto          d   = make_f64_16_inputs();
-    using VD          = Value<double, Semantics::Triton, kCC>;
-    std::vector<std::uint64_t> ref(F64_M * F64_N);
-    for(int i = 0; i < F64_M; ++i)
-        for(int j = 0; j < F64_N; ++j)
-        {
-            VD acc = host_neg_if(VD(d.C[i * F64_N + j]), (NEG & 4) != 0);
-            for(int k = 0; k < F64_K; ++k)
-                acc = acc
-                      + host_neg_if(VD(d.A[i * F64_K + k]), (NEG & 1) != 0)
-                            * host_neg_if(VD(d.B[k * F64_N + j]), (NEG & 2) != 0);
-            ref[i * F64_N + j] = acc.fpsan_payload();
-        }
-    double *       dA = to_dev(d.A), *dB = to_dev(d.B), *dC = to_dev(d.C);
-    std::uint64_t* dD;
-    HIP_CHECK(hipMalloc(&dD, ref.size() * sizeof(std::uint64_t)));
-    k_f64_16x16x4<Semantics::Triton, std::uint64_t, NEG><<<1, WAVE>>>(dA, dB, dC, dD);
-    HIP_CHECK(hipDeviceSynchronize());
-    std::vector<std::uint64_t> got(ref.size());
-    HIP_CHECK(hipMemcpy(got.data(), dD, got.size() * sizeof(std::uint64_t), hipMemcpyDeviceToHost));
-    for(std::size_t i = 0; i < got.size(); ++i)
-        EXPECT_EQ(got[i], ref[i]) << "elem " << i;
-    (void)hipFree(dA);
-    (void)hipFree(dB);
-    (void)hipFree(dC);
-    (void)hipFree(dD);
+    fpsan_test::for_each_fpsan_semantics([&](auto sem) {
+        constexpr Semantics S = decltype(sem)::value;
+        using VD              = Value<double, S, kCC>;
+        std::vector<std::uint64_t> ref(F64_M * F64_N);
+        for(int i = 0; i < F64_M; ++i)
+            for(int j = 0; j < F64_N; ++j)
+            {
+                VD acc = host_neg_if(VD(d.C[i * F64_N + j]), (NEG & 4) != 0);
+                for(int k = 0; k < F64_K; ++k)
+                    acc = acc
+                          + host_neg_if(VD(d.A[i * F64_K + k]), (NEG & 1) != 0)
+                                * host_neg_if(VD(d.B[k * F64_N + j]), (NEG & 2) != 0);
+                ref[i * F64_N + j] = acc.fpsan_payload();
+            }
+        double *       dA = to_dev(d.A), *dB = to_dev(d.B), *dC = to_dev(d.C);
+        std::uint64_t* dD;
+        HIP_CHECK(hipMalloc(&dD, ref.size() * sizeof(std::uint64_t)));
+        k_f64_16x16x4<S, std::uint64_t, NEG><<<1, WAVE>>>(dA, dB, dC, dD);
+        HIP_CHECK(hipDeviceSynchronize());
+        std::vector<std::uint64_t> got(ref.size());
+        HIP_CHECK(
+            hipMemcpy(got.data(), dD, got.size() * sizeof(std::uint64_t), hipMemcpyDeviceToHost));
+        for(std::size_t i = 0; i < got.size(); ++i)
+            EXPECT_EQ(got[i], ref[i]) << "elem " << i;
+        (void)hipFree(dA);
+        (void)hipFree(dB);
+        (void)hipFree(dC);
+        (void)hipFree(dD);
+    });
 }
 
 static constexpr int F64S_M = 4, F64S_N = 4, F64S_K = 4, F64S_B = 4;
@@ -1102,31 +1106,36 @@ TEST(MfmaF64_4x4x4_NEG5, FpsanMatchesScalarReference)
         GTEST_SKIP() << "no HIP device";
     constexpr int NEG = 5;
     auto          d   = make_f64_4_inputs();
-    using VD          = Value<double, Semantics::Triton, kCC>;
-    std::vector<std::uint64_t> ref(F64S_B * F64S_M * F64S_N);
-    for(int blk = 0; blk < F64S_B; ++blk)
-        for(int i = 0; i < F64S_M; ++i)
-            for(int j = 0; j < F64S_N; ++j)
-            {
-                VD acc = host_neg_if(VD(d.C[(blk * F64S_M + i) * F64S_N + j]), (NEG & 4) != 0);
-                for(int k = 0; k < F64S_K; ++k)
-                    acc = acc
-                          + host_neg_if(VD(d.A[(blk * F64S_M + i) * F64S_K + k]), (NEG & 1) != 0)
-                                * host_neg_if(VD(d.B[(blk * F64S_K + k) * F64S_N + j]),
-                                              (NEG & 2) != 0);
-                ref[(blk * F64S_M + i) * F64S_N + j] = acc.fpsan_payload();
-            }
-    double *       dA = to_dev(d.A), *dB = to_dev(d.B), *dC = to_dev(d.C);
-    std::uint64_t* dD;
-    HIP_CHECK(hipMalloc(&dD, ref.size() * sizeof(std::uint64_t)));
-    k_f64_4x4x4<Semantics::Triton, std::uint64_t, NEG><<<1, WAVE>>>(dA, dB, dC, dD);
-    HIP_CHECK(hipDeviceSynchronize());
-    std::vector<std::uint64_t> got(ref.size());
-    HIP_CHECK(hipMemcpy(got.data(), dD, got.size() * sizeof(std::uint64_t), hipMemcpyDeviceToHost));
-    for(std::size_t i = 0; i < got.size(); ++i)
-        EXPECT_EQ(got[i], ref[i]) << "elem " << i;
-    (void)hipFree(dA);
-    (void)hipFree(dB);
-    (void)hipFree(dC);
-    (void)hipFree(dD);
+    fpsan_test::for_each_fpsan_semantics([&](auto sem) {
+        constexpr Semantics S = decltype(sem)::value;
+        using VD              = Value<double, S, kCC>;
+        std::vector<std::uint64_t> ref(F64S_B * F64S_M * F64S_N);
+        for(int blk = 0; blk < F64S_B; ++blk)
+            for(int i = 0; i < F64S_M; ++i)
+                for(int j = 0; j < F64S_N; ++j)
+                {
+                    VD acc = host_neg_if(VD(d.C[(blk * F64S_M + i) * F64S_N + j]), (NEG & 4) != 0);
+                    for(int k = 0; k < F64S_K; ++k)
+                        acc = acc
+                              + host_neg_if(VD(d.A[(blk * F64S_M + i) * F64S_K + k]),
+                                            (NEG & 1) != 0)
+                                    * host_neg_if(VD(d.B[(blk * F64S_K + k) * F64S_N + j]),
+                                                  (NEG & 2) != 0);
+                    ref[(blk * F64S_M + i) * F64S_N + j] = acc.fpsan_payload();
+                }
+        double *       dA = to_dev(d.A), *dB = to_dev(d.B), *dC = to_dev(d.C);
+        std::uint64_t* dD;
+        HIP_CHECK(hipMalloc(&dD, ref.size() * sizeof(std::uint64_t)));
+        k_f64_4x4x4<S, std::uint64_t, NEG><<<1, WAVE>>>(dA, dB, dC, dD);
+        HIP_CHECK(hipDeviceSynchronize());
+        std::vector<std::uint64_t> got(ref.size());
+        HIP_CHECK(
+            hipMemcpy(got.data(), dD, got.size() * sizeof(std::uint64_t), hipMemcpyDeviceToHost));
+        for(std::size_t i = 0; i < got.size(); ++i)
+            EXPECT_EQ(got[i], ref[i]) << "elem " << i;
+        (void)hipFree(dA);
+        (void)hipFree(dB);
+        (void)hipFree(dC);
+        (void)hipFree(dD);
+    });
 }

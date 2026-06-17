@@ -23,6 +23,7 @@
 #include "fpsan/detail/fp8.hpp"
 #include "fpsan/fpsan.hpp"
 
+#include "fpsan_semantics.hpp"
 #include "hip_test_utils.hpp"
 #include "test_random.hpp"
 
@@ -173,14 +174,15 @@ TEST(WmmaF4_32x16x128, LayoutMatchesHardware)
 
 // ===================== wrapper: Float + FPSan =====================
 // FP4 is a packed storage format, not a scalar Value<> element type. The FPSan
-// checks here therefore pin the Triton/storage-payload convention
-// (subbyte_widen-style signed resize), not an algebraic Value cast.
-using VF = Value<float, Semantics::Triton, kCC>;
+// checks here therefore pin the storage-payload convention used by the wrapper,
+// not an algebraic Value<fp4> cast.
+template <Semantics S>
+using VF = Value<float, S, kCC>;
 
-static std::uint32_t sign_resize(std::uint32_t code, int width)
+template <Semantics S>
+static VF<S> f4_storage_value(std::uint32_t code)
 {
-    const std::int32_t e = static_cast<std::int32_t>(code << (32 - width)) >> (32 - width);
-    return static_cast<std::uint32_t>(e);
+    return fpsan::detail::subbyte_widen<4, S, kCC>(code);
 }
 
 __global__ void
@@ -202,6 +204,7 @@ __global__ void
         D[(r + 16 * (lane >> 4)) * N + (lane & 15)] = d.get(r).to_float();
 }
 
+template <Semantics S>
 __global__ void k_wrap_fpsan(const std::uint32_t* Apack,
                              const std::uint32_t* Bpack,
                              const float*         C,
@@ -217,8 +220,8 @@ __global__ void k_wrap_fpsan(const std::uint32_t* Apack,
     v16f_native cn;
     for(int r = 0; r < 16; ++r)
         cn[r] = C[(r + 16 * (lane >> 4)) * N + (lane & 15)];
-    Value<v16f_native, Semantics::Triton, kCC> c(cn);
-    auto d = fpsan::amdgcn_wmma_f32_32x16x128_f4<Semantics::Triton, kCC>(a, b, c);
+    Value<v16f_native, S, kCC> c(cn);
+    auto                       d = fpsan::amdgcn_wmma_f32_32x16x128_f4<S, kCC>(a, b, c);
     for(int r = 0; r < 16; ++r)
         Dpay[(r + 16 * (lane >> 4)) * N + (lane & 15)] = d.get(r).fpsan_payload();
 }
@@ -255,52 +258,56 @@ TEST(WmmaF4_32x16x128, WrapperFloatAndFPSan)
                 acc += A[m * K + k] * B[k * N + n];
             fref[m * N + n] = acc;
         }
-    std::vector<std::uint32_t> pref(M * N);
-    for(int m = 0; m < M; ++m)
-        for(int n = 0; n < N; ++n)
-        {
-            VF acc(C[m * N + n]);
-            for(int k = 0; k < K; ++k)
-            {
-                const std::uint32_t ca = f32_to_narrow(A[m * K + k], kFp4E2M1) & 0xF;
-                const std::uint32_t cb = f32_to_narrow(B[k * N + n], kFp4E2M1) & 0xF;
-                acc                    = acc
-                      + VF::from_fpsan_payload(sign_resize(ca, 4))
-                            * VF::from_fpsan_payload(sign_resize(cb, 4));
-            }
-            pref[m * N + n] = acc.fpsan_payload();
-        }
-
     std::uint32_t* dA  = to_dev(Apack);
     std::uint32_t* dB  = to_dev(Bpack);
     float*         dC  = to_dev(C);
     float*         dDf = nullptr;
-    std::uint32_t* dDp = nullptr;
     HIP_CHECK(hipMalloc(&dDf, M * N * sizeof(float)));
-    HIP_CHECK(hipMalloc(&dDp, M * N * sizeof(std::uint32_t)));
     k_wrap_float<<<1, 32>>>(dA, dB, dC, dDf);
-    k_wrap_fpsan<<<1, 32>>>(dA, dB, dC, dDp);
     HIP_CHECK(hipDeviceSynchronize());
-    std::vector<float>         gotf(M * N);
-    std::vector<std::uint32_t> gotp(M * N);
+    std::vector<float> gotf(M * N);
     HIP_CHECK(hipMemcpy(gotf.data(), dDf, M * N * sizeof(float), hipMemcpyDeviceToHost));
-    HIP_CHECK(hipMemcpy(gotp.data(), dDp, M * N * sizeof(std::uint32_t), hipMemcpyDeviceToHost));
-    int nf = 0, np = 0;
+    int nf = 0;
     for(int i = 0; i < M * N; ++i)
-    {
         if(bits_of(gotf[i]) != bits_of(fref[i]) && nf++ < 4)
             ADD_FAILURE() << "float at m=" << i / N << " n=" << i % N << " got=" << gotf[i]
                           << " ref=" << fref[i];
-        if(gotp[i] != pref[i] && np++ < 4)
-            ADD_FAILURE() << "payload at " << i << " got=" << gotp[i] << " ref=" << pref[i];
-    }
     EXPECT_EQ(nf, 0) << nf << " float mismatches";
-    EXPECT_EQ(np, 0) << np << " payload mismatches";
+
+    fpsan_test::for_each_fpsan_semantics([&](auto sem) {
+        constexpr Semantics        S = decltype(sem)::value;
+        std::vector<std::uint32_t> pref(M * N);
+        for(int m = 0; m < M; ++m)
+            for(int n = 0; n < N; ++n)
+            {
+                VF<S> acc(C[m * N + n]);
+                for(int k = 0; k < K; ++k)
+                {
+                    const std::uint32_t ca = f32_to_narrow(A[m * K + k], kFp4E2M1) & 0xF;
+                    const std::uint32_t cb = f32_to_narrow(B[k * N + n], kFp4E2M1) & 0xF;
+                    acc = acc + f4_storage_value<S>(ca) * f4_storage_value<S>(cb);
+                }
+                pref[m * N + n] = acc.fpsan_payload();
+            }
+
+        std::uint32_t* dDp = nullptr;
+        HIP_CHECK(hipMalloc(&dDp, M * N * sizeof(std::uint32_t)));
+        k_wrap_fpsan<S><<<1, 32>>>(dA, dB, dC, dDp);
+        HIP_CHECK(hipDeviceSynchronize());
+        std::vector<std::uint32_t> gotp(M * N);
+        HIP_CHECK(
+            hipMemcpy(gotp.data(), dDp, M * N * sizeof(std::uint32_t), hipMemcpyDeviceToHost));
+        int np = 0;
+        for(int i = 0; i < M * N; ++i)
+            if(gotp[i] != pref[i] && np++ < 4)
+                ADD_FAILURE() << "payload at " << i << " got=" << gotp[i] << " ref=" << pref[i];
+        EXPECT_EQ(np, 0) << np << " payload mismatches";
+        (void)hipFree(dDp);
+    });
     (void)hipFree(dA);
     (void)hipFree(dB);
     (void)hipFree(dC);
     (void)hipFree(dDf);
-    (void)hipFree(dDp);
 }
 
 // ===================== C-accumulator modifier (gfx1250) =====================
@@ -337,7 +344,7 @@ __global__ void
         D[(r + 16 * (lane >> 4)) * N + (lane & 15)] = d.get(r).to_float();
 }
 
-template <int Cmod>
+template <int Cmod, Semantics S>
 __global__ void k_f4_mod_fpsan(const std::uint32_t* Apack,
                                const std::uint32_t* Bpack,
                                const float*         C,
@@ -353,8 +360,8 @@ __global__ void k_f4_mod_fpsan(const std::uint32_t* Apack,
     v16f_native cn;
     for(int r = 0; r < 16; ++r)
         cn[r] = C[(r + 16 * (lane >> 4)) * N + (lane & 15)];
-    Value<v16f_native, Semantics::Triton, kCC> c(cn);
-    auto d = fpsan::amdgcn_wmma_f32_32x16x128_f4<Semantics::Triton, kCC, Cmod>(a, b, c);
+    Value<v16f_native, S, kCC> c(cn);
+    auto                       d = fpsan::amdgcn_wmma_f32_32x16x128_f4<S, kCC, Cmod>(a, b, c);
     for(int r = 0; r < 16; ++r)
         Dpay[(r + 16 * (lane >> 4)) * N + (lane & 15)] = d.get(r).fpsan_payload();
 }
@@ -392,56 +399,60 @@ static void run_modifier_f4()
                 acc += A[m * K + k] * B[k * N + n];
             fref[m * N + n] = acc;
         }
-    std::vector<std::uint32_t> pref(M * N);
-    for(int m = 0; m < M; ++m)
-        for(int n = 0; n < N; ++n)
-        {
-            VF cm(C[m * N + n]);
-            if(Cmod & 2)
-                cm = fpsan::max(cm, -cm);
-            if(Cmod & 1)
-                cm = -cm;
-            VF acc = cm;
-            for(int k = 0; k < K; ++k)
-            {
-                const std::uint32_t ca = f32_to_narrow(A[m * K + k], kFp4E2M1) & 0xF;
-                const std::uint32_t cb = f32_to_narrow(B[k * N + n], kFp4E2M1) & 0xF;
-                acc                    = acc
-                      + VF::from_fpsan_payload(sign_resize(ca, 4))
-                            * VF::from_fpsan_payload(sign_resize(cb, 4));
-            }
-            pref[m * N + n] = acc.fpsan_payload();
-        }
-
     std::uint32_t* dA  = to_dev(Apack);
     std::uint32_t* dB  = to_dev(Bpack);
     float*         dC  = to_dev(C);
     float*         dDf = nullptr;
-    std::uint32_t* dDp = nullptr;
     HIP_CHECK(hipMalloc(&dDf, M * N * sizeof(float)));
-    HIP_CHECK(hipMalloc(&dDp, M * N * sizeof(std::uint32_t)));
     k_f4_mod_float<Cmod><<<1, 32>>>(dA, dB, dC, dDf);
-    k_f4_mod_fpsan<Cmod><<<1, 32>>>(dA, dB, dC, dDp);
     HIP_CHECK(hipDeviceSynchronize());
-    std::vector<float>         gotf(M * N);
-    std::vector<std::uint32_t> gotp(M * N);
+    std::vector<float> gotf(M * N);
     HIP_CHECK(hipMemcpy(gotf.data(), dDf, M * N * sizeof(float), hipMemcpyDeviceToHost));
-    HIP_CHECK(hipMemcpy(gotp.data(), dDp, M * N * sizeof(std::uint32_t), hipMemcpyDeviceToHost));
-    int nf = 0, np = 0;
+    int nf = 0;
     for(int i = 0; i < M * N; ++i)
-    {
         if(bits_of(gotf[i]) != bits_of(fref[i]) && nf++ < 4)
             ADD_FAILURE() << "Cmod=" << Cmod << " float at m=" << i / N << " n=" << i % N;
-        if(gotp[i] != pref[i] && np++ < 4)
-            ADD_FAILURE() << "Cmod=" << Cmod << " payload at " << i;
-    }
     EXPECT_EQ(nf, 0) << nf << " float mismatches";
-    EXPECT_EQ(np, 0) << np << " payload mismatches";
+
+    fpsan_test::for_each_fpsan_semantics([&](auto sem) {
+        constexpr Semantics        S = decltype(sem)::value;
+        std::vector<std::uint32_t> pref(M * N);
+        for(int m = 0; m < M; ++m)
+            for(int n = 0; n < N; ++n)
+            {
+                VF<S> cm(C[m * N + n]);
+                if(Cmod & 2)
+                    cm = fpsan::max(cm, -cm);
+                if(Cmod & 1)
+                    cm = -cm;
+                VF<S> acc = cm;
+                for(int k = 0; k < K; ++k)
+                {
+                    const std::uint32_t ca = f32_to_narrow(A[m * K + k], kFp4E2M1) & 0xF;
+                    const std::uint32_t cb = f32_to_narrow(B[k * N + n], kFp4E2M1) & 0xF;
+                    acc = acc + f4_storage_value<S>(ca) * f4_storage_value<S>(cb);
+                }
+                pref[m * N + n] = acc.fpsan_payload();
+            }
+
+        std::uint32_t* dDp = nullptr;
+        HIP_CHECK(hipMalloc(&dDp, M * N * sizeof(std::uint32_t)));
+        k_f4_mod_fpsan<Cmod, S><<<1, 32>>>(dA, dB, dC, dDp);
+        HIP_CHECK(hipDeviceSynchronize());
+        std::vector<std::uint32_t> gotp(M * N);
+        HIP_CHECK(
+            hipMemcpy(gotp.data(), dDp, M * N * sizeof(std::uint32_t), hipMemcpyDeviceToHost));
+        int np = 0;
+        for(int i = 0; i < M * N; ++i)
+            if(gotp[i] != pref[i] && np++ < 4)
+                ADD_FAILURE() << "Cmod=" << Cmod << " payload at " << i;
+        EXPECT_EQ(np, 0) << np << " payload mismatches";
+        (void)hipFree(dDp);
+    });
     (void)hipFree(dA);
     (void)hipFree(dB);
     (void)hipFree(dC);
     (void)hipFree(dDf);
-    (void)hipFree(dDp);
 }
 
 TEST(WmmaF4_32x16x128, ModifierNegC)
@@ -495,7 +506,7 @@ __global__ void k_scale_float(const std::uint32_t* Apack,
         D[(r + 16 * (lane >> 4)) * N + (lane & 15)] = d.get(r).to_float();
 }
 
-template <int SFMT>
+template <int SFMT, Semantics S>
 __global__ void k_scale_fpsan(const std::uint32_t* Apack,
                               const std::uint32_t* Bpack,
                               const float*         C,
@@ -513,8 +524,8 @@ __global__ void k_scale_fpsan(const std::uint32_t* Apack,
     v16f_native cn;
     for(int r = 0; r < 16; ++r)
         cn[r] = C[(r + 16 * (lane >> 4)) * N + (lane & 15)];
-    Value<v16f_native, Semantics::Triton, kCC> c(cn);
-    auto d = fpsan::amdgcn_wmma_scale_f32_32x16x128_f4<Semantics::Triton, kCC, 0, SFMT, SFMT>(
+    Value<v16f_native, S, kCC> c(cn);
+    auto                       d = fpsan::amdgcn_wmma_scale_f32_32x16x128_f4<S, kCC, 0, SFMT, SFMT>(
         a, b, c, static_cast<int>(SA[lane]), static_cast<int>(SB[lane]));
     for(int r = 0; r < 16; ++r)
         Dpay[(r + 16 * (lane >> 4)) * N + (lane & 15)] = d.get(r).fpsan_payload();
@@ -545,7 +556,7 @@ __global__ void k_scale16_float(const std::uint32_t*      Apack,
         D[(r + 16 * (lane >> 4)) * N + (lane & 15)] = d.get(r).to_float();
 }
 
-template <int SFMT>
+template <int SFMT, Semantics S>
 __global__ void k_scale16_fpsan(const std::uint32_t*      Apack,
                                 const std::uint32_t*      Bpack,
                                 const float*              C,
@@ -563,8 +574,8 @@ __global__ void k_scale16_fpsan(const std::uint32_t*      Apack,
     v16f_native cn;
     for(int r = 0; r < 16; ++r)
         cn[r] = C[(r + 16 * (lane >> 4)) * N + (lane & 15)];
-    Value<v16f_native, Semantics::Triton, kCC> c(cn);
-    auto d = fpsan::amdgcn_wmma_scale16_f32_32x16x128_f4<Semantics::Triton, kCC, 0, SFMT, SFMT>(
+    Value<v16f_native, S, kCC> c(cn);
+    auto d = fpsan::amdgcn_wmma_scale16_f32_32x16x128_f4<S, kCC, 0, SFMT, SFMT>(
         a, b, c, static_cast<long>(SA[lane]), static_cast<long>(SB[lane]));
     for(int r = 0; r < 16; ++r)
         Dpay[(r + 16 * (lane >> 4)) * N + (lane & 15)] = d.get(r).fpsan_payload();
@@ -646,34 +657,35 @@ static void run_scale(const char* tag)
             }
             fref[m * N + n] = acc;
         }
-    std::vector<std::uint32_t> pref(M * N);
-    for(int m = 0; m < M; ++m)
-        for(int n = 0; n < N; ++n)
-        {
-            VF acc(C[m * N + n]);
-            for(int k = 0; k < K; ++k)
+    auto make_pref = [&](auto sem) {
+        constexpr Semantics        S = decltype(sem)::value;
+        std::vector<std::uint32_t> pref(M * N);
+        for(int m = 0; m < M; ++m)
+            for(int n = 0; n < N; ++n)
             {
-                const int           by = sbyte(k);
-                const std::uint32_t ca = f32_to_narrow(A[m * K + k], kFp4E2M1) & 0xF;
-                const std::uint32_t cb = f32_to_narrow(B[k * N + n], kFp4E2M1) & 0xF;
-                acc                    = acc
-                      + VF::from_fpsan_payload(sign_resize(ca, 4))
-                            * VF::from_fpsan_payload(sign_resize(cb, 4))
-                            * VF(scale_dec(eA[m * NBY + by], SFMT))
-                            * VF(scale_dec(eB[n * NBY + by], SFMT));
+                VF<S> acc(C[m * N + n]);
+                for(int k = 0; k < K; ++k)
+                {
+                    const int           by = sbyte(k);
+                    const std::uint32_t ca = f32_to_narrow(A[m * K + k], kFp4E2M1) & 0xF;
+                    const std::uint32_t cb = f32_to_narrow(B[k * N + n], kFp4E2M1) & 0xF;
+                    acc                    = acc
+                          + f4_storage_value<S>(ca) * f4_storage_value<S>(cb)
+                                * VF<S>(scale_dec(eA[m * NBY + by], SFMT))
+                                * VF<S>(scale_dec(eB[n * NBY + by], SFMT));
+                }
+                pref[m * N + n] = acc.fpsan_payload();
             }
-            pref[m * N + n] = acc.fpsan_payload();
-        }
+        return pref;
+    };
 
     // Stage per-lane scale operands: A row m -> lane scale_lane_a(m); B col n -> lane n.
     std::uint32_t* dA  = to_dev(Apack);
     std::uint32_t* dB  = to_dev(Bpack);
     float*         dC  = to_dev(C);
     float*         dDf = nullptr;
-    std::uint32_t* dDp = nullptr;
     HIP_CHECK(hipMalloc(&dDf, M * N * sizeof(float)));
-    HIP_CHECK(hipMalloc(&dDp, M * N * sizeof(std::uint32_t)));
-    int nf = 0, np = 0;
+    int nf = 0;
     if constexpr(!SCALE16)
     {
         std::vector<unsigned> SA(32, 0u), SB(32, 0u);
@@ -694,8 +706,25 @@ static void run_scale(const char* tag)
         unsigned* dSA = to_dev(SA);
         unsigned* dSB = to_dev(SB);
         k_scale_float<SFMT><<<1, 32>>>(dA, dB, dC, dSA, dSB, dDf);
-        k_scale_fpsan<SFMT><<<1, 32>>>(dA, dB, dC, dSA, dSB, dDp);
         HIP_CHECK(hipDeviceSynchronize());
+        fpsan_test::for_each_fpsan_semantics([&](auto sem) {
+            constexpr Semantics        S    = decltype(sem)::value;
+            std::vector<std::uint32_t> pref = make_pref(sem);
+            std::uint32_t*             dDp  = nullptr;
+            HIP_CHECK(hipMalloc(&dDp, M * N * sizeof(std::uint32_t)));
+            k_scale_fpsan<SFMT, S><<<1, 32>>>(dA, dB, dC, dSA, dSB, dDp);
+            HIP_CHECK(hipDeviceSynchronize());
+            std::vector<std::uint32_t> gotp(M * N);
+            HIP_CHECK(
+                hipMemcpy(gotp.data(), dDp, M * N * sizeof(std::uint32_t), hipMemcpyDeviceToHost));
+            int np = 0;
+            for(int i = 0; i < M * N; ++i)
+                if(gotp[i] != pref[i] && np++ < 4)
+                    ADD_FAILURE() << tag << " payload at " << i << " got=" << gotp[i]
+                                  << " ref=" << pref[i];
+            EXPECT_EQ(np, 0) << np << " payload mismatches";
+            (void)hipFree(dDp);
+        });
         (void)hipFree(dSA);
         (void)hipFree(dSB);
     }
@@ -719,30 +748,39 @@ static void run_scale(const char* tag)
         unsigned long long* dSA = to_dev(SA);
         unsigned long long* dSB = to_dev(SB);
         k_scale16_float<SFMT><<<1, 32>>>(dA, dB, dC, dSA, dSB, dDf);
-        k_scale16_fpsan<SFMT><<<1, 32>>>(dA, dB, dC, dSA, dSB, dDp);
         HIP_CHECK(hipDeviceSynchronize());
+        fpsan_test::for_each_fpsan_semantics([&](auto sem) {
+            constexpr Semantics        S    = decltype(sem)::value;
+            std::vector<std::uint32_t> pref = make_pref(sem);
+            std::uint32_t*             dDp  = nullptr;
+            HIP_CHECK(hipMalloc(&dDp, M * N * sizeof(std::uint32_t)));
+            k_scale16_fpsan<SFMT, S><<<1, 32>>>(dA, dB, dC, dSA, dSB, dDp);
+            HIP_CHECK(hipDeviceSynchronize());
+            std::vector<std::uint32_t> gotp(M * N);
+            HIP_CHECK(
+                hipMemcpy(gotp.data(), dDp, M * N * sizeof(std::uint32_t), hipMemcpyDeviceToHost));
+            int np = 0;
+            for(int i = 0; i < M * N; ++i)
+                if(gotp[i] != pref[i] && np++ < 4)
+                    ADD_FAILURE() << tag << " payload at " << i << " got=" << gotp[i]
+                                  << " ref=" << pref[i];
+            EXPECT_EQ(np, 0) << np << " payload mismatches";
+            (void)hipFree(dDp);
+        });
         (void)hipFree(dSA);
         (void)hipFree(dSB);
     }
-    std::vector<float>         gotf(M * N);
-    std::vector<std::uint32_t> gotp(M * N);
+    std::vector<float> gotf(M * N);
     HIP_CHECK(hipMemcpy(gotf.data(), dDf, M * N * sizeof(float), hipMemcpyDeviceToHost));
-    HIP_CHECK(hipMemcpy(gotp.data(), dDp, M * N * sizeof(std::uint32_t), hipMemcpyDeviceToHost));
     for(int i = 0; i < M * N; ++i)
-    {
         if(bits_of(gotf[i]) != bits_of(fref[i]) && nf++ < 4)
             ADD_FAILURE() << tag << " float at m=" << i / N << " n=" << i % N << " got=" << gotf[i]
                           << " ref=" << fref[i];
-        if(gotp[i] != pref[i] && np++ < 4)
-            ADD_FAILURE() << tag << " payload at " << i << " got=" << gotp[i] << " ref=" << pref[i];
-    }
     EXPECT_EQ(nf, 0) << nf << " float mismatches";
-    EXPECT_EQ(np, 0) << np << " payload mismatches";
     (void)hipFree(dA);
     (void)hipFree(dB);
     (void)hipFree(dC);
     (void)hipFree(dDf);
-    (void)hipFree(dDp);
 }
 
 TEST(WmmaF4_32x16x128, ScaleFloatAndFPSan)

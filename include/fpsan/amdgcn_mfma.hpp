@@ -486,8 +486,8 @@ namespace fpsan
         // consumes): in FPSan mode its bits ARE the per-slot payloads, packed at the
         // silicon-verified positions -- Width-bit field s occupies bits Width*s ..
         // Width*s+Width-1, little-endian across the 8 i32 words. This matches the cvt
-        // sub-byte convention (no phi bijection on sub-byte payloads; widen == signed
-        // resize of the n-bit payload). Verified on MI350 by a full-block-random
+        // sub-byte convention (no FP4/FP6 Value<> element type; widen uses the
+        // per-semantics storage-payload convention). Verified on MI350 by a full-block-random
         // match of the builtin for every same-width A/B combo.
         //
         // Cross-lane gather uses ds_bpermute on the individual 32-bit words (the field
@@ -496,8 +496,9 @@ namespace fpsan
         // permutations cancel in a same-format test but not when mixed), so the
         // wrappers static_assert that A and B share a bit width.
 
-        // detail::subbyte_widen (the FPSan signed-resize of a Width-bit payload to
-        // f32) comes from fpsan/detail/subbyte_widen.hpp, shared with amdgcn_cvt.hpp.
+        // detail::subbyte_widen (the FPSan storage-payload widening of a Width-bit
+        // field to f32) comes from fpsan/detail/subbyte_widen.hpp, shared with
+        // amdgcn_cvt.hpp.
 
         // Gather the Width-bit field at slot s from `srclane`'s packed register `pw`
         // (8 i32, this lane's copy) and widen it to an f32 payload.
@@ -621,7 +622,7 @@ namespace fpsan
         //   32x32x64  sub mix slot: lane = 16*(2*(k/32) + idx/16) + (idx%16),
         //     field p0 = 16*((k%32)/16) + (k%16)
         // The 8-bit operand stays a Value<v32_fragment> (proper fp8 payload casting);
-        // the sub operand is the raw packed v8i32 (bits are payloads, signed-resized).
+        // the sub operand is the raw packed v8i32 (bits are storage payloads).
         // `aIsSub` picks which side is sub. Per-K-block scale via scale_block_factor.
         template <bool AIsSub, int Wsub, class Fp8Frag, Semantics S, Conversions C>
         FPSAN_DEVICE Value<v4f_native, S, C> mfma_scale_mixed_16x16x128(Value<Fp8Frag, S, C> fp8,

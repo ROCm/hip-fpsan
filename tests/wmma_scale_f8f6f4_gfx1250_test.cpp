@@ -23,6 +23,7 @@
 #include "fpsan/detail/fp8.hpp"
 #include "fpsan/fpsan.hpp"
 
+#include "fpsan_semantics.hpp"
 #include "hip_test_utils.hpp"
 #include "test_random.hpp"
 
@@ -195,12 +196,11 @@ TEST(WmmaScaleF8f6f4_128, LayoutMatchesHardware)
 // ===================== Sub-byte block-scaled wrapper =====================
 // Validate the shipped amdgcn_wmma_scale_f32_16x16x128_f8f6f4_sub wrapper for
 // sub-byte operands: Native mode == host block-scaled matmul (decoded values),
-// FPSan mode == payload-ring block-scaled reference (sub-byte sign-resize).
-// FP4/FP6/E5M3-style operands in this file are packed storage formats, not
-// scalar Value<> element types, so these FPSan checks intentionally stay on the
-// Triton/storage-payload convention rather than algebraic Value casts.
+// FPSan-family semantics == payload-ring block-scaled reference in the same
+// semantics. FP4/FP6/BF6 are packed storage formats, not scalar Value<> element
+// types, so these checks use the explicit storage-payload convention. FP8/BF8
+// mixed operands are public scalar Value<> types and widen through fpsan::cast.
 static constexpr Conversions kCC = Conversions::Explicit;
-using VF                         = Value<float, Semantics::Triton, kCC>;
 
 static const FpFormat& fmt_of(int code)
 {
@@ -218,7 +218,7 @@ static const FpFormat& fmt_of(int code)
         return kFp4E2M1;
     }
 }
-static int width_of(int code)
+static constexpr int width_of(int code)
 {
     return code <= 1 ? 8 : code <= 3 ? 6 : 4;
 }
@@ -229,10 +229,17 @@ static void pack_field(std::uint32_t* reg, int slot, std::uint32_t code, int wid
         if((code >> b) & 1u)
             reg[(p + b) >> 5] |= 1u << ((p + b) & 31);
 }
-static std::uint32_t sign_resize(std::uint32_t code, int width)
+template <int FMT, Semantics S>
+static Value<float, S, kCC> widen_ref(std::uint32_t code)
 {
-    const std::int32_t e = static_cast<std::int32_t>(code << (32 - width)) >> (32 - width);
-    return static_cast<std::uint32_t>(e);
+    if constexpr(FMT == 0)
+        return fpsan::cast<float>(
+            Value<fpsan::fp8_e4m3, S, kCC>::from_fpsan_payload(static_cast<std::uint8_t>(code)));
+    else if constexpr(FMT == 1)
+        return fpsan::cast<float>(
+            Value<fpsan::fp8_e5m2, S, kCC>::from_fpsan_payload(static_cast<std::uint8_t>(code)));
+    else
+        return fpsan::detail::subbyte_widen<width_of(FMT), S, kCC>(code);
 }
 
 // Decode a scale byte per the WMMA scale-format immediate (mirrors the wrapper):
@@ -317,7 +324,7 @@ __global__ void k_sub_scale_float(const std::uint32_t* Apack,
         D[(e + 8 * (lane >> 4)) * N + (lane & 15)] = d.get(e).to_float();
 }
 
-template <int AFMT, int BFMT, int ASFMT, int BSFMT>
+template <Semantics S, int AFMT, int BFMT, int ASFMT, int BSFMT>
 __global__ void k_sub_scale_fpsan(const std::uint32_t* Apack,
                                   const std::uint32_t* Bpack,
                                   const float*         C,
@@ -335,20 +342,14 @@ __global__ void k_sub_scale_fpsan(const std::uint32_t* Apack,
     v8f_native cn;
     for(int e = 0; e < 8; ++e)
         cn[e] = C[(e + 8 * (lane >> 4)) * N + (lane & 15)];
-    Value<v8f_native, Semantics::Triton, kCC> c(cn);
-    auto d = fpsan::amdgcn_wmma_scale_f32_16x16x128_f8f6f4_sub<AFMT,
-                                                               BFMT,
-                                                               Semantics::Triton,
-                                                               kCC,
-                                                               0,
-                                                               ASFMT,
-                                                               BSFMT>(
+    Value<v8f_native, S, kCC> c(cn);
+    auto d = fpsan::amdgcn_wmma_scale_f32_16x16x128_f8f6f4_sub<AFMT, BFMT, S, kCC, 0, ASFMT, BSFMT>(
         a, b, c, static_cast<int>(SA[lane]), static_cast<int>(SB[lane]));
     for(int e = 0; e < 8; ++e)
         Dpay[(e + 8 * (lane >> 4)) * N + (lane & 15)] = d.get(e).fpsan_payload();
 }
 
-template <int AFMT, int BFMT, int ASFMT = 0, int BSFMT = 0>
+template <Semantics S, int AFMT, int BFMT, int ASFMT = 0, int BSFMT = 0>
 static void run_sub_scale(const char* tag)
 {
     if(!have_device())
@@ -400,12 +401,13 @@ static void run_sub_scale(const char* tag)
             fref[m * N + n] = acc;
         }
 
-    // FPSan reference: payload-ring per-element scaled, sub-byte sign-resize.
+    // FPSan reference: payload-ring per-element scaled, storage-payload widening.
     const std::uint32_t        amask = (1u << aw) - 1u, bmask = (1u << bw) - 1u;
     std::vector<std::uint32_t> pref(M * N);
     for(int m = 0; m < M; ++m)
         for(int n = 0; n < N; ++n)
         {
+            using VF = Value<float, S, kCC>;
             VF acc(C[m * N + n]);
             for(int k = 0; k < K; ++k)
             {
@@ -414,9 +416,7 @@ static void run_sub_scale(const char* tag)
                 const std::uint32_t cb   = f32_to_narrow(B[k * N + n], fmt_of(BFMT)) & bmask;
                 const VF            fa(scale_dec(unsigned(eA[m * NB + byte]) & 0xFFu, ASFMT));
                 const VF            fb(scale_dec(unsigned(eB[n * NB + byte]) & 0xFFu, BSFMT));
-                acc = acc
-                      + VF::from_fpsan_payload(sign_resize(ca, aw))
-                            * VF::from_fpsan_payload(sign_resize(cb, bw)) * fa * fb;
+                acc = acc + widen_ref<AFMT, S>(ca) * widen_ref<BFMT, S>(cb) * fa * fb;
             }
             pref[m * N + n] = acc.fpsan_payload();
         }
@@ -431,7 +431,7 @@ static void run_sub_scale(const char* tag)
     HIP_CHECK(hipMalloc(&dDf, M * N * sizeof(float)));
     HIP_CHECK(hipMalloc(&dDp, M * N * sizeof(std::uint32_t)));
     k_sub_scale_float<AFMT, BFMT, ASFMT, BSFMT><<<1, 32>>>(dA, dB, dC, dSA, dSB, dDf);
-    k_sub_scale_fpsan<AFMT, BFMT, ASFMT, BSFMT><<<1, 32>>>(dA, dB, dC, dSA, dSB, dDp);
+    k_sub_scale_fpsan<S, AFMT, BFMT, ASFMT, BSFMT><<<1, 32>>>(dA, dB, dC, dSA, dSB, dDp);
     HIP_CHECK(hipDeviceSynchronize());
     std::vector<float>         gotf(M * N);
     std::vector<std::uint32_t> gotp(M * N);
@@ -455,6 +455,13 @@ static void run_sub_scale(const char* tag)
     (void)hipFree(dSB);
     (void)hipFree(dDf);
     (void)hipFree(dDp);
+}
+
+template <int AFMT, int BFMT, int ASFMT = 0, int BSFMT = 0>
+static void run_sub_scale_all(const char* tag)
+{
+    fpsan_test::for_each_fpsan_semantics(
+        [&](auto sem) { run_sub_scale<decltype(sem)::value, AFMT, BFMT, ASFMT, BSFMT>(tag); });
 }
 
 // Probe: map (scale-operand lane La, byte Ba) -> (output row m, K-block kb) for
@@ -670,15 +677,15 @@ TEST(WmmaScaleF8f6f4_128, DISABLED_ProbeScale16LayoutFp8)
 
 TEST(WmmaScaleF8f6f4_128, SubFp6Fp6)
 {
-    run_sub_scale<2, 2>("fp6_fp6");
+    run_sub_scale_all<2, 2>("fp6_fp6");
 }
 TEST(WmmaScaleF8f6f4_128, SubFp4Fp4)
 {
-    run_sub_scale<4, 4>("fp4_fp4");
+    run_sub_scale_all<4, 4>("fp4_fp4");
 }
 TEST(WmmaScaleF8f6f4_128, SubFp6Fp4)
 {
-    run_sub_scale<2, 4>("fp6_fp4");
+    run_sub_scale_all<2, 4>("fp6_fp4");
 }
 // E4M3FN-format scales (scale fmt immediate = 2). On gfx1250, E4M3 scales are
 // only legal in matched configs: f4xf4 with both scales E4M3,
@@ -687,15 +694,15 @@ TEST(WmmaScaleF8f6f4_128, SubFp6Fp4)
 // oracles that decode the scale bytes in the matching format.
 TEST(WmmaScaleF8f6f4_128, SubFp4Fp4ScaleE4M3)
 {
-    run_sub_scale<4, 4, 2, 2>("fp4_fp4_e4m3");
+    run_sub_scale_all<4, 4, 2, 2>("fp4_fp4_e4m3");
 }
 TEST(WmmaScaleF8f6f4_128, SubFp6Fp4ScaleBE4M3)
 {
-    run_sub_scale<2, 4, 0, 2>("fp6_fp4_sB_e4m3"); // A fp6/E8M0, B fp4/E4M3
+    run_sub_scale_all<2, 4, 0, 2>("fp6_fp4_sB_e4m3"); // A fp6/E8M0, B fp4/E4M3
 }
 TEST(WmmaScaleF8f6f4_128, SubFp4Fp6ScaleAE4M3)
 {
-    run_sub_scale<4, 2, 2, 0>("fp4_fp6_sA_e4m3"); // A fp4/E4M3, B fp6/E8M0
+    run_sub_scale_all<4, 2, 2, 0>("fp4_fp6_sA_e4m3"); // A fp4/E4M3, B fp6/E8M0
 }
 
 // ===================== scale16 (i64) sub-byte wrapper =====================
@@ -730,7 +737,7 @@ __global__ void k_sub_scale16_float(const std::uint32_t*      Apack,
         D[(e + 8 * (lane >> 4)) * N + (lane & 15)] = d.get(e).to_float();
 }
 
-template <int AFMT, int BFMT>
+template <Semantics S, int AFMT, int BFMT>
 __global__ void k_sub_scale16_fpsan(const std::uint32_t*      Apack,
                                     const std::uint32_t*      Bpack,
                                     const float*              C,
@@ -748,15 +755,14 @@ __global__ void k_sub_scale16_fpsan(const std::uint32_t*      Apack,
     v8f_native cn;
     for(int e = 0; e < 8; ++e)
         cn[e] = C[(e + 8 * (lane >> 4)) * N + (lane & 15)];
-    Value<v8f_native, Semantics::Triton, kCC> c(cn);
-    auto                                      d
-        = fpsan::amdgcn_wmma_scale16_f32_16x16x128_f8f6f4_sub<AFMT, BFMT, Semantics::Triton, kCC>(
-            a, b, c, static_cast<long>(SA[lane]), static_cast<long>(SB[lane]));
+    Value<v8f_native, S, kCC> c(cn);
+    auto d = fpsan::amdgcn_wmma_scale16_f32_16x16x128_f8f6f4_sub<AFMT, BFMT, S, kCC>(
+        a, b, c, static_cast<long>(SA[lane]), static_cast<long>(SB[lane]));
     for(int e = 0; e < 8; ++e)
         Dpay[(e + 8 * (lane >> 4)) * N + (lane & 15)] = d.get(e).fpsan_payload();
 }
 
-template <int AFMT, int BFMT>
+template <Semantics S, int AFMT, int BFMT>
 static void run_sub_scale16(const char* tag)
 {
     if(!have_device())
@@ -828,6 +834,7 @@ static void run_sub_scale16(const char* tag)
     for(int m = 0; m < M; ++m)
         for(int n = 0; n < N; ++n)
         {
+            using VF = Value<float, S, kCC>;
             VF acc(C[m * N + n]);
             for(int k = 0; k < K; ++k)
             {
@@ -836,9 +843,7 @@ static void run_sub_scale16(const char* tag)
                 const std::uint32_t cb   = f32_to_narrow(B[k * N + n], fmt_of(BFMT)) & bmask;
                 const VF            fa(e8m0_to_float(unsigned(eA[m * NB16 + byte]) & 0xFFu));
                 const VF            fb(e8m0_to_float(unsigned(eB[n * NB16 + byte]) & 0xFFu));
-                acc = acc
-                      + VF::from_fpsan_payload(sign_resize(ca, aw))
-                            * VF::from_fpsan_payload(sign_resize(cb, bw)) * fa * fb;
+                acc = acc + widen_ref<AFMT, S>(ca) * widen_ref<BFMT, S>(cb) * fa * fb;
             }
             pref[m * N + n] = acc.fpsan_payload();
         }
@@ -853,7 +858,7 @@ static void run_sub_scale16(const char* tag)
     HIP_CHECK(hipMalloc(&dDf, M * N * sizeof(float)));
     HIP_CHECK(hipMalloc(&dDp, M * N * sizeof(std::uint32_t)));
     k_sub_scale16_float<AFMT, BFMT><<<1, 32>>>(dA, dB, dC, dSA, dSB, dDf);
-    k_sub_scale16_fpsan<AFMT, BFMT><<<1, 32>>>(dA, dB, dC, dSA, dSB, dDp);
+    k_sub_scale16_fpsan<S, AFMT, BFMT><<<1, 32>>>(dA, dB, dC, dSA, dSB, dDp);
     HIP_CHECK(hipDeviceSynchronize());
     std::vector<float>         gotf(M * N);
     std::vector<std::uint32_t> gotp(M * N);
@@ -879,17 +884,24 @@ static void run_sub_scale16(const char* tag)
     (void)hipFree(dDp);
 }
 
+template <int AFMT, int BFMT>
+static void run_sub_scale16_all(const char* tag)
+{
+    fpsan_test::for_each_fpsan_semantics(
+        [&](auto sem) { run_sub_scale16<decltype(sem)::value, AFMT, BFMT>(tag); });
+}
+
 TEST(WmmaScaleF8f6f4_128, Scale16SubFp6Fp6)
 {
-    run_sub_scale16<2, 2>("s16_fp6_fp6");
+    run_sub_scale16_all<2, 2>("s16_fp6_fp6");
 }
 TEST(WmmaScaleF8f6f4_128, Scale16SubFp4Fp4)
 {
-    run_sub_scale16<4, 4>("s16_fp4_fp4");
+    run_sub_scale16_all<4, 4>("s16_fp4_fp4");
 }
 TEST(WmmaScaleF8f6f4_128, Scale16SubFp6Fp4)
 {
-    run_sub_scale16<2, 4>("s16_fp6_fp4");
+    run_sub_scale16_all<2, 4>("s16_fp6_fp4");
 }
 
 // ===================== MIXED 8-bit x sub-byte block-scaled =====================
@@ -963,7 +975,7 @@ __global__ void k_mix_scale_float(const std::uint32_t* Apack,
         D[(e + 8 * (lane >> 4)) * N + (lane & 15)] = d.get(e).to_float();
 }
 
-template <int AFMT, int BFMT, int ASFMT, int BSFMT>
+template <Semantics S, int AFMT, int BFMT, int ASFMT, int BSFMT>
 __global__ void k_mix_scale_fpsan(const std::uint32_t* Apack,
                                   const std::uint32_t* Bpack,
                                   const float*         C,
@@ -981,20 +993,15 @@ __global__ void k_mix_scale_fpsan(const std::uint32_t* Apack,
     v8f_native cn;
     for(int e = 0; e < 8; ++e)
         cn[e] = C[(e + 8 * (lane >> 4)) * N + (lane & 15)];
-    Value<v8f_native, Semantics::Triton, kCC> c(cn);
-    auto d = fpsan::amdgcn_wmma_scale_f32_16x16x128_f8f6f4_mixed<AFMT,
-                                                                 BFMT,
-                                                                 Semantics::Triton,
-                                                                 kCC,
-                                                                 0,
-                                                                 ASFMT,
-                                                                 BSFMT>(
-        a, b, c, static_cast<int>(SA[lane]), static_cast<int>(SB[lane]));
+    Value<v8f_native, S, kCC> c(cn);
+    auto                      d
+        = fpsan::amdgcn_wmma_scale_f32_16x16x128_f8f6f4_mixed<AFMT, BFMT, S, kCC, 0, ASFMT, BSFMT>(
+            a, b, c, static_cast<int>(SA[lane]), static_cast<int>(SB[lane]));
     for(int e = 0; e < 8; ++e)
         Dpay[(e + 8 * (lane >> 4)) * N + (lane & 15)] = d.get(e).fpsan_payload();
 }
 
-template <int AFMT, int BFMT, int ASFMT = 0, int BSFMT = 0>
+template <Semantics S, int AFMT, int BFMT, int ASFMT = 0, int BSFMT = 0>
 static void run_mixed_scale(const char* tag)
 {
     if(!have_device())
@@ -1039,6 +1046,7 @@ static void run_mixed_scale(const char* tag)
     for(int m = 0; m < M; ++m)
         for(int n = 0; n < N; ++n)
         {
+            using VF = Value<float, S, kCC>;
             VF acc(C[m * N + n]);
             for(int k = 0; k < K; ++k)
             {
@@ -1047,9 +1055,7 @@ static void run_mixed_scale(const char* tag)
                 const std::uint32_t cb   = f32_to_narrow(B[k * N + n], fmt_of(BFMT)) & bmask;
                 const VF            fa(scale_dec(unsigned(eA[m * NB + byte]) & 0xFFu, ASFMT));
                 const VF            fb(scale_dec(unsigned(eB[n * NB + byte]) & 0xFFu, BSFMT));
-                acc = acc
-                      + VF::from_fpsan_payload(sign_resize(ca, aw))
-                            * VF::from_fpsan_payload(sign_resize(cb, bw)) * fa * fb;
+                acc = acc + widen_ref<AFMT, S>(ca) * widen_ref<BFMT, S>(cb) * fa * fb;
             }
             pref[m * N + n] = acc.fpsan_payload();
         }
@@ -1064,7 +1070,7 @@ static void run_mixed_scale(const char* tag)
     HIP_CHECK(hipMalloc(&dDf, M * N * sizeof(float)));
     HIP_CHECK(hipMalloc(&dDp, M * N * sizeof(std::uint32_t)));
     k_mix_scale_float<AFMT, BFMT, ASFMT, BSFMT><<<1, 32>>>(dA, dB, dC, dSA, dSB, dDf);
-    k_mix_scale_fpsan<AFMT, BFMT, ASFMT, BSFMT><<<1, 32>>>(dA, dB, dC, dSA, dSB, dDp);
+    k_mix_scale_fpsan<S, AFMT, BFMT, ASFMT, BSFMT><<<1, 32>>>(dA, dB, dC, dSA, dSB, dDp);
     HIP_CHECK(hipDeviceSynchronize());
     std::vector<float>         gotf(M * N);
     std::vector<std::uint32_t> gotp(M * N);
@@ -1090,31 +1096,38 @@ static void run_mixed_scale(const char* tag)
     (void)hipFree(dDp);
 }
 
+template <int AFMT, int BFMT, int ASFMT = 0, int BSFMT = 0>
+static void run_mixed_scale_all(const char* tag)
+{
+    fpsan_test::for_each_fpsan_semantics(
+        [&](auto sem) { run_mixed_scale<decltype(sem)::value, AFMT, BFMT, ASFMT, BSFMT>(tag); });
+}
+
 TEST(WmmaScaleF8f6f4_128, MixFp8Fp4)
 {
-    run_mixed_scale<0, 4>("mix_fp8_fp4");
+    run_mixed_scale_all<0, 4>("mix_fp8_fp4");
 }
 TEST(WmmaScaleF8f6f4_128, MixFp8Fp6)
 {
-    run_mixed_scale<0, 2>("mix_fp8_fp6");
+    run_mixed_scale_all<0, 2>("mix_fp8_fp6");
 }
 TEST(WmmaScaleF8f6f4_128, MixBf8Fp4)
 {
-    run_mixed_scale<1, 4>("mix_bf8_fp4");
+    run_mixed_scale_all<1, 4>("mix_bf8_fp4");
 }
 TEST(WmmaScaleF8f6f4_128, MixFp4Fp8)
 {
-    run_mixed_scale<4, 0>("mix_fp4_fp8");
+    run_mixed_scale_all<4, 0>("mix_fp4_fp8");
 }
 // E4M3-format scale on the f4 operand of an 8-bit x f4 mix (the 8-bit side stays
 // E8M0), the legal mixed E4M3 config.
 TEST(WmmaScaleF8f6f4_128, MixFp8Fp4ScaleBE4M3)
 {
-    run_mixed_scale<0, 4, 0, 2>("mix_fp8_fp4_sB_e4m3");
+    run_mixed_scale_all<0, 4, 0, 2>("mix_fp8_fp4_sB_e4m3");
 }
 TEST(WmmaScaleF8f6f4_128, MixFp4Fp8ScaleAE4M3)
 {
-    run_mixed_scale<4, 0, 2, 0>("mix_fp4_fp8_sA_e4m3");
+    run_mixed_scale_all<4, 0, 2, 0>("mix_fp4_fp8_sA_e4m3");
 }
 
 // ---- scale16 (i64) MIXED 8-bit x sub-byte ----
@@ -1144,7 +1157,7 @@ __global__ void k_mix_scale16_float(const std::uint32_t*      Apack,
         D[(e + 8 * (lane >> 4)) * N + (lane & 15)] = d.get(e).to_float();
 }
 
-template <int AFMT, int BFMT>
+template <Semantics S, int AFMT, int BFMT>
 __global__ void k_mix_scale16_fpsan(const std::uint32_t*      Apack,
                                     const std::uint32_t*      Bpack,
                                     const float*              C,
@@ -1162,15 +1175,14 @@ __global__ void k_mix_scale16_fpsan(const std::uint32_t*      Apack,
     v8f_native cn;
     for(int e = 0; e < 8; ++e)
         cn[e] = C[(e + 8 * (lane >> 4)) * N + (lane & 15)];
-    Value<v8f_native, Semantics::Triton, kCC> c(cn);
-    auto                                      d
-        = fpsan::amdgcn_wmma_scale16_f32_16x16x128_f8f6f4_mixed<AFMT, BFMT, Semantics::Triton, kCC>(
-            a, b, c, static_cast<long>(SA[lane]), static_cast<long>(SB[lane]));
+    Value<v8f_native, S, kCC> c(cn);
+    auto d = fpsan::amdgcn_wmma_scale16_f32_16x16x128_f8f6f4_mixed<AFMT, BFMT, S, kCC>(
+        a, b, c, static_cast<long>(SA[lane]), static_cast<long>(SB[lane]));
     for(int e = 0; e < 8; ++e)
         Dpay[(e + 8 * (lane >> 4)) * N + (lane & 15)] = d.get(e).fpsan_payload();
 }
 
-template <int AFMT, int BFMT>
+template <Semantics S, int AFMT, int BFMT>
 static void run_mixed_scale16(const char* tag)
 {
     if(!have_device())
@@ -1231,6 +1243,7 @@ static void run_mixed_scale16(const char* tag)
     for(int m = 0; m < M; ++m)
         for(int n = 0; n < N; ++n)
         {
+            using VF = Value<float, S, kCC>;
             VF acc(C[m * N + n]);
             for(int k = 0; k < K; ++k)
             {
@@ -1239,9 +1252,7 @@ static void run_mixed_scale16(const char* tag)
                 const std::uint32_t cb   = f32_to_narrow(B[k * N + n], fmt_of(BFMT)) & bmask;
                 const VF            fa(e8m0_to_float(unsigned(eA[m * NB16 + byte]) & 0xFFu));
                 const VF            fb(e8m0_to_float(unsigned(eB[n * NB16 + byte]) & 0xFFu));
-                acc = acc
-                      + VF::from_fpsan_payload(sign_resize(ca, aw))
-                            * VF::from_fpsan_payload(sign_resize(cb, bw)) * fa * fb;
+                acc = acc + widen_ref<AFMT, S>(ca) * widen_ref<BFMT, S>(cb) * fa * fb;
             }
             pref[m * N + n] = acc.fpsan_payload();
         }
@@ -1256,7 +1267,7 @@ static void run_mixed_scale16(const char* tag)
     HIP_CHECK(hipMalloc(&dDf, M * N * sizeof(float)));
     HIP_CHECK(hipMalloc(&dDp, M * N * sizeof(std::uint32_t)));
     k_mix_scale16_float<AFMT, BFMT><<<1, 32>>>(dA, dB, dC, dSA, dSB, dDf);
-    k_mix_scale16_fpsan<AFMT, BFMT><<<1, 32>>>(dA, dB, dC, dSA, dSB, dDp);
+    k_mix_scale16_fpsan<S, AFMT, BFMT><<<1, 32>>>(dA, dB, dC, dSA, dSB, dDp);
     HIP_CHECK(hipDeviceSynchronize());
     std::vector<float>         gotf(M * N);
     std::vector<std::uint32_t> gotp(M * N);
@@ -1282,17 +1293,24 @@ static void run_mixed_scale16(const char* tag)
     (void)hipFree(dDp);
 }
 
+template <int AFMT, int BFMT>
+static void run_mixed_scale16_all(const char* tag)
+{
+    fpsan_test::for_each_fpsan_semantics(
+        [&](auto sem) { run_mixed_scale16<decltype(sem)::value, AFMT, BFMT>(tag); });
+}
+
 TEST(WmmaScaleF8f6f4_128, MixS16Fp8Fp4)
 {
-    run_mixed_scale16<0, 4>("s16_mix_fp8_fp4");
+    run_mixed_scale16_all<0, 4>("s16_mix_fp8_fp4");
 }
 TEST(WmmaScaleF8f6f4_128, MixS16Fp8Fp6)
 {
-    run_mixed_scale16<0, 2>("s16_mix_fp8_fp6");
+    run_mixed_scale16_all<0, 2>("s16_mix_fp8_fp6");
 }
 TEST(WmmaScaleF8f6f4_128, MixS16Fp4Fp8)
 {
-    run_mixed_scale16<4, 0>("s16_mix_fp4_fp8");
+    run_mixed_scale16_all<4, 0>("s16_mix_fp4_fp8");
 }
 
 #endif // __has_builtin(__builtin_amdgcn_wmma_scale_f32_16x16x128_f8f6f4)

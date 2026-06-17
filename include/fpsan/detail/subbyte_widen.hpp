@@ -7,8 +7,9 @@
 // payload.
 //
 // FP4/FP6 are not scalar Value element types, so their packed gfx intrinsics use
-// a storage-level convention rather than a value-faithful algebraic cast:
-// sign-resize the low Width payload bits. This single helper implements that
+// a storage-level convention rather than a value-faithful algebraic cast: treat
+// the low Width payload bits as a signed storage integer, then encode that
+// integer in the destination payload semantics. This helper implements that
 // convention for the scaled-conversion wrappers (amdgcn_cvt.hpp: fp4/fp6 unpack)
 // and the scaled/sub-byte matrix dataflows, which both decode packed fp4/fp6
 // codes. Do not use it for FP8/BF8 Value types; those go through fpsan::cast.
@@ -24,14 +25,35 @@ namespace fpsan
 {
     namespace detail
     {
-        // Sign-resize a Width-bit payload (low Width bits of `field`) to a 32-bit
-        // f32 payload. Width is the source format's bit count (4 for fp4, 6 for
-        // fp6); the high bits of `field` are ignored.
+        // Sign-extend a storage payload field and encode the resulting integer in
+        // f32 payload semantics. Width is the source storage field's bit count; the
+        // high bits of `field` are ignored. Width==8 is reserved for storage-only
+        // formats such as gfx1250 E5M3. Public FP8/BF8 Value formats must use
+        // fpsan::cast so algebraic same-width format identity is preserved.
         template <int Width, Semantics S, Conversions C>
-        FPSAN_DEVICE Value<float, S, C> subbyte_widen(std::uint32_t field)
+        FPSAN_HOST_DEVICE Value<float, S, C> storage_payload_widen(std::uint32_t field)
         {
             const std::int32_t e = static_cast<std::int32_t>(field << (32 - Width)) >> (32 - Width);
-            return Value<float, S, C>::from_fpsan_payload(static_cast<std::uint32_t>(e));
+            if constexpr(is_algebraic_semantics(S))
+            {
+                const auto c = Value<float, S, C>::alg_cfg();
+                const auto mag
+                    = static_cast<std::uint64_t>(e < 0 ? -static_cast<std::int64_t>(e) : e) % c.n;
+                const auto p = e < 0 && mag != 0 ? c.n - mag : mag;
+                return Value<float, S, C>::from_fpsan_payload(static_cast<std::uint32_t>(p));
+            }
+            else
+            {
+                return Value<float, S, C>::from_fpsan_payload(static_cast<std::uint32_t>(e));
+            }
+        }
+
+        // Sub-byte formats are storage-only, not scalar Value element types.
+        template <int Width, Semantics S, Conversions C>
+        FPSAN_HOST_DEVICE Value<float, S, C> subbyte_widen(std::uint32_t field)
+        {
+            static_assert(Width < 8, "public FP8/BF8 payloads must be widened through fpsan::cast");
+            return storage_payload_widen<Width, S, C>(field);
         }
 
         // Element bit width of an f8f6f4 format immediate: fp8/bf8 (0,1) -> 8,

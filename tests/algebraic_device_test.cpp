@@ -29,14 +29,14 @@ __global__ void wmma_kernel(const _Float16* A, const _Float16* B, float* C)
         c[i] = C[i];
     }
     CV d = amdgcn_wmma_f32_16x16x16_f16_w32(AV(a), AV(b), CV(c));
-    // store the storage bits (payload in payload modes, float bits in Float
+    // store the storage bits (payload in payload modes, float bits in Native
     // mode) so the WMMA call is not dead-code-eliminated.
     auto bits = d.to_storage_bits();
     for(int i = 0; i < 8; ++i)
         C[i] = __builtin_bit_cast(float, static_cast<unsigned>(bits[i]));
 }
 
-// Force device codegen for Float, FPSan, and the algebraic variants through the
+// Force device codegen for Native, Triton, and the algebraic variants through the
 // same intrinsic. If the algebraic instantiations compile, orthogonality holds
 // at the actual GPU-codegen level.
 template __global__ void wmma_kernel<Semantics::Native>(const _Float16*, const _Float16*, float*);

@@ -269,7 +269,7 @@ CVT_F32_FP8_TEST(cvt_f32_bf8, 2)
 CVT_F32_FP8_TEST(cvt_f32_bf8, 3)
 
 // ---- cvt_pk_f32_fp8 / cvt_pk_f32_bf8 (packed unpack) -----------------------
-template <bool WordSel>
+template <bool WordSel, Semantics S>
 __global__ void k_cvt_pk_f32_fp8_pair(const int*     packed,
                                       float*         direct,
                                       float*         wrapper,
@@ -287,16 +287,16 @@ __global__ void k_cvt_pk_f32_fp8_pair(const int*     packed,
     const std::uint32_t u     = static_cast<std::uint32_t>(packed[i]);
     const std::uint8_t  byte0 = static_cast<std::uint8_t>((u >> ((2 * WordSel) * 8)) & 0xFFu);
     const std::uint8_t  byte1 = static_cast<std::uint8_t>((u >> ((2 * WordSel + 1) * 8)) & 0xFFu);
-    auto fp80         = Value<fpsan::fp8_e4m3, Semantics::Triton, kCC>::from_fpsan_payload(byte0);
-    auto fp81         = Value<fpsan::fp8_e4m3, Semantics::Triton, kCC>::from_fpsan_payload(byte1);
-    auto wf           = fpsan::amdgcn_cvt_pk_f32_fp8<WordSel, Semantics::Triton, kCC>(packed[i]);
-    pay_direct[2 * i] = fpsan::cast<float>(fp80).fpsan_payload();
-    pay_direct[2 * i + 1]  = fpsan::cast<float>(fp81).fpsan_payload();
-    pay_wrapper[2 * i]     = wf.get(0).fpsan_payload();
-    pay_wrapper[2 * i + 1] = wf.get(1).fpsan_payload();
+    auto                fp80  = Value<fpsan::fp8_e4m3, S, kCC>::from_fpsan_payload(byte0);
+    auto                fp81  = Value<fpsan::fp8_e4m3, S, kCC>::from_fpsan_payload(byte1);
+    auto                wf    = fpsan::amdgcn_cvt_pk_f32_fp8<WordSel, S, kCC>(packed[i]);
+    pay_direct[2 * i]         = fpsan::cast<float>(fp80).fpsan_payload();
+    pay_direct[2 * i + 1]     = fpsan::cast<float>(fp81).fpsan_payload();
+    pay_wrapper[2 * i]        = wf.get(0).fpsan_payload();
+    pay_wrapper[2 * i + 1]    = wf.get(1).fpsan_payload();
 }
 
-template <bool WordSel>
+template <bool WordSel, Semantics S>
 __global__ void k_cvt_pk_f32_bf8_pair(const int*     packed,
                                       float*         direct,
                                       float*         wrapper,
@@ -314,13 +314,13 @@ __global__ void k_cvt_pk_f32_bf8_pair(const int*     packed,
     const std::uint32_t u     = static_cast<std::uint32_t>(packed[i]);
     const std::uint8_t  byte0 = static_cast<std::uint8_t>((u >> ((2 * WordSel) * 8)) & 0xFFu);
     const std::uint8_t  byte1 = static_cast<std::uint8_t>((u >> ((2 * WordSel + 1) * 8)) & 0xFFu);
-    auto bf80         = Value<fpsan::fp8_e5m2, Semantics::Triton, kCC>::from_fpsan_payload(byte0);
-    auto bf81         = Value<fpsan::fp8_e5m2, Semantics::Triton, kCC>::from_fpsan_payload(byte1);
-    auto wf           = fpsan::amdgcn_cvt_pk_f32_bf8<WordSel, Semantics::Triton, kCC>(packed[i]);
-    pay_direct[2 * i] = fpsan::cast<float>(bf80).fpsan_payload();
-    pay_direct[2 * i + 1]  = fpsan::cast<float>(bf81).fpsan_payload();
-    pay_wrapper[2 * i]     = wf.get(0).fpsan_payload();
-    pay_wrapper[2 * i + 1] = wf.get(1).fpsan_payload();
+    auto                bf80  = Value<fpsan::fp8_e5m2, S, kCC>::from_fpsan_payload(byte0);
+    auto                bf81  = Value<fpsan::fp8_e5m2, S, kCC>::from_fpsan_payload(byte1);
+    auto                wf    = fpsan::amdgcn_cvt_pk_f32_bf8<WordSel, S, kCC>(packed[i]);
+    pay_direct[2 * i]         = fpsan::cast<float>(bf80).fpsan_payload();
+    pay_direct[2 * i + 1]     = fpsan::cast<float>(bf81).fpsan_payload();
+    pay_wrapper[2 * i]        = wf.get(0).fpsan_payload();
+    pay_wrapper[2 * i + 1]    = wf.get(1).fpsan_payload();
 }
 
 #define CVT_PK_F32_FP8_TEST(FAMILY, WORDSEL)                                                      \
@@ -339,7 +339,8 @@ __global__ void k_cvt_pk_f32_bf8_pair(const int*     packed,
         HIP_CHECK(hipMalloc(&dPdir, 2 * kFp8N * sizeof(std::uint32_t)));                          \
         HIP_CHECK(hipMalloc(&dPwrap, 2 * kFp8N * sizeof(std::uint32_t)));                         \
         HIP_CHECK(hipMemcpy(dIn, in.data(), kFp8N * sizeof(int), hipMemcpyHostToDevice));         \
-        k_##FAMILY##_pair<WORDSEL><<<1, kFp8N>>>(dIn, dDir, dWrap, dPdir, dPwrap);                \
+        k_##FAMILY##_pair<WORDSEL, Semantics::Triton>                                             \
+            <<<1, kFp8N>>>(dIn, dDir, dWrap, dPdir, dPwrap);                                      \
         HIP_CHECK(hipDeviceSynchronize());                                                        \
         std::vector<float>         dir(2 * kFp8N), wrap(2 * kFp8N);                               \
         std::vector<std::uint32_t> pdir(2 * kFp8N), pwrap(2 * kFp8N);                             \
@@ -356,6 +357,17 @@ __global__ void k_cvt_pk_f32_bf8_pair(const int*     packed,
                 EXPECT_EQ(bits_u32(wrap[i]), bits_u32(dir[i])) << "Float lane " << i;             \
             EXPECT_EQ(pwrap[i], pdir[i]) << "FPSan lane " << i;                                   \
         }                                                                                         \
+        fpsan_test::for_each_fpsan_semantics([&](auto sem) {                                      \
+            constexpr Semantics S = decltype(sem)::value;                                         \
+            k_##FAMILY##_pair<WORDSEL, S><<<1, kFp8N>>>(dIn, dDir, dWrap, dPdir, dPwrap);         \
+            HIP_CHECK(hipDeviceSynchronize());                                                    \
+            HIP_CHECK(hipMemcpy(                                                                  \
+                pdir.data(), dPdir, 2 * kFp8N * sizeof(std::uint32_t), hipMemcpyDeviceToHost));   \
+            HIP_CHECK(hipMemcpy(                                                                  \
+                pwrap.data(), dPwrap, 2 * kFp8N * sizeof(std::uint32_t), hipMemcpyDeviceToHost)); \
+            for(int i = 0; i < 2 * kFp8N; ++i)                                                    \
+                EXPECT_EQ(pwrap[i], pdir[i]) << fpsan::semantics_name(S) << " lane " << i;        \
+        });                                                                                       \
         (void)hipFree(dIn);                                                                       \
         (void)hipFree(dDir);                                                                      \
         (void)hipFree(dWrap);                                                                     \
@@ -514,7 +526,7 @@ CVT_PK_FP8_FPSAN_TEST(cvt_pk_bf8, true)
 CVT_PK_FP8_FPSAN_TEST(cvt_pk_bf8, false)
 
 // ---- cvt_sr_fp8_f32 / cvt_sr_bf8_f32 (stochastic round + byte splice) -------
-template <int ByteIdx>
+template <int ByteIdx, Semantics S>
 __global__ void k_cvt_sr_fp8_f32_pair(const float* a,
                                       const int*   old,
                                       const int*   seed,
@@ -529,16 +541,16 @@ __global__ void k_cvt_sr_fp8_f32_pair(const float* a,
     wrapper[i] = fpsan::amdgcn_cvt_sr_fp8_f32<ByteIdx, Semantics::Native, kCC>(
         avf, old[i], static_cast<std::uint32_t>(seed[i]));
 
-    Value<float, Semantics::Triton, kCC> avp{a[i]};
-    auto                                 f8 = fpsan::cast<fpsan::fp8_e4m3>(avp);
+    Value<float, S, kCC> avp{a[i]};
+    auto                 f8 = fpsan::cast<fpsan::fp8_e4m3>(avp);
     std::uint32_t u = static_cast<std::uint32_t>(old[i]) & ~(std::uint32_t{0xFFu} << (ByteIdx * 8));
     u |= static_cast<std::uint32_t>(static_cast<std::uint8_t>(f8.fpsan_payload())) << (ByteIdx * 8);
     expected[i]      = static_cast<int>(u);
-    fpsan_wrapper[i] = fpsan::amdgcn_cvt_sr_fp8_f32<ByteIdx, Semantics::Triton, kCC>(
+    fpsan_wrapper[i] = fpsan::amdgcn_cvt_sr_fp8_f32<ByteIdx, S, kCC>(
         avp, old[i], static_cast<std::uint32_t>(seed[i]));
 }
 
-template <int ByteIdx>
+template <int ByteIdx, Semantics S>
 __global__ void k_cvt_sr_bf8_f32_pair(const float* a,
                                       const int*   old,
                                       const int*   seed,
@@ -553,13 +565,13 @@ __global__ void k_cvt_sr_bf8_f32_pair(const float* a,
     wrapper[i] = fpsan::amdgcn_cvt_sr_bf8_f32<ByteIdx, Semantics::Native, kCC>(
         avf, old[i], static_cast<std::uint32_t>(seed[i]));
 
-    Value<float, Semantics::Triton, kCC> avp{a[i]};
-    auto                                 bf8 = fpsan::cast<fpsan::fp8_e5m2>(avp);
+    Value<float, S, kCC> avp{a[i]};
+    auto                 bf8 = fpsan::cast<fpsan::fp8_e5m2>(avp);
     std::uint32_t u = static_cast<std::uint32_t>(old[i]) & ~(std::uint32_t{0xFFu} << (ByteIdx * 8));
     u |= static_cast<std::uint32_t>(static_cast<std::uint8_t>(bf8.fpsan_payload()))
          << (ByteIdx * 8);
     expected[i]      = static_cast<int>(u);
-    fpsan_wrapper[i] = fpsan::amdgcn_cvt_sr_bf8_f32<ByteIdx, Semantics::Triton, kCC>(
+    fpsan_wrapper[i] = fpsan::amdgcn_cvt_sr_bf8_f32<ByteIdx, S, kCC>(
         avp, old[i], static_cast<std::uint32_t>(seed[i]));
 }
 
@@ -584,7 +596,8 @@ __global__ void k_cvt_sr_bf8_f32_pair(const float* a,
         HIP_CHECK(hipMemcpy(dA, a.data(), kFp8N * sizeof(float), hipMemcpyHostToDevice));       \
         HIP_CHECK(hipMemcpy(dOld, old.data(), kFp8N * sizeof(int), hipMemcpyHostToDevice));     \
         HIP_CHECK(hipMemcpy(dSeed, seed.data(), kFp8N * sizeof(int), hipMemcpyHostToDevice));   \
-        k_##FAMILY##_pair<BYTEIDX><<<1, kFp8N>>>(dA, dOld, dSeed, dDir, dWrap, dExp, dFwrap);   \
+        k_##FAMILY##_pair<BYTEIDX, Semantics::Triton>                                           \
+            <<<1, kFp8N>>>(dA, dOld, dSeed, dDir, dWrap, dExp, dFwrap);                         \
         HIP_CHECK(hipDeviceSynchronize());                                                      \
         std::vector<int> dir(kFp8N), wrap(kFp8N), exp(kFp8N), fwrap(kFp8N);                     \
         HIP_CHECK(hipMemcpy(dir.data(), dDir, kFp8N * sizeof(int), hipMemcpyDeviceToHost));     \
@@ -596,6 +609,17 @@ __global__ void k_cvt_sr_bf8_f32_pair(const float* a,
             EXPECT_EQ(wrap[i], dir[i]) << "Float lane " << i;                                   \
             EXPECT_EQ(fwrap[i], exp[i]) << "FPSan lane " << i;                                  \
         }                                                                                       \
+        fpsan_test::for_each_fpsan_semantics([&](auto sem) {                                    \
+            constexpr Semantics S = decltype(sem)::value;                                       \
+            k_##FAMILY##_pair<BYTEIDX, S>                                                       \
+                <<<1, kFp8N>>>(dA, dOld, dSeed, dDir, dWrap, dExp, dFwrap);                     \
+            HIP_CHECK(hipDeviceSynchronize());                                                  \
+            HIP_CHECK(hipMemcpy(exp.data(), dExp, kFp8N * sizeof(int), hipMemcpyDeviceToHost)); \
+            HIP_CHECK(                                                                          \
+                hipMemcpy(fwrap.data(), dFwrap, kFp8N * sizeof(int), hipMemcpyDeviceToHost));   \
+            for(int i = 0; i < kFp8N; ++i)                                                      \
+                EXPECT_EQ(fwrap[i], exp[i]) << fpsan::semantics_name(S) << " lane " << i;       \
+        });                                                                                     \
         (void)hipFree(dA);                                                                      \
         (void)hipFree(dOld);                                                                    \
         (void)hipFree(dSeed);                                                                   \

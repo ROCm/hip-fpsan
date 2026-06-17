@@ -25,6 +25,7 @@
 #include "fpsan/detail/fp8.hpp"
 #include "fpsan/fpsan.hpp"
 
+#include "fpsan_semantics.hpp"
 #include "hip_test_utils.hpp"
 #include "test_random.hpp"
 
@@ -71,7 +72,7 @@ static const FpFormat& fmt_of(int code)
         return kFp4E2M1;
     }
 }
-static int width_of(int code)
+static constexpr int width_of(int code)
 {
     return code <= 1 ? 8 : code <= 3 ? 6 : 4;
 }
@@ -296,21 +297,26 @@ TEST(WmmaF8f6f4_128, Fp6Fp8_mixed)
 }
 
 // ===================== FPSan payload property =====================
-// The shipped sub-byte wrapper's FPSan dataflow must equal an independent
-// payload-ring reference. The per-slot payload of a sub-byte code is the signed
-// resize of its Width-bit field (the ExtSI / subbyte_widen model, same as the
-// fp4/fp6 cvt-unpack path); products and the C term accumulate in the ring.
-// FP4/FP6 are storage formats rather than scalar Value<> element types, so this
-// remains a Triton/storage-payload convention, not an algebraic Value cast.
-using VF = Value<float, Semantics::Triton, kCC>;
+// The shipped wrapper's FPSan dataflow must equal an independent payload-ring
+// reference. FP4/FP6/BF6 are storage formats rather than scalar Value<> element
+// types, so their slots use the explicit storage-payload convention. FP8/BF8
+// are public scalar Value<> types, so mixed paths must preserve their format
+// identity and widen through fpsan::cast.
 
-static std::uint32_t sign_resize(std::uint32_t code, int width)
+template <int FMT, Semantics S>
+static Value<float, S, kCC> widen_ref(std::uint32_t code)
 {
-    const std::int32_t e = static_cast<std::int32_t>(code << (32 - width)) >> (32 - width);
-    return static_cast<std::uint32_t>(e);
+    if constexpr(FMT == 0)
+        return fpsan::cast<float>(
+            Value<fpsan::fp8_e4m3, S, kCC>::from_fpsan_payload(static_cast<std::uint8_t>(code)));
+    else if constexpr(FMT == 1)
+        return fpsan::cast<float>(
+            Value<fpsan::fp8_e5m2, S, kCC>::from_fpsan_payload(static_cast<std::uint8_t>(code)));
+    else
+        return fpsan::detail::subbyte_widen<width_of(FMT), S, kCC>(code);
 }
 
-template <int AFMT, int BFMT, bool MIXED = false>
+template <Semantics S, int AFMT, int BFMT, bool MIXED = false>
 __global__ void k_f8f6f4_fpsan(const std::uint32_t* Apack,
                                const std::uint32_t* Bpack,
                                const float*         C,
@@ -326,19 +332,17 @@ __global__ void k_f8f6f4_fpsan(const std::uint32_t* Apack,
     v8f_native cn;
     for(int e = 0; e < 8; ++e)
         cn[e] = C[(e + 8 * (lane >> 4)) * N + (lane & 15)];
-    Value<v8f_native, Semantics::Triton, kCC> c(cn);
-    Value<v8f_native, Semantics::Triton, kCC> d;
+    Value<v8f_native, S, kCC> c(cn);
+    Value<v8f_native, S, kCC> d;
     if constexpr(MIXED)
-        d = fpsan::amdgcn_wmma_f32_16x16x128_f8f6f4_mixed<AFMT, BFMT, Semantics::Triton, kCC>(
-            a, b, c);
+        d = fpsan::amdgcn_wmma_f32_16x16x128_f8f6f4_mixed<AFMT, BFMT, S, kCC>(a, b, c);
     else
-        d = fpsan::amdgcn_wmma_f32_16x16x128_f8f6f4_sub<AFMT, BFMT, Semantics::Triton, kCC>(
-            a, b, c);
+        d = fpsan::amdgcn_wmma_f32_16x16x128_f8f6f4_sub<AFMT, BFMT, S, kCC>(a, b, c);
     for(int e = 0; e < 8; ++e)
         Dpay[(e + 8 * (lane >> 4)) * N + (lane & 15)] = d.get(e).fpsan_payload();
 }
 
-template <int AFMT, int BFMT, bool MIXED = false>
+template <Semantics S, int AFMT, int BFMT, bool MIXED = false>
 static void run_fpsan(const char* tag)
 {
     if(!have_device())
@@ -365,14 +369,13 @@ static void run_fpsan(const char* tag)
     for(int m = 0; m < M; ++m)
         for(int n = 0; n < N; ++n)
         {
+            using VF = Value<float, S, kCC>;
             VF acc(C[m * N + n]);
             for(int k = 0; k < K; ++k)
             {
                 const std::uint32_t ca = f32_to_narrow(A[m * K + k], fmt_of(AFMT)) & amask;
                 const std::uint32_t cb = f32_to_narrow(B[k * N + n], fmt_of(BFMT)) & bmask;
-                acc                    = acc
-                      + VF::from_fpsan_payload(sign_resize(ca, aw))
-                            * VF::from_fpsan_payload(sign_resize(cb, bw));
+                acc                    = acc + widen_ref<AFMT, S>(ca) * widen_ref<BFMT, S>(cb);
             }
             ref[m * N + n] = acc.fpsan_payload();
         }
@@ -382,7 +385,7 @@ static void run_fpsan(const char* tag)
     float*         dC = to_dev(C);
     std::uint32_t* dD = nullptr;
     HIP_CHECK(hipMalloc(&dD, M * N * sizeof(std::uint32_t)));
-    k_f8f6f4_fpsan<AFMT, BFMT, MIXED><<<1, 32>>>(dA, dB, dC, dD);
+    k_f8f6f4_fpsan<S, AFMT, BFMT, MIXED><<<1, 32>>>(dA, dB, dC, dD);
     HIP_CHECK(hipDeviceSynchronize());
     std::vector<std::uint32_t> got(M * N);
     HIP_CHECK(hipMemcpy(got.data(), dD, M * N * sizeof(std::uint32_t), hipMemcpyDeviceToHost));
@@ -394,35 +397,42 @@ static void run_fpsan(const char* tag)
     (void)hipFree(dD);
 }
 
+template <int AFMT, int BFMT, bool MIXED = false>
+static void run_fpsan_all(const char* tag)
+{
+    fpsan_test::for_each_fpsan_semantics(
+        [&](auto sem) { run_fpsan<decltype(sem)::value, AFMT, BFMT, MIXED>(tag); });
+}
+
 TEST(WmmaF8f6f4_128, Fpsan_Fp6Fp6)
 {
-    run_fpsan<2, 2>("fp6_fp6");
+    run_fpsan_all<2, 2>("fp6_fp6");
 }
 TEST(WmmaF8f6f4_128, Fpsan_Bf6Bf6)
 {
-    run_fpsan<3, 3>("bf6_bf6");
+    run_fpsan_all<3, 3>("bf6_bf6");
 }
 TEST(WmmaF8f6f4_128, Fpsan_Fp4Fp4)
 {
-    run_fpsan<4, 4>("fp4_fp4");
+    run_fpsan_all<4, 4>("fp4_fp4");
 }
 TEST(WmmaF8f6f4_128, Fpsan_Fp6Fp4)
 {
-    run_fpsan<2, 4>("fp6_fp4");
+    run_fpsan_all<2, 4>("fp6_fp4");
 }
 // Mixed 8-bit x sub-byte FPSan: payload dataflow uses the mixed mix model
 // (8-bit operand on ab layout, sub operand on mix_lane/mix_slot).
 TEST(WmmaF8f6f4_128, Fpsan_Fp8Fp6_mixed)
 {
-    run_fpsan<0, 2, true>("fp8_fp6");
+    run_fpsan_all<0, 2, true>("fp8_fp6");
 }
 TEST(WmmaF8f6f4_128, Fpsan_Fp4Fp8_mixed)
 {
-    run_fpsan<4, 0, true>("fp4_fp8");
+    run_fpsan_all<4, 0, true>("fp4_fp8");
 }
 TEST(WmmaF8f6f4_128, Fpsan_Bf8Fp4_mixed)
 {
-    run_fpsan<1, 4, true>("bf8_fp4");
+    run_fpsan_all<1, 4, true>("bf8_fp4");
 }
 
 #endif // __has_builtin(__builtin_amdgcn_wmma_f32_16x16x128_f8f6f4)

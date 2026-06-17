@@ -14,12 +14,13 @@
 // The two tested properties mirror the gfx12 WMMA harness:
 //   (1) Semantics::Native software dataflow matches the real hardware builtin
 //       within the small observed gfx11 WMMA numeric tolerance.
-//   (2) Semantics::Triton matches an independent scalar host FPSan reference
-//       exactly, payload-for-payload.
+//   (2) Every FPSan-family semantics matches an independent scalar host reference
+//       in the same payload arithmetic, exactly payload-for-payload.
 
 #include "fpsan/amdgcn_matrix.hpp"
 #include "fpsan/fpsan.hpp"
 
+#include "fpsan_semantics.hpp"
 #include "hip_test_utils.hpp"
 #include "test_random.hpp"
 
@@ -187,19 +188,19 @@ __global__ void k_builtin(const typename Harness<Traits>::AElem* A,
     store_result<Traits, Semantics::Native>(d, D);
 }
 
-template <class Traits>
+template <class Traits, Semantics S>
 __global__ void k_fpsan(const typename Harness<Traits>::AElem* A,
                         const typename Harness<Traits>::BElem* B,
                         const typename Harness<Traits>::CElem* C,
                         typename Harness<Traits>::CBits*       Dpay)
 {
-    int                                                           lane = threadIdx.x;
-    Value<typename Harness<Traits>::AVec, Semantics::Triton, kCC> a;
-    Value<typename Harness<Traits>::BVec, Semantics::Triton, kCC> b;
-    Value<typename Harness<Traits>::CVec, Semantics::Triton, kCC> c;
-    load_frags<Traits, Semantics::Triton>(A, B, C, lane, a, b, c);
-    auto d = Traits::template call<Semantics::Triton, kCC>(a, b, c);
-    store_result<Traits, Semantics::Triton>(d, Dpay);
+    int                                           lane = threadIdx.x;
+    Value<typename Harness<Traits>::AVec, S, kCC> a;
+    Value<typename Harness<Traits>::BVec, S, kCC> b;
+    Value<typename Harness<Traits>::CVec, S, kCC> c;
+    load_frags<Traits, S>(A, B, C, lane, a, b, c);
+    auto d = Traits::template call<S, kCC>(a, b, c);
+    store_result<Traits, S>(d, Dpay);
 }
 
 template <class Traits>
@@ -228,7 +229,7 @@ __global__ void k_tied_preserve_float(typename Harness<Traits>::CElem* out)
         out[lane * H::c_lanes + i] = d.get(i).to_float();
 }
 
-template <class Traits>
+template <class Traits, Semantics S>
 __global__ void k_tied_preserve_fpsan(typename Harness<Traits>::CBits* out)
 {
     using H  = Harness<Traits>;
@@ -246,10 +247,10 @@ __global__ void k_tied_preserve_fpsan(typename Harness<Traits>::CBits* out)
     for(int i = 0; i < H::c_lanes; ++i)
         cn[i] = preserve_seed<CE>(lane, i);
 
-    Value<typename H::AVec, Semantics::Triton, kCC> a(an);
-    Value<typename H::BVec, Semantics::Triton, kCC> b(bn);
-    Value<typename H::CVec, Semantics::Triton, kCC> c(cn);
-    auto d = Traits::template call<Semantics::Triton, kCC>(a, b, c);
+    Value<typename H::AVec, S, kCC> a(an);
+    Value<typename H::BVec, S, kCC> b(bn);
+    Value<typename H::CVec, S, kCC> c(cn);
+    auto                            d = Traits::template call<S, kCC>(a, b, c);
     for(int i = 0; i < H::c_lanes; ++i)
         out[lane * H::c_lanes + i] = d.get(i).fpsan_payload();
 }
@@ -347,35 +348,39 @@ void run_fpsan_matches_scalar_reference()
     using CBits    = typename Harness<Traits>::CBits;
     Mats<Traits> m = make_inputs<Traits>();
 
-    using VA = Value<AE, Semantics::Triton, kCC>;
-    using VB = Value<BE, Semantics::Triton, kCC>;
-    using VC = Value<CE, Semantics::Triton, kCC>;
-    std::vector<CBits> ref(M * N);
-    for(int mm = 0; mm < M; ++mm)
-        for(int nn = 0; nn < N; ++nn)
-        {
-            VC acc(m.C[mm * N + nn]);
-            for(int k = 0; k < K; ++k)
-                acc = acc
-                      + fpsan::cast<CE>(VA(m.A[mm * K + k])) * fpsan::cast<CE>(VB(m.B[k * N + nn]));
-            ref[mm * N + nn] = acc.fpsan_payload();
-        }
+    AE* dA = to_dev(m.A);
+    BE* dB = to_dev(m.B);
+    CE* dC = to_dev(m.C);
+    fpsan_test::for_each_fpsan_semantics([&](auto sem) {
+        constexpr Semantics S = decltype(sem)::value;
+        using VA              = Value<AE, S, kCC>;
+        using VB              = Value<BE, S, kCC>;
+        using VC              = Value<CE, S, kCC>;
+        std::vector<CBits> ref(M * N);
+        for(int mm = 0; mm < M; ++mm)
+            for(int nn = 0; nn < N; ++nn)
+            {
+                VC acc(m.C[mm * N + nn]);
+                for(int k = 0; k < K; ++k)
+                    acc = acc
+                          + fpsan::cast<CE>(VA(m.A[mm * K + k]))
+                                * fpsan::cast<CE>(VB(m.B[k * N + nn]));
+                ref[mm * N + nn] = acc.fpsan_payload();
+            }
 
-    AE*    dA = to_dev(m.A);
-    BE*    dB = to_dev(m.B);
-    CE*    dC = to_dev(m.C);
-    CBits* dD;
-    HIP_CHECK(hipMalloc(&dD, M * N * sizeof(CBits)));
-    k_fpsan<Traits><<<1, Traits::wave_size>>>(dA, dB, dC, dD);
-    HIP_CHECK(hipDeviceSynchronize());
-    std::vector<CBits> got(M * N);
-    HIP_CHECK(hipMemcpy(got.data(), dD, M * N * sizeof(CBits), hipMemcpyDeviceToHost));
-    for(int i = 0; i < M * N; ++i)
-        EXPECT_EQ(got[i], ref[i]) << "payload mismatch at " << (i / N) << "," << (i % N);
+        CBits* dD;
+        HIP_CHECK(hipMalloc(&dD, M * N * sizeof(CBits)));
+        k_fpsan<Traits, S><<<1, Traits::wave_size>>>(dA, dB, dC, dD);
+        HIP_CHECK(hipDeviceSynchronize());
+        std::vector<CBits> got(M * N);
+        HIP_CHECK(hipMemcpy(got.data(), dD, M * N * sizeof(CBits), hipMemcpyDeviceToHost));
+        for(int i = 0; i < M * N; ++i)
+            EXPECT_EQ(got[i], ref[i]) << "payload mismatch at " << (i / N) << "," << (i % N);
+        (void)hipFree(dD);
+    });
     (void)hipFree(dA);
     (void)hipFree(dB);
     (void)hipFree(dC);
-    (void)hipFree(dD);
 }
 
 template <class Traits>
@@ -397,14 +402,6 @@ void run_tied_preserves_unselected()
     HIP_CHECK(hipMemcpy(got_float.data(), dFloat, count * sizeof(CE), hipMemcpyDeviceToHost));
     (void)hipFree(dFloat);
 
-    CBits* dFpsan;
-    HIP_CHECK(hipMalloc(&dFpsan, count * sizeof(CBits)));
-    k_tied_preserve_fpsan<Traits><<<1, Traits::wave_size>>>(dFpsan);
-    HIP_CHECK(hipDeviceSynchronize());
-    std::vector<CBits> got_fpsan(count);
-    HIP_CHECK(hipMemcpy(got_fpsan.data(), dFpsan, count * sizeof(CBits), hipMemcpyDeviceToHost));
-    (void)hipFree(dFpsan);
-
     for(int lane = 0; lane < Traits::wave_size; ++lane)
         for(int r = 0; r < H::output_regs; ++r)
         {
@@ -413,10 +410,30 @@ void run_tied_preserves_unselected()
             const auto flat = static_cast<std::size_t>(lane) * H::c_lanes + idx;
             EXPECT_EQ(bits_of(got_float[flat]), bits_of(seed))
                 << "Float preserve mismatch lane=" << lane << " idx=" << idx;
-            using VF = Value<CE, Semantics::Triton, kCC>;
-            EXPECT_EQ(got_fpsan[flat], VF(seed).fpsan_payload())
-                << "FPSan preserve mismatch lane=" << lane << " idx=" << idx;
         }
+
+    fpsan_test::for_each_fpsan_semantics([&](auto sem) {
+        constexpr Semantics S = decltype(sem)::value;
+        CBits*              dFpsan;
+        HIP_CHECK(hipMalloc(&dFpsan, count * sizeof(CBits)));
+        k_tied_preserve_fpsan<Traits, S><<<1, Traits::wave_size>>>(dFpsan);
+        HIP_CHECK(hipDeviceSynchronize());
+        std::vector<CBits> got_fpsan(count);
+        HIP_CHECK(
+            hipMemcpy(got_fpsan.data(), dFpsan, count * sizeof(CBits), hipMemcpyDeviceToHost));
+        (void)hipFree(dFpsan);
+
+        for(int lane = 0; lane < Traits::wave_size; ++lane)
+            for(int r = 0; r < H::output_regs; ++r)
+            {
+                const int  idx  = 2 * r + (Traits::opsel ? 0 : 1);
+                const CE   seed = preserve_seed<CE>(lane, idx);
+                const auto flat = static_cast<std::size_t>(lane) * H::c_lanes + idx;
+                using VF        = Value<CE, S, kCC>;
+                EXPECT_EQ(got_fpsan[flat], VF(seed).fpsan_payload())
+                    << "FPSan preserve mismatch lane=" << lane << " idx=" << idx;
+            }
+    });
 }
 
 struct WmmaGfx11F32F16

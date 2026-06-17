@@ -14,11 +14,12 @@
 // special-value table, asserted directly here. Native-mode references are
 // host-computed and INDEPENDENT of the device builtin, so any implementation
 // that diverges from them fails. FPSan-mode references use the deterministic
-// width-8 payload resize. Because E5M3 is not a scalar Value<> element type,
-// this stays a Triton/storage-payload convention rather than an algebraic cast.
+// width-8 storage-payload convention. Because E5M3 is not a scalar Value<>
+// element type, this stays a storage convention rather than an algebraic cast.
 #include "fpsan/amdgcn_cvt.hpp"
 #include "fpsan/fpsan.hpp"
 
+#include "fpsan_semantics.hpp"
 #include "hip_test_utils.hpp"
 
 #include <hip/hip_runtime.h>
@@ -38,15 +39,6 @@ using fpsan::detail::kFp8E5M3;
 using fpsan::detail::narrow_to_f32;
 
 static constexpr Conversions kCC = Conversions::Explicit;
-using VF                         = Value<float, Semantics::Triton, kCC>;
-
-namespace
-{
-    std::int32_t sext8(std::uint32_t b)
-    {
-        return static_cast<std::int32_t>(b << 24) >> 24;
-    }
-} // namespace
 
 #if !defined(__HIP_DEVICE_COMPILE__) || __has_builtin(__builtin_amdgcn_cvt_f32_fp8_e5m3)
 
@@ -257,13 +249,15 @@ TEST(CvtFp8E5M3, SrPackExact)
 }
 
 // ===========================================================================
-// 4. FPSan mode: deterministic width-8 payload resize (decode = sext8, pack =
-// low 8 bits), independent of the device builtin.
+// 4. FPSan mode: deterministic width-8 storage-payload resize (Triton signed
+// extension, algebraic residue embedding; pack = low 8 bits), independent of
+// the device builtin.
 // ===========================================================================
+template <Semantics S>
 __global__ void k_e5m3_fpsan_decode(const int* packed, unsigned* out)
 {
     int l  = threadIdx.x;
-    out[l] = fpsan::amdgcn_cvt_f32_fp8_e5m3<0, Semantics::Triton, kCC>(packed[l]).fpsan_payload();
+    out[l] = fpsan::amdgcn_cvt_f32_fp8_e5m3<0, S, kCC>(packed[l]).fpsan_payload();
 }
 
 TEST(CvtFp8E5M3, FpsanDecodeWiden8)
@@ -276,19 +270,28 @@ TEST(CvtFp8E5M3, FpsanDecodeWiden8)
     int*      dIn = to_dev(packed);
     unsigned* dO;
     HIP_CHECK(hipMalloc(&dO, 256 * sizeof(unsigned)));
-    k_e5m3_fpsan_decode<<<1, 256>>>(dIn, dO);
-    HIP_CHECK(hipDeviceSynchronize());
-    auto got = from_dev(dO, 256);
-    for(int b = 0; b < 256; ++b)
-        EXPECT_EQ(got[b], static_cast<unsigned>(sext8(static_cast<std::uint32_t>(b))))
-            << "byte 0x" << std::hex << b;
+    fpsan_test::for_each_fpsan_semantics([&](auto sem) {
+        constexpr Semantics S = decltype(sem)::value;
+        k_e5m3_fpsan_decode<S><<<1, 256>>>(dIn, dO);
+        HIP_CHECK(hipDeviceSynchronize());
+        auto got = from_dev(dO, 256);
+        for(int b = 0; b < 256; ++b)
+        {
+            auto want
+                = fpsan::detail::storage_payload_widen<8, S, kCC>(static_cast<std::uint32_t>(b))
+                      .fpsan_payload();
+            EXPECT_EQ(got[b], static_cast<unsigned>(want)) << "byte 0x" << std::hex << b;
+        }
+    });
     (void)hipFree(dIn);
     (void)hipFree(dO);
 }
 
+template <Semantics S>
 __global__ void k_e5m3_fpsan_pack(int old, float a, float b, int* out)
 {
-    *out = fpsan::amdgcn_cvt_pk_fp8_f32_e5m3<true, Semantics::Triton, kCC>(VF{a}, VF{b}, old);
+    using VF = Value<float, S, kCC>;
+    *out     = fpsan::amdgcn_cvt_pk_fp8_f32_e5m3<true, S, kCC>(VF{a}, VF{b}, old);
 }
 
 TEST(CvtFp8E5M3, FpsanPackLow8)
@@ -300,18 +303,22 @@ TEST(CvtFp8E5M3, FpsanPackLow8)
     int*         dO;
     HIP_CHECK(hipMalloc(&dO, sizeof(int)));
     std::uniform_int_distribution<int> dist(-200, 200);
-    for(int t = 0; t < 64; ++t)
-    {
-        float a = static_cast<float>(dist(rng));
-        float b = static_cast<float>(dist(rng));
-        k_e5m3_fpsan_pack<<<1, 1>>>(old, a, b, dO);
-        HIP_CHECK(hipDeviceSynchronize());
-        std::uint32_t got  = static_cast<std::uint32_t>(from_dev(dO, 1)[0]);
-        std::uint32_t ea   = VF{a}.fpsan_payload() & 0xFFu;
-        std::uint32_t eb   = VF{b}.fpsan_payload() & 0xFFu;
-        std::uint32_t want = (static_cast<std::uint32_t>(old) & 0xFFFF0000u) | ea | (eb << 8);
-        EXPECT_EQ(got, want) << "a=" << a << " b=" << b;
-    }
+    fpsan_test::for_each_fpsan_semantics([&](auto sem) {
+        constexpr Semantics S = decltype(sem)::value;
+        using VF              = Value<float, S, kCC>;
+        for(int t = 0; t < 64; ++t)
+        {
+            float a = static_cast<float>(dist(rng));
+            float b = static_cast<float>(dist(rng));
+            k_e5m3_fpsan_pack<S><<<1, 1>>>(old, a, b, dO);
+            HIP_CHECK(hipDeviceSynchronize());
+            std::uint32_t got  = static_cast<std::uint32_t>(from_dev(dO, 1)[0]);
+            std::uint32_t ea   = VF{a}.fpsan_payload() & 0xFFu;
+            std::uint32_t eb   = VF{b}.fpsan_payload() & 0xFFu;
+            std::uint32_t want = (static_cast<std::uint32_t>(old) & 0xFFFF0000u) | ea | (eb << 8);
+            EXPECT_EQ(got, want) << "a=" << a << " b=" << b;
+        }
+    });
     (void)hipFree(dO);
 }
 

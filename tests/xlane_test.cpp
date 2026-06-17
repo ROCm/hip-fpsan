@@ -6,7 +6,7 @@
 // GPU tests for the cross-lane data movers in fpsan/amdgcn_wave.hpp. Every
 // wrapper is pure bit movement -- the storage bits of one lane's Value end
 // up at some other lane unchanged -- so the property under test is that
-// after the move, each lane's payload (FPSan mode) and float bits (Float
+// after the move, each lane's payload (FPSan-family semantics) and float bits (Native
 // mode) equal the source lane's, with the source lane chosen by the
 // builtin's semantics. Native-mode and FPSan-mode share the same
 // bit-mover, so they should agree bit-for-bit on the lane mapping.
@@ -126,7 +126,7 @@ TEST(Xlane, ReadlaneFloat48)
 }
 TEST(Xlane, ReadlaneFpsan48)
 {
-    test_readlane<Semantics::Triton>(48);
+    FPSAN_RUN_ALL_VARIANTS(test_readlane, 48);
 }
 #endif
 
@@ -255,7 +255,7 @@ TEST(Xlane, DsBpermuteXorFloat31)
 }
 TEST(Xlane, DsBpermuteXorFpsan31)
 {
-    test_ds_bpermute_xor<Semantics::Triton>(31);
+    FPSAN_RUN_ALL_VARIANTS(test_ds_bpermute_xor, 31);
 }
 // off=32 is the cross-half boundary: gfx11 expects modulo-32 lane selection,
 // while RDNA4/gfx950 expect a full-wave exchange.
@@ -265,7 +265,7 @@ TEST(Xlane, DsBpermuteXorFloat32Boundary)
 }
 TEST(Xlane, DsBpermuteXorFpsan32Boundary)
 {
-    test_ds_bpermute_xor<Semantics::Triton>(32);
+    FPSAN_RUN_ALL_VARIANTS(test_ds_bpermute_xor, 32);
 }
 #endif
 
@@ -347,7 +347,7 @@ TEST(Xlane, DsPermuteXorFloat31)
 }
 TEST(Xlane, DsPermuteXorFpsan31)
 {
-    test_ds_permute_xor<Semantics::Triton>(31);
+    FPSAN_RUN_ALL_VARIANTS(test_ds_permute_xor, 31);
 }
 // off=32 is the cross-half boundary: gfx11 expects modulo-32 lane selection,
 // while RDNA4/gfx950 expect a full-wave exchange.
@@ -357,7 +357,7 @@ TEST(Xlane, DsPermuteXorFloat32Boundary)
 }
 TEST(Xlane, DsPermuteXorFpsan32Boundary)
 {
-    test_ds_permute_xor<Semantics::Triton>(32);
+    FPSAN_RUN_ALL_VARIANTS(test_ds_permute_xor, 32);
 }
 #endif
 
@@ -476,23 +476,33 @@ static void check_ds_swizzle_oracle(const char* tag)
     HIP_CHECK(hipMalloc(&d_f, LANES * sizeof(FOut)));
     HIP_CHECK(hipMalloc(&d_p, LANES * sizeof(POut)));
     k_ds_swizzle_pat<PAT, Semantics::Native><<<1, LANES>>>(d_f);
-    k_ds_swizzle_pat<PAT, Semantics::Triton><<<1, LANES>>>(d_p);
     HIP_CHECK(hipDeviceSynchronize());
     std::vector<FOut> gf(LANES);
     std::vector<POut> gp(LANES);
     HIP_CHECK(hipMemcpy(gf.data(), d_f, LANES * sizeof(FOut), hipMemcpyDeviceToHost));
-    HIP_CHECK(hipMemcpy(gp.data(), d_p, LANES * sizeof(POut), hipMemcpyDeviceToHost));
     using VF = Value<float, Semantics::Native, kCC>;
-    using VP = Value<float, Semantics::Triton, kCC>;
     for(int i = 0; i < LANES; ++i)
     {
         const int   s   = ds_swizzle_src(i, PAT);
         const float src = static_cast<float>(s * 7 + 1) - 100.f;
         EXPECT_EQ(gf[i], static_cast<float>(VF{src}))
             << tag << " Float lane " << i << " expected src lane " << s;
-        EXPECT_EQ(gp[i], VP{src}.fpsan_payload())
-            << tag << " FPSan lane " << i << " expected src lane " << s;
     }
+    fpsan_test::for_each_fpsan_semantics([&](auto sem) {
+        constexpr Semantics S = decltype(sem)::value;
+        k_ds_swizzle_pat<PAT, S><<<1, LANES>>>(d_p);
+        HIP_CHECK(hipDeviceSynchronize());
+        HIP_CHECK(hipMemcpy(gp.data(), d_p, LANES * sizeof(POut), hipMemcpyDeviceToHost));
+        using VP = Value<float, S, kCC>;
+        for(int i = 0; i < LANES; ++i)
+        {
+            const int   s   = ds_swizzle_src(i, PAT);
+            const float src = static_cast<float>(s * 7 + 1) - 100.f;
+            EXPECT_EQ(gp[i], VP{src}.fpsan_payload())
+                << tag << " " << fpsan::semantics_name(S) << " lane " << i << " expected src lane "
+                << s;
+        }
+    });
     (void)hipFree(d_f);
     (void)hipFree(d_p);
 }
@@ -627,7 +637,7 @@ TEST(Xlane, UpdateDppQuadSwapRowMaskFloat)
 }
 TEST(Xlane, UpdateDppQuadSwapRowMaskFpsan)
 {
-    test_update_dpp_quad_swap_row_mask<Semantics::Triton>();
+    FPSAN_RUN_ALL_VARIANTS(test_update_dpp_quad_swap_row_mask, );
 }
 
 #if !defined(__HIP_DEVICE_COMPILE__) || __has_builtin(__builtin_amdgcn_mov_dpp8)
@@ -756,7 +766,7 @@ TEST(Xlane, Permlane64Float)
 }
 TEST(Xlane, Permlane64Fpsan)
 {
-    test_permlane64<Semantics::Triton>();
+    FPSAN_RUN_ALL_VARIANTS(test_permlane64, );
 }
 #endif // __has_builtin(__builtin_amdgcn_permlane64)
 
@@ -808,15 +818,21 @@ void test_permlane_family(int sel0, int sel1)
     HIP_CHECK(hipMalloc(&d_f, LANES * sizeof(float)));
     HIP_CHECK(hipMalloc(&d_p, LANES * sizeof(std::uint32_t)));
     k_permlane_family<Op, Semantics::Native><<<1, LANES>>>(d_f, sel0, sel1);
-    k_permlane_family<Op, Semantics::Triton><<<1, LANES>>>(d_p, sel0, sel1);
     HIP_CHECK(hipDeviceSynchronize());
     std::vector<float>         got_f(LANES);
     std::vector<std::uint32_t> got_p(LANES);
     HIP_CHECK(hipMemcpy(got_f.data(), d_f, LANES * sizeof(float), hipMemcpyDeviceToHost));
-    HIP_CHECK(hipMemcpy(got_p.data(), d_p, LANES * sizeof(std::uint32_t), hipMemcpyDeviceToHost));
-    using VP = Value<float, Semantics::Triton, kCC>;
-    for(int i = 0; i < LANES; ++i)
-        EXPECT_EQ(got_p[i], VP{got_f[i]}.fpsan_payload()) << "lane " << i;
+    fpsan_test::for_each_fpsan_semantics([&](auto sem) {
+        constexpr Semantics S = decltype(sem)::value;
+        k_permlane_family<Op, S><<<1, LANES>>>(d_p, sel0, sel1);
+        HIP_CHECK(hipDeviceSynchronize());
+        HIP_CHECK(
+            hipMemcpy(got_p.data(), d_p, LANES * sizeof(std::uint32_t), hipMemcpyDeviceToHost));
+        using VP = Value<float, S, kCC>;
+        for(int i = 0; i < LANES; ++i)
+            EXPECT_EQ(got_p[i], VP{got_f[i]}.fpsan_payload())
+                << fpsan::semantics_name(S) << " lane " << i;
+    });
     (void)hipFree(d_f);
     (void)hipFree(d_p);
 }
@@ -899,7 +915,7 @@ TEST(Xlane, DsBpermuteFiXorFloat1)
 }
 TEST(Xlane, DsBpermuteFiXorFpsan1)
 {
-    test_ds_bpermute_fi_xor<Semantics::Triton>(1);
+    FPSAN_RUN_ALL_VARIANTS(test_ds_bpermute_fi_xor, 1);
 }
 #if FPSAN_TEST_FORCE_WAVE_SIZE == 64
 TEST(Xlane, DsBpermuteFiXorFloat32)
@@ -908,7 +924,7 @@ TEST(Xlane, DsBpermuteFiXorFloat32)
 }
 TEST(Xlane, DsBpermuteFiXorFpsan32)
 {
-    test_ds_bpermute_fi_xor<Semantics::Triton>(32);
+    FPSAN_RUN_ALL_VARIANTS(test_ds_bpermute_fi_xor, 32);
 }
 #endif
 #endif // __has_builtin(__builtin_amdgcn_ds_bpermute_fi_b32)
@@ -946,22 +962,33 @@ static void check_permlane16(unsigned sel0, unsigned sel1, const char* tag)
     HIP_CHECK(hipMalloc(&d_f, LANES * sizeof(float)));
     HIP_CHECK(hipMalloc(&d_p, LANES * sizeof(std::uint32_t)));
     k_permlane16<Semantics::Native, CROSS><<<1, LANES>>>(d_f, sel0, sel1);
-    k_permlane16<Semantics::Triton, CROSS><<<1, LANES>>>(d_p, sel0, sel1);
     HIP_CHECK(hipDeviceSynchronize());
     std::vector<float>         gf(LANES);
     std::vector<std::uint32_t> gp(LANES);
     HIP_CHECK(hipMemcpy(gf.data(), d_f, LANES * sizeof(float), hipMemcpyDeviceToHost));
-    HIP_CHECK(hipMemcpy(gp.data(), d_p, LANES * sizeof(std::uint32_t), hipMemcpyDeviceToHost));
     using VF = Value<float, Semantics::Native, kCC>;
-    using VP = Value<float, Semantics::Triton, kCC>;
     for(int i = 0; i < LANES; ++i)
     {
         const int   base = CROSS ? ((i & ~15) ^ 16) : (i & ~15);
         const int   s    = base + pl16_idx(i & 15, sel0, sel1);
         const float src  = static_cast<float>(s * 7 + 1) - 100.f;
         EXPECT_EQ(gf[i], static_cast<float>(VF{src})) << tag << " Float lane " << i << " src " << s;
-        EXPECT_EQ(gp[i], VP{src}.fpsan_payload()) << tag << " FPSan lane " << i << " src " << s;
     }
+    fpsan_test::for_each_fpsan_semantics([&](auto sem) {
+        constexpr Semantics S = decltype(sem)::value;
+        k_permlane16<S, CROSS><<<1, LANES>>>(d_p, sel0, sel1);
+        HIP_CHECK(hipDeviceSynchronize());
+        HIP_CHECK(hipMemcpy(gp.data(), d_p, LANES * sizeof(std::uint32_t), hipMemcpyDeviceToHost));
+        using VP = Value<float, S, kCC>;
+        for(int i = 0; i < LANES; ++i)
+        {
+            const int   base = CROSS ? ((i & ~15) ^ 16) : (i & ~15);
+            const int   s    = base + pl16_idx(i & 15, sel0, sel1);
+            const float src  = static_cast<float>(s * 7 + 1) - 100.f;
+            EXPECT_EQ(gp[i], VP{src}.fpsan_payload())
+                << tag << " " << fpsan::semantics_name(S) << " lane " << i << " src " << s;
+        }
+    });
     (void)hipFree(d_f);
     (void)hipFree(d_p);
 }
@@ -1022,20 +1049,26 @@ TEST(Xlane, Permlane16SwapCrossMode)
     HIP_CHECK(hipMalloc(&dpx, LANES * sizeof(std::uint32_t)));
     HIP_CHECK(hipMalloc(&dpy, LANES * sizeof(std::uint32_t)));
     k_permlane16_swap<Semantics::Native><<<1, LANES>>>(dfx, dfy);
-    k_permlane16_swap<Semantics::Triton><<<1, LANES>>>(dpx, dpy);
     HIP_CHECK(hipDeviceSynchronize());
     std::vector<float>         fx(LANES), fy(LANES);
     std::vector<std::uint32_t> px(LANES), py(LANES);
     HIP_CHECK(hipMemcpy(fx.data(), dfx, LANES * sizeof(float), hipMemcpyDeviceToHost));
     HIP_CHECK(hipMemcpy(fy.data(), dfy, LANES * sizeof(float), hipMemcpyDeviceToHost));
-    HIP_CHECK(hipMemcpy(px.data(), dpx, LANES * sizeof(std::uint32_t), hipMemcpyDeviceToHost));
-    HIP_CHECK(hipMemcpy(py.data(), dpy, LANES * sizeof(std::uint32_t), hipMemcpyDeviceToHost));
-    using VP = Value<float, Semantics::Triton, kCC>;
-    for(int i = 0; i < LANES; ++i)
-    {
-        EXPECT_EQ(px[i], VP{fx[i]}.fpsan_payload()) << "x lane " << i;
-        EXPECT_EQ(py[i], VP{fy[i]}.fpsan_payload()) << "y lane " << i;
-    }
+    fpsan_test::for_each_fpsan_semantics([&](auto sem) {
+        constexpr Semantics S = decltype(sem)::value;
+        k_permlane16_swap<S><<<1, LANES>>>(dpx, dpy);
+        HIP_CHECK(hipDeviceSynchronize());
+        HIP_CHECK(hipMemcpy(px.data(), dpx, LANES * sizeof(std::uint32_t), hipMemcpyDeviceToHost));
+        HIP_CHECK(hipMemcpy(py.data(), dpy, LANES * sizeof(std::uint32_t), hipMemcpyDeviceToHost));
+        using VP = Value<float, S, kCC>;
+        for(int i = 0; i < LANES; ++i)
+        {
+            EXPECT_EQ(px[i], VP{fx[i]}.fpsan_payload())
+                << fpsan::semantics_name(S) << " x lane " << i;
+            EXPECT_EQ(py[i], VP{fy[i]}.fpsan_payload())
+                << fpsan::semantics_name(S) << " y lane " << i;
+        }
+    });
     (void)hipFree(dfx);
     (void)hipFree(dfy);
     (void)hipFree(dpx);
@@ -1078,20 +1111,26 @@ TEST(Xlane, Permlane32SwapCrossMode)
     HIP_CHECK(hipMalloc(&dpx, LANES * sizeof(std::uint32_t)));
     HIP_CHECK(hipMalloc(&dpy, LANES * sizeof(std::uint32_t)));
     k_permlane32_swap<Semantics::Native><<<1, LANES>>>(dfx, dfy);
-    k_permlane32_swap<Semantics::Triton><<<1, LANES>>>(dpx, dpy);
     HIP_CHECK(hipDeviceSynchronize());
     std::vector<float>         fx(LANES), fy(LANES);
     std::vector<std::uint32_t> px(LANES), py(LANES);
     HIP_CHECK(hipMemcpy(fx.data(), dfx, LANES * sizeof(float), hipMemcpyDeviceToHost));
     HIP_CHECK(hipMemcpy(fy.data(), dfy, LANES * sizeof(float), hipMemcpyDeviceToHost));
-    HIP_CHECK(hipMemcpy(px.data(), dpx, LANES * sizeof(std::uint32_t), hipMemcpyDeviceToHost));
-    HIP_CHECK(hipMemcpy(py.data(), dpy, LANES * sizeof(std::uint32_t), hipMemcpyDeviceToHost));
-    using VP = Value<float, Semantics::Triton, kCC>;
-    for(int i = 0; i < LANES; ++i)
-    {
-        EXPECT_EQ(px[i], VP{fx[i]}.fpsan_payload()) << "x lane " << i;
-        EXPECT_EQ(py[i], VP{fy[i]}.fpsan_payload()) << "y lane " << i;
-    }
+    fpsan_test::for_each_fpsan_semantics([&](auto sem) {
+        constexpr Semantics S = decltype(sem)::value;
+        k_permlane32_swap<S><<<1, LANES>>>(dpx, dpy);
+        HIP_CHECK(hipDeviceSynchronize());
+        HIP_CHECK(hipMemcpy(px.data(), dpx, LANES * sizeof(std::uint32_t), hipMemcpyDeviceToHost));
+        HIP_CHECK(hipMemcpy(py.data(), dpy, LANES * sizeof(std::uint32_t), hipMemcpyDeviceToHost));
+        using VP = Value<float, S, kCC>;
+        for(int i = 0; i < LANES; ++i)
+        {
+            EXPECT_EQ(px[i], VP{fx[i]}.fpsan_payload())
+                << fpsan::semantics_name(S) << " x lane " << i;
+            EXPECT_EQ(py[i], VP{fy[i]}.fpsan_payload())
+                << fpsan::semantics_name(S) << " y lane " << i;
+        }
+    });
     (void)hipFree(dfx);
     (void)hipFree(dfy);
     (void)hipFree(dpx);
