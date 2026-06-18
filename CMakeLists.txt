@@ -126,13 +126,13 @@ target_include_directories(fpsan INTERFACE
 target_compile_features(fpsan INTERFACE cxx_std_17)
 
 # ---- warnings ---------------------------------------------------------------
-# -Wall -Wextra -Werror on GCC/Clang-compatible compilers, applied to anything
-# that links the library (tests, examples).  HIP source files use the same
-# Clang frontend, so the same flags apply to device code too.  MSVC is not in
-# scope for the test/example build.
-if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
-  target_compile_options(fpsan INTERFACE -Wall -Wextra -Werror)
-endif()
+# Keep strict warnings local to this repository's own tests/examples/tools.
+# Do not attach these to fpsan itself: fpsan is the public dependency target,
+# and consumers must not inherit warning policy or warnings-as-errors.
+add_library(fpsan_project_warnings INTERFACE)
+target_compile_options(fpsan_project_warnings INTERFACE
+  $<$<COMPILE_LANG_AND_ID:CXX,GNU,Clang>:-Wall -Wextra -Werror>
+  $<$<COMPILE_LANG_AND_ID:HIP,Clang>:-Wall -Wextra -Werror>)
 
 # ---- tests ------------------------------------------------------------------
 if(FPSAN_BUILD_TESTS OR FPSAN_BUILD_PYTHON)
