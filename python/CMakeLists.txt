@@ -21,7 +21,7 @@ if(NOT nanobind_FOUND)
 endif()
 
 nanobind_add_module(_fpsan STABLE_ABI LTO fpsan_python.cpp)
-target_link_libraries(_fpsan PRIVATE fpsan::fpsan)
+target_link_libraries(_fpsan PRIVATE fpsan::fpsan fpsan_project_warnings)
 target_compile_features(_fpsan PRIVATE cxx_std_17)
 set_target_properties(_fpsan PROPERTIES
   LIBRARY_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/fpsan"
