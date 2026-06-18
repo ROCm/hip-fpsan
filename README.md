@@ -1,7 +1,8 @@
 # hip-fpsan
 
-`hip-fpsan` is a header-only C++17/HIP library for running numerical code under
-FPSan-family semantics.
+`hip-fpsan` supports C++17, HIP, and Python for running numerical code under
+FPSan-family semantics. The core C++17/HIP library is header-only; the Python
+bindings are optional and target interactive experiments.
 
 FPSan was introduced by the [Triton compiler](https://github.com/triton-lang/triton)
 as a way to test floating-point rewrites without requiring bit-identical rounded
@@ -30,6 +31,7 @@ Good starting points:
 - Hands-on guides:
   - [Authoring code with `Value`](docs/tutorial-authoring.md)
   - [Incremental porting](docs/tutorial-porting.md)
+  - [Python bindings](docs/python.md): interactive shell and notebook use.
 - Understanding FPSan:
   - [Triton FPSan from first principles](docs/triton-fpsan.md)
   - Algebraic FPSan:
@@ -146,6 +148,13 @@ cmake -S . -B build/cxx-bench -G Ninja \
   -DFPSAN_ENABLE_HIP=OFF \
   -DFPSAN_BUILD_BENCHMARKS=ON
 cmake --build build/cxx-bench --target fpsan_cpu_bench
+
+# Optional Python bindings.
+cmake -S . -B build/python -G Ninja \
+  -DFPSAN_ENABLE_HIP=OFF \
+  -DFPSAN_BUILD_PYTHON=ON
+cmake --build build/python
+ctest --test-dir build/python -R fpsan_python_test --output-on-failure
 ```
 
 The HIP configure finds the ROCm toolchain under `ROCM_PATH`, resolved as
@@ -156,10 +165,10 @@ or override the pieces directly with `-DCMAKE_HIP_COMPILER=...`,
 `-DCMAKE_HIP_COMPILER_ROCM_ROOT=...`, `-DCMAKE_HIP_ARCHITECTURES=...`.
 
 CMake options: `FPSAN_BUILD_TESTS` (ON), `FPSAN_BUILD_EXAMPLES` (ON),
-`FPSAN_BUILD_BENCHMARKS` (OFF), `FPSAN_ENABLE_HIP`. The latter defaults to ON
-when a HIP toolchain is available and OFF otherwise: it follows the standard
-`CMAKE_HIP_COMPILER` variable, which is derived from `ROCM_PATH` (resolved as
-`-DROCM_PATH=...` > `$ENV{ROCM_PATH}` > `rocm-sdk path --root` > `/opt/rocm`),
-set explicitly, or found on `PATH` by `check_language(HIP)`. Set
-`-DFPSAN_ENABLE_HIP=OFF` to force a pure-C++ build even where a HIP toolchain
-exists.
+`FPSAN_BUILD_BENCHMARKS` (OFF), `FPSAN_BUILD_PYTHON` (OFF),
+`FPSAN_ENABLE_HIP`. The latter defaults to ON when a HIP toolchain is available
+and OFF otherwise: it follows the standard `CMAKE_HIP_COMPILER` variable, which
+is derived from `ROCM_PATH` (resolved as `-DROCM_PATH=...` >
+`$ENV{ROCM_PATH}` > `rocm-sdk path --root` > `/opt/rocm`), set explicitly, or
+found on `PATH` by `check_language(HIP)`. Set `-DFPSAN_ENABLE_HIP=OFF` to force
+a pure-C++ build even where a HIP toolchain exists.
