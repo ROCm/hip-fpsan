@@ -170,21 +170,16 @@ namespace
     PARITY_ONE(FT, TAG, Triton, Implicit) \
     PARITY_ONE(FT, TAG, Triton, Explicit)
 
-// The algebraic models. Conversions is orthogonal to the payload algebra
-// here, so one representative (Explicit) per variant suffices. These apply at
-// every supported element width including double -- the algebraic semantics now
-// carry 64-bit element types via a 128-bit modular multiply (algebraic.hpp).
-#define PARITY_ALG_MODES(FT, TAG)                     \
-    PARITY_ONE(FT, TAG, Field, Explicit)              \
-    PARITY_ONE(FT, TAG, Field2, Explicit)             \
-    PARITY_ONE(FT, TAG, FieldFast, Explicit)          \
-    PARITY_ONE(FT, TAG, FieldFast2, Explicit)         \
-    PARITY_ONE(FT, TAG, FieldWithMulCasts, Explicit)  \
-    PARITY_ONE(FT, TAG, FieldWithMulCasts2, Explicit) \
-    PARITY_ONE(FT, TAG, SophieGermainRing, Explicit)  \
-    PARITY_ONE(FT, TAG, SophieGermainRing2, Explicit) \
-    PARITY_ONE(FT, TAG, PythagoreanRing, Explicit)    \
-    PARITY_ONE(FT, TAG, PythagoreanRing2, Explicit)
+// The default algebraic models. Conversions is orthogonal to the payload algebra
+// here, so one representative (Explicit) per semantics suffices. The 2-suffixed
+// reroll variants are covered by the core algebraic tests rather than this
+// host/device parity smoke test.
+#define PARITY_ALG_MODES(FT, TAG)                    \
+    PARITY_ONE(FT, TAG, Field, Explicit)             \
+    PARITY_ONE(FT, TAG, FieldFast, Explicit)         \
+    PARITY_ONE(FT, TAG, FieldWithMulCasts, Explicit) \
+    PARITY_ONE(FT, TAG, SophieGermainRing, Explicit) \
+    PARITY_ONE(FT, TAG, PythagoreanRing, Explicit)
 
 PARITY_ALL_MODES(float, F32)
 PARITY_ALG_MODES(float, F32)

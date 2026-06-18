@@ -24,7 +24,7 @@ using fpsan::Value;
 // unembed.
 TEST(Cast, FpsanF16ToF32FixedPoints)
 {
-    fpsan_test::for_each_fpsan_semantics([](auto sem) {
+    fpsan_test::for_each_fpsan_semantics_all_variants([](auto sem) {
         constexpr Semantics S = decltype(sem)::value;
         using H               = Value<_Float16, S, Conversions::Explicit>;
         using F32             = Value<float, S, Conversions::Explicit>;
@@ -53,7 +53,7 @@ TEST(Cast, FpsanF32ToF16ToF32RoundTrips)
     // Triton's signed resize satisfies truncate(sign_extend(p)) == p, and a
     // single-prime field's cast tower is invertible. The composite two-moduli
     // rings carry no cast homomorphism, so the round trip is not asserted there.
-    fpsan_test::for_each_fpsan_semantics([](auto sem) {
+    fpsan_test::for_each_fpsan_semantics_all_variants([](auto sem) {
         constexpr Semantics S = decltype(sem)::value;
         if constexpr(fpsan_test::flavor_has_cast_homomorphism<_Float16, S>())
         {

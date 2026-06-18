@@ -151,7 +151,7 @@ void run_f16_fpsan_payload_truncate()
 
 TEST(CvtSrPkF16, FpsanPayloadTruncate)
 {
-    FPSAN_RUN_ALL_VARIANTS(run_f16_fpsan_payload_truncate);
+    FPSAN_RUN_FPSAN_SEMANTICS(run_f16_fpsan_payload_truncate);
 }
 
 #endif // cvt_sr_pk_f16_f32
@@ -263,7 +263,7 @@ void run_bf16_fpsan_payload_truncate()
 
 TEST(CvtSrPkBf16, FpsanPayloadTruncate)
 {
-    FPSAN_RUN_ALL_VARIANTS(run_bf16_fpsan_payload_truncate);
+    FPSAN_RUN_FPSAN_SEMANTICS(run_bf16_fpsan_payload_truncate);
 }
 
 #endif // cvt_sr_pk_bf16_f32

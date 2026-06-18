@@ -331,7 +331,7 @@ void run_fpsan_pk8_fp8_payload()
 
 TEST(CvtScalePk8Unpack, FpsanFp8Payload)
 {
-    FPSAN_RUN_ALL_VARIANTS(run_fpsan_pk8_fp8_payload);
+    FPSAN_RUN_FPSAN_SEMANTICS(run_fpsan_pk8_fp8_payload);
 }
 
 template <Semantics S>
@@ -373,7 +373,7 @@ void run_fpsan_pk16_fp6_payload()
 
 TEST(CvtScalePk16Unpack, FpsanFp6Payload)
 {
-    FPSAN_RUN_ALL_VARIANTS(run_fpsan_pk16_fp6_payload);
+    FPSAN_RUN_FPSAN_SEMANTICS(run_fpsan_pk16_fp6_payload);
 }
 
 #endif // has builtin

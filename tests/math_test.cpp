@@ -85,7 +85,7 @@ TEST(Math, Exp2MatchesGroundTruthFloat16Exhaustive)
 // asserted only on the exp-capable flavors.
 TEST(Math, ExpHomomorphism)
 {
-    fpsan_test::for_each_fpsan_semantics([](auto sem) {
+    fpsan_test::for_each_fpsan_semantics_all_variants([](auto sem) {
         constexpr Semantics S = decltype(sem)::value;
         if constexpr(fpsan_test::flavor_has_exp_homomorphism<float, S>())
         {
@@ -111,7 +111,7 @@ TEST(Math, ExpHomomorphism)
 // asserted only on the trig-capable flavors.
 TEST(Math, TrigAngleAddition)
 {
-    fpsan_test::for_each_fpsan_semantics([](auto sem) {
+    fpsan_test::for_each_fpsan_semantics_all_variants([](auto sem) {
         constexpr Semantics S = decltype(sem)::value;
         if constexpr(fpsan_test::flavor_has_sin_cos<float, S>())
         {
@@ -140,7 +140,7 @@ TEST(Math, TrigAngleAddition)
 TEST(Math, TaggedDeterministicAndDistinct)
 {
     // Determinism (same input -> same payload) holds in every fpsan flavor.
-    fpsan_test::for_each_fpsan_semantics([](auto sem) {
+    fpsan_test::for_each_fpsan_semantics_all_variants([](auto sem) {
         using F = Value<float, decltype(sem)::value, Conversions::Explicit>;
         for(float x : xs())
         {
@@ -208,7 +208,7 @@ TEST(Math, NativeParity)
 // fma(A,B,C) == A*B + C is an exact payload-ring identity in every fpsan flavor.
 TEST(Math, FmaMatchesMulAdd)
 {
-    fpsan_test::for_each_fpsan_semantics([](auto sem) {
+    fpsan_test::for_each_fpsan_semantics_all_variants([](auto sem) {
         using F = Value<float, decltype(sem)::value, Conversions::Explicit>;
         for(float a : xs())
             for(float b : xs())
@@ -234,7 +234,7 @@ TEST(Math, MinMaxNativeParity)
 // min/max are idempotent and commutative in every fpsan flavor.
 TEST(Math, MinMaxFpsanIdempotentCommutative)
 {
-    fpsan_test::for_each_fpsan_semantics([](auto sem) {
+    fpsan_test::for_each_fpsan_semantics_all_variants([](auto sem) {
         constexpr Semantics S = decltype(sem)::value;
         using F               = Value<float, S, Conversions::Explicit>;
         for(float a : xs())

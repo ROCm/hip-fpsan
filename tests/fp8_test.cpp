@@ -162,7 +162,7 @@ void fpsan_fixed_points()
 template <class FP8>
 void fpsan_fixed_points_all()
 {
-    fpsan_test::for_each_fpsan_semantics(
+    fpsan_test::for_each_fpsan_semantics_all_variants(
         [](auto sem) { fpsan_fixed_points<FP8, decltype(sem)::value>(); });
 }
 TEST(Fp8, FpsanFixedPointsE4M3)
@@ -209,7 +209,7 @@ void fpsan_cast_roundtrip()
 template <class FP8>
 void fpsan_cast_roundtrip_all()
 {
-    fpsan_test::for_each_fpsan_semantics([](auto sem) {
+    fpsan_test::for_each_fpsan_semantics_all_variants([](auto sem) {
         constexpr Semantics S = decltype(sem)::value;
         if constexpr(fpsan_test::flavor_has_cast_homomorphism<FP8, S>())
             fpsan_cast_roundtrip<FP8, S>();

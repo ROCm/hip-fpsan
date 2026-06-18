@@ -417,7 +417,7 @@ void run_fpsan_pk8_fp8_payload()
 
 TEST(CvtScalef32Pk8, FpsanFp8Payload)
 {
-    FPSAN_RUN_ALL_VARIANTS(run_fpsan_pk8_fp8_payload);
+    FPSAN_RUN_FPSAN_SEMANTICS(run_fpsan_pk8_fp8_payload);
 }
 
 template <Semantics S>
@@ -460,7 +460,7 @@ void run_fpsan_pk16_fp6_payload()
 
 TEST(CvtScalef32Pk16, FpsanFp6Payload)
 {
-    FPSAN_RUN_ALL_VARIANTS(run_fpsan_pk16_fp6_payload);
+    FPSAN_RUN_FPSAN_SEMANTICS(run_fpsan_pk16_fp6_payload);
 }
 
 // SR pk8 fp4 FPSan equals the deterministic (non-SR) pack -- seed is opaque.
@@ -501,7 +501,7 @@ void run_fpsan_sr_pk8_fp4_matches_deterministic()
 
 TEST(CvtScalef32SrPk8, FpsanFp4MatchesDeterministic)
 {
-    FPSAN_RUN_ALL_VARIANTS(run_fpsan_sr_pk8_fp4_matches_deterministic);
+    FPSAN_RUN_FPSAN_SEMANTICS(run_fpsan_sr_pk8_fp4_matches_deterministic);
 }
 
 #endif // has builtin
