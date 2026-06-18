@@ -37,7 +37,11 @@ function(fpsan_add_test name src)
     include(GoogleTest)
     # Each TEST() becomes its own ctest entry, so ctest -j parallelizes across
     # them and a crash fails only that case.
-    gtest_discover_tests(${name} TEST_PREFIX "${FPSAN_TEST_TEST_PREFIX}")
+    set(_fpsan_gtest_args)
+    if(FPSAN_TEST_TEST_PREFIX)
+      list(APPEND _fpsan_gtest_args TEST_PREFIX "${FPSAN_TEST_TEST_PREFIX}")
+    endif()
+    gtest_discover_tests(${name} ${_fpsan_gtest_args})
   elseif(TARGET GTest::gtest_main)
     target_link_libraries(${name} PRIVATE GTest::gtest_main)
     # One ctest entry per binary: all of its TEST()s run in a single process.

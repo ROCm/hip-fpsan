@@ -90,5 +90,5 @@ equal**. Compare fingerprint results only against other results with the same
 ## HIP / GPU
 
 The same code compiles as HIP C++ for device kernels (everything is
-`__host__ __device__` and constexpr). See the top-level README for the `hip`
-build preset; `tests/hip_device_test.cpp` shows Value running in a kernel.
+`__host__ __device__` and constexpr). See the top-level README for HIP CMake
+command lines; `tests/hip_device_test.cpp` shows Value running in a kernel.

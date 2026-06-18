@@ -120,28 +120,37 @@ intrinsic dataflow on fingerprints.
 
 ## Building the tests and examples
 
-CMake presets are provided:
+Configure out of tree with ordinary CMake command lines:
 
 ```bash
-# pure C++ (system clang++)
-cmake --preset cxx && cmake --build --preset cxx && ctest --preset cxx
+# Pure C++.
+cmake -S . -B build/cxx -G Ninja -DFPSAN_ENABLE_HIP=OFF
+cmake --build build/cxx
+ctest --test-dir build/cxx --output-on-failure
 
-# HIP C++ (ROCm clang; compiles the same tests as device code, gfx1201 / RDNA4)
-cmake --preset hip && cmake --build --preset hip && ctest --preset hip
+# HIP C++ for RDNA4 / gfx1201.
+cmake -S . -B build/hip-gfx1201 -G Ninja \
+  -DFPSAN_ENABLE_HIP=ON \
+  -DCMAKE_HIP_ARCHITECTURES=gfx1201
+cmake --build build/hip-gfx1201
+ctest --test-dir build/hip-gfx1201 --output-on-failure
 
-# HIP C++ for CDNA3/CDNA4/gfx1250; running tests needs matching hardware.
-cmake --preset hip-gfx942   && cmake --build --preset hip-gfx942
-cmake --preset hip-gfx950   && cmake --build --preset hip-gfx950
-cmake --preset hip-gfx1250  && cmake --build --preset hip-gfx1250
+# HIP C++ for CDNA4 / gfx950. Running tests needs matching hardware.
+cmake -S . -B build/hip-gfx950 -G Ninja \
+  -DFPSAN_ENABLE_HIP=ON \
+  -DCMAKE_HIP_ARCHITECTURES=gfx950
+cmake --build build/hip-gfx950
 
-# optional microbenchmarks
-cmake --preset cxx -DFPSAN_BUILD_BENCHMARKS=ON
-cmake --build --preset cxx --target fpsan_cpu_bench
+# Optional microbenchmarks.
+cmake -S . -B build/cxx-bench -G Ninja \
+  -DFPSAN_ENABLE_HIP=OFF \
+  -DFPSAN_BUILD_BENCHMARKS=ON
+cmake --build build/cxx-bench --target fpsan_cpu_bench
 ```
 
-The HIP presets find the ROCm toolchain under `ROCM_PATH`, resolved as
+The HIP configure finds the ROCm toolchain under `ROCM_PATH`, resolved as
 `-DROCM_PATH=...` > `$ENV{ROCM_PATH}` > `rocm-sdk path --root` > `/opt/rocm`
-(the same priority the ROCm libraries use). Point them at a different install
+(the same priority the ROCm libraries use). Point it at a different install
 with `-DROCM_PATH=...` (or `$ENV{ROCM_PATH}`),
 or override the pieces directly with `-DCMAKE_HIP_COMPILER=...`,
 `-DCMAKE_HIP_COMPILER_ROCM_ROOT=...`, `-DCMAKE_HIP_ARCHITECTURES=...`.
