@@ -110,8 +110,8 @@ using fpsan::v8e5m2_native;
         run_fpsan_matches_scalar_reference_all<NAME>();             \
     }
 
-FPSAN_WMMA_GFX12_TESTS(WmmaF32F16)
-FPSAN_WMMA_GFX12_TESTS(WmmaF32BF16)
+FPSAN_WMMA_GFX12_TESTS(WmmaF16F16)
+FPSAN_WMMA_GFX12_TESTS(WmmaBF16BF16)
 #undef FPSAN_WMMA_GFX12_TESTS
 #undef FPSAN_WMMA_GFX12_SUITE
 #undef FPSAN_WMMA_GFX12_CONCAT

@@ -3,13 +3,14 @@
 
 #include "wmma_gfx11_parts.hpp"
 
-struct WmmaGfx11F32F16
+template <bool Opsel, bool Tied = false>
+struct WmmaGfx11F16F16
 {
-    using AVec                      = v16h_wmma_native;
-    using BVec                      = v16h_wmma_native;
-    using CVec                      = std::conditional_t<kWaveSize == 64, v4f_native, v8f_native>;
-    static constexpr bool has_opsel = false;
-    static constexpr bool opsel     = false;
+    using AVec = v16h_wmma_native;
+    using BVec = v16h_wmma_native;
+    using CVec = std::conditional_t<kWaveSize == 64, v8h_native, v16h_wmma_native>;
+    static constexpr bool has_opsel = true;
+    static constexpr bool opsel     = Opsel;
     static constexpr int  wave_size = kWaveSize;
     static constexpr int  a_lo = -3, a_hi = 3;
     static constexpr int  b_lo = -2, b_hi = 2;
@@ -19,20 +20,27 @@ struct WmmaGfx11F32F16
         call(Value<AVec, S, Conv> a, Value<BVec, S, Conv> b, Value<CVec, S, Conv> c)
     {
 #if defined(FPSAN_TEST_GFX11_WAVE64)
-        return fpsan::amdgcn_wmma_f32_16x16x16_f16_w64<S, Conv>(a, b, c);
+        if constexpr(Tied)
+            return fpsan::amdgcn_wmma_f16_16x16x16_f16_tied_w64<Opsel, S, Conv>(a, b, c);
+        else
+            return fpsan::amdgcn_wmma_f16_16x16x16_f16_w64<Opsel, S, Conv>(a, b, c);
 #else
-        return fpsan::amdgcn_wmma_f32_16x16x16_f16_w32(a, b, c);
+        if constexpr(Tied)
+            return fpsan::amdgcn_wmma_f16_16x16x16_f16_tied_w32<Opsel, S, Conv>(a, b, c);
+        else
+            return fpsan::amdgcn_wmma_f16_16x16x16_f16_w32<Opsel, S, Conv>(a, b, c);
 #endif
     }
 };
 
-struct WmmaGfx11F32BF16
+template <bool Opsel, bool Tied = false>
+struct WmmaGfx11BF16BF16
 {
-    using AVec                      = v16bf_wmma_native;
-    using BVec                      = v16bf_wmma_native;
-    using CVec                      = std::conditional_t<kWaveSize == 64, v4f_native, v8f_native>;
-    static constexpr bool has_opsel = false;
-    static constexpr bool opsel     = false;
+    using AVec = v16bf_wmma_native;
+    using BVec = v16bf_wmma_native;
+    using CVec = std::conditional_t<kWaveSize == 64, v8bf_native, v16bf_wmma_native>;
+    static constexpr bool has_opsel = true;
+    static constexpr bool opsel     = Opsel;
     static constexpr int  wave_size = kWaveSize;
     static constexpr int  a_lo = -3, a_hi = 3;
     static constexpr int  b_lo = -2, b_hi = 2;
@@ -42,12 +50,23 @@ struct WmmaGfx11F32BF16
         call(Value<AVec, S, Conv> a, Value<BVec, S, Conv> b, Value<CVec, S, Conv> c)
     {
 #if defined(FPSAN_TEST_GFX11_WAVE64)
-        return fpsan::amdgcn_wmma_f32_16x16x16_bf16_w64<S, Conv>(a, b, c);
+        if constexpr(Tied)
+            return fpsan::amdgcn_wmma_bf16_16x16x16_bf16_tied_w64<Opsel, S, Conv>(a, b, c);
+        else
+            return fpsan::amdgcn_wmma_bf16_16x16x16_bf16_w64<Opsel, S, Conv>(a, b, c);
 #else
-        return fpsan::amdgcn_wmma_f32_16x16x16_bf16_w32(a, b, c);
+        if constexpr(Tied)
+            return fpsan::amdgcn_wmma_bf16_16x16x16_bf16_tied_w32<Opsel, S, Conv>(a, b, c);
+        else
+            return fpsan::amdgcn_wmma_bf16_16x16x16_bf16_w32<Opsel, S, Conv>(a, b, c);
 #endif
     }
 };
+
+using WmmaGfx11F16F16Tied0   = WmmaGfx11F16F16<false, true>;
+using WmmaGfx11F16F16Tied1   = WmmaGfx11F16F16<true, true>;
+using WmmaGfx11BF16BF16Tied0 = WmmaGfx11BF16BF16<false, true>;
+using WmmaGfx11BF16BF16Tied1 = WmmaGfx11BF16BF16<true, true>;
 
 #define FPSAN_WMMA_GFX11_CONCAT2(A, B) A##B
 #define FPSAN_WMMA_GFX11_CONCAT(A, B) FPSAN_WMMA_GFX11_CONCAT2(A, B)
@@ -73,8 +92,10 @@ struct WmmaGfx11F32BF16
         run_tied_preserves_unselected<TRAITS>();                \
     }
 
-FPSAN_WMMA_GFX11_TESTS(WmmaGfx11F32F16, WmmaGfx11F32F16)
-FPSAN_WMMA_GFX11_TESTS(WmmaGfx11F32BF16, WmmaGfx11F32BF16)
+FPSAN_WMMA_GFX11_TESTS(WmmaGfx11F16F16Opsel0, WmmaGfx11F16F16<false>)
+FPSAN_WMMA_GFX11_TESTS(WmmaGfx11F16F16Opsel1, WmmaGfx11F16F16<true>)
+FPSAN_WMMA_GFX11_TESTS(WmmaGfx11BF16BF16Opsel0, WmmaGfx11BF16BF16<false>)
+FPSAN_WMMA_GFX11_TESTS(WmmaGfx11BF16BF16Opsel1, WmmaGfx11BF16BF16<true>)
 #undef FPSAN_WMMA_GFX11_TIED_PRESERVE_TEST
 #undef FPSAN_WMMA_GFX11_TESTS
 #undef FPSAN_WMMA_GFX11_SUITE
