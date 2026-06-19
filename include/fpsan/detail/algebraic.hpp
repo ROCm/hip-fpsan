@@ -298,6 +298,14 @@ namespace fpsan
         // where a u64 product sufficed.
         FPSAN_HOST_DEVICE constexpr u64 alg_mulmod(u64 a, u64 b, u64 n)
         {
+            // Avoid emitting 128-bit remainder helpers for small FPSan moduli; once
+            // reduced, the product fits in u64 and gives the same result.
+            if(n <= 0xffffffffull)
+            {
+                a %= n;
+                b %= n;
+                return (a * b) % n;
+            }
             return (u64)(((u128)a * (u128)b) % n);
         }
 

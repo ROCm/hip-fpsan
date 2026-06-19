@@ -47,6 +47,14 @@ namespace fpsan
             return storage_payload_widen<Width, S, C>(field);
         }
 
+        template <class DstFT, int Width, Semantics S, Conversions C>
+        FPSAN_HOST_DEVICE Value<DstFT, S, C> subbyte_widen_to(std::uint32_t field)
+        {
+            using Out = Value<DstFT, S, C>;
+            return Out::from_fpsan_payload(static_cast<typename Out::bits_type>(
+                subbyte_widen<Width, S, C>(field).fpsan_payload()));
+        }
+
         // Element bit width of an f8f6f4 format immediate: fp8/bf8 (0,1) -> 8,
         // fp6/bf6 (2,3) -> 6, fp4 (4) -> 4. Shared by the gfx950 MFMA and gfx1250
         // WMMA f8f6f4 paths (both decode the same packed sub-byte fragments).
