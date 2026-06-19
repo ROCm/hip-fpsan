@@ -27,6 +27,7 @@
 
 #include "fpsan_semantics.hpp"
 #include "hip_test_utils.hpp"
+#include "subbyte_oracle.hpp"
 #include "test_random.hpp"
 
 #include <hip/hip_runtime.h>
@@ -298,10 +299,10 @@ TEST(WmmaF8f6f4_128, Fp6Fp8_mixed)
 
 // ===================== FPSan payload property =====================
 // The shipped wrapper's FPSan dataflow must equal an independent payload-ring
-// reference. FP4/FP6/BF6 are storage formats rather than scalar Value<> element
-// types, so their slots use the explicit storage-payload convention. FP8/BF8
-// are public scalar Value<> types, so mixed paths must preserve their format
-// identity and widen through fpsan::cast.
+// reference. FP4/FP6/BF6 slots carry finite subbyte codes and canonicalize
+// through the standard FPSan cast policy. FP8/BF8 are public scalar Value<>
+// types, so mixed paths must preserve their format identity and widen through
+// fpsan::cast.
 
 template <int FMT, Semantics S>
 static Value<float, S, kCC> widen_ref(std::uint32_t code)
@@ -313,7 +314,7 @@ static Value<float, S, kCC> widen_ref(std::uint32_t code)
         return fpsan::cast<float>(
             Value<fpsan::fp8_e5m2, S, kCC>::from_fpsan_payload(static_cast<std::uint8_t>(code)));
     else
-        return fpsan::detail::subbyte_widen<width_of(FMT), S, kCC>(code);
+        return fpsan_test::canonical_subbyte_widen<width_of(FMT), S, kCC>(code);
 }
 
 template <Semantics S, int AFMT, int BFMT, bool MIXED = false>

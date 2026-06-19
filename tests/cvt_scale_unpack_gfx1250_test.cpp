@@ -20,8 +20,8 @@
 //           from the builtin. Any implementation that diverges from the host
 //           reference fails here.
 //   FPSan : the wrapper equals an independent payload-domain reference
-//           (FP8/BF8 payload cast, subbyte FP4/FP6 resize, NO scale -- block
-//           scale is Float-only).
+//           (FP8/BF8 payload cast, canonical subbyte FP4/FP6/BF6 widening,
+//           NO scale -- block scale is Float-only).
 // Each kernel runs a SINGLE lane (<<<1,1>>>), so ScaleSel=0 selects byte 0 of
 // the scale operand for that lane, and every output element i is
 // decode(code i) * scale, self-contained per lane.
@@ -34,6 +34,7 @@
 
 #include "fpsan_semantics.hpp"
 #include "hip_test_utils.hpp"
+#include "subbyte_oracle.hpp"
 
 #include <hip/hip_runtime.h>
 
@@ -126,6 +127,13 @@ namespace
             out |= (f32_to_narrow(in[i], kFp4E2M1) & 0xFu) << (4 * i);
         return out;
     }
+    unsigned host_pack_raw_nibbles8(const std::array<unsigned, 8>& codes)
+    {
+        unsigned out = 0;
+        for(int i = 0; i < 8; ++i)
+            out |= (codes[i] & 0xFu) << (4 * i);
+        return out;
+    }
     // Host pack of 16 6-bit codes -> v3u32 (contiguous little-endian).
     std::array<unsigned, 3> host_pack_codes16(const std::vector<float>& in, const FpFormat& fmt)
     {
@@ -141,6 +149,42 @@ namespace
                 }
         }
         return w;
+    }
+    std::array<unsigned, 3> host_pack_raw_codes16(const std::array<unsigned, 16>& codes)
+    {
+        std::array<unsigned, 3> w{0u, 0u, 0u};
+        for(int i = 0; i < 16; ++i)
+        {
+            std::uint32_t code = codes[i] & 0x3Fu;
+            for(int b = 0; b < 6; ++b)
+                if((code >> b) & 1u)
+                {
+                    int p = i * 6 + b;
+                    w[p / 32] |= 1u << (p % 32);
+                }
+        }
+        return w;
+    }
+
+    template <class DstFT, int Width, Semantics S, std::size_t N>
+    void expect_canonical_device_payloads(const std::array<unsigned, N>& codes,
+                                          const std::vector<unsigned>&   got,
+                                          const std::vector<unsigned>&   got_sum,
+                                          const char*                    label)
+    {
+        using Out = Value<DstFT, S, kCC>;
+        for(std::size_t i = 0; i < N; ++i)
+        {
+            const auto want_payload
+                = fpsan_test::canonical_subbyte_widen_payload<DstFT, Width, S, kCC>(codes[i]);
+            const auto want = Out::from_fpsan_payload(want_payload);
+            EXPECT_EQ(got[i], static_cast<unsigned>(want_payload))
+                << label << " elem " << i << " code=0x" << std::hex << codes[i] << std::dec
+                << " S=" << int(S);
+            EXPECT_EQ(got_sum[i], static_cast<unsigned>((want + want).fpsan_payload()))
+                << label << " elem " << i << " code=0x" << std::hex << codes[i] << std::dec
+                << " follow-on add S=" << int(S);
+        }
     }
 } // namespace
 
@@ -290,8 +334,9 @@ TEST(CvtScalePk8Unpack, Fp8ScaleMultiplies)
 }
 
 // ============================ FPSan mode ====================================
-// Payload-domain FP8 cast, NO scale (block scale is Float-only). The wrapper
-// equals an independent payload reference built from the public Value algebra.
+// Payload-domain casts, NO scale (block scale is Float-only). The wrapper equals
+// an independent payload reference built from the public Value algebra. FPSan
+// tests pass E8M0 x2 to prove that the block scale is ignored here.
 
 template <Semantics S>
 __global__ void k_fpsan_pk8_fp8(const unsigned* in, unsigned scale, unsigned* out)
@@ -335,45 +380,186 @@ TEST(CvtScalePk8Unpack, FpsanFp8Payload)
 }
 
 template <Semantics S>
-__global__ void k_fpsan_pk16_fp6(const unsigned* in, unsigned scale, int* out)
+__global__ void k_fpsan_pk8_fp4_f32_canonical(unsigned packed, unsigned scale, unsigned* out)
 {
-    // FP6 has no scalar Value<> element type; this pins the storage-payload
-    // convention rather than an algebraic cast.
-    fpsan::v3u32_native p;
-    p[0]   = in[0];
-    p[1]   = in[1];
-    p[2]   = in[2];
-    auto r = fpsan::amdgcn_cvt_scale_pk16_f32_fp6<0, S, kCC>(p, scale);
-    for(int i = 0; i < 16; ++i)
-        out[i] = r.get(i).fpsan_payload();
+    auto r = fpsan::amdgcn_cvt_scale_pk8_f32_fp4<0, S, kCC>(packed, scale);
+    for(int i = 0; i < 8; ++i)
+    {
+        const auto lane = r.get(i);
+        out[i]          = lane.fpsan_payload();
+        out[8 + i]      = (lane + lane).fpsan_payload();
+    }
 }
 
 template <Semantics S>
-void run_fpsan_pk16_fp6_payload()
+__global__ void k_fpsan_pk8_fp4_f16_canonical(unsigned packed, unsigned scale, unsigned* out)
+{
+    auto r = fpsan::amdgcn_cvt_scale_pk8_f16_fp4<0, S, kCC>(packed, scale);
+    for(int i = 0; i < 8; ++i)
+    {
+        const auto lane = r.get(i);
+        out[i]          = lane.fpsan_payload();
+        out[8 + i]      = (lane + lane).fpsan_payload();
+    }
+}
+
+template <Semantics S>
+__global__ void k_fpsan_pk8_fp4_bf16_canonical(unsigned packed, unsigned scale, unsigned* out)
+{
+    auto r = fpsan::amdgcn_cvt_scale_pk8_bf16_fp4<0, S, kCC>(packed, scale);
+    for(int i = 0; i < 8; ++i)
+    {
+        const auto lane = r.get(i);
+        out[i]          = lane.fpsan_payload();
+        out[8 + i]      = (lane + lane).fpsan_payload();
+    }
+}
+
+template <Semantics S>
+void run_fpsan_pk8_fp4_f32_canonical()
 {
     if(!have_device())
         GTEST_SKIP() << "no HIP device";
-    auto      in  = exact16();
-    auto      w   = host_pack_codes16(in, kFp6E2M3);
-    unsigned* dIn = to_dev(std::vector<unsigned>(w.begin(), w.end()));
-    int*      dO;
-    HIP_CHECK(hipMalloc(&dO, 16 * sizeof(int)));
-    k_fpsan_pk16_fp6<S><<<1, 1>>>(dIn, kE8M0_x1, dO);
+    constexpr std::array<unsigned, 8> codes{0x0u, 0x1u, 0x7u, 0x8u, 0x9u, 0xAu, 0xEu, 0xFu};
+    unsigned*                         dO;
+    HIP_CHECK(hipMalloc(&dO, 16 * sizeof(unsigned)));
+    k_fpsan_pk8_fp4_f32_canonical<S><<<1, 1>>>(host_pack_raw_nibbles8(codes), kE8M0_x2, dO);
     HIP_CHECK(hipDeviceSynchronize());
-    auto got = from_dev(dO, 16);
-    for(int i = 0; i < 16; ++i)
-    {
-        std::uint32_t code = f32_to_narrow(in[i], kFp6E2M3) & 0x3Fu;
-        int want = static_cast<int>(fpsan::detail::subbyte_widen<6, S, kCC>(code).fpsan_payload());
-        EXPECT_EQ(got[i], want) << "elem " << i;
-    }
-    (void)hipFree(dIn);
+    auto                  got_all = from_dev(dO, 16);
+    std::vector<unsigned> got(got_all.begin(), got_all.begin() + 8);
+    std::vector<unsigned> got_sum(got_all.begin() + 8, got_all.end());
+    expect_canonical_device_payloads<float, 4, S>(codes, got, got_sum, "gfx1250 pk8 fp4->f32");
     (void)hipFree(dO);
 }
 
-TEST(CvtScalePk16Unpack, FpsanFp6Payload)
+template <Semantics S>
+void run_fpsan_pk8_fp4_f16_canonical()
 {
-    FPSAN_RUN_FPSAN_SEMANTICS(run_fpsan_pk16_fp6_payload);
+    if(!have_device())
+        GTEST_SKIP() << "no HIP device";
+    constexpr std::array<unsigned, 8> codes{0x0u, 0x1u, 0x7u, 0x8u, 0x9u, 0xAu, 0xEu, 0xFu};
+    unsigned*                         dO;
+    HIP_CHECK(hipMalloc(&dO, 16 * sizeof(unsigned)));
+    k_fpsan_pk8_fp4_f16_canonical<S><<<1, 1>>>(host_pack_raw_nibbles8(codes), kE8M0_x2, dO);
+    HIP_CHECK(hipDeviceSynchronize());
+    auto                  got_all = from_dev(dO, 16);
+    std::vector<unsigned> got(got_all.begin(), got_all.begin() + 8);
+    std::vector<unsigned> got_sum(got_all.begin() + 8, got_all.end());
+    expect_canonical_device_payloads<_Float16, 4, S>(codes, got, got_sum, "gfx1250 pk8 fp4->f16");
+    (void)hipFree(dO);
 }
+
+template <Semantics S>
+void run_fpsan_pk8_fp4_bf16_canonical()
+{
+    if(!have_device())
+        GTEST_SKIP() << "no HIP device";
+    constexpr std::array<unsigned, 8> codes{0x0u, 0x1u, 0x7u, 0x8u, 0x9u, 0xAu, 0xEu, 0xFu};
+    unsigned*                         dO;
+    HIP_CHECK(hipMalloc(&dO, 16 * sizeof(unsigned)));
+    k_fpsan_pk8_fp4_bf16_canonical<S><<<1, 1>>>(host_pack_raw_nibbles8(codes), kE8M0_x2, dO);
+    HIP_CHECK(hipDeviceSynchronize());
+    auto                  got_all = from_dev(dO, 16);
+    std::vector<unsigned> got(got_all.begin(), got_all.begin() + 8);
+    std::vector<unsigned> got_sum(got_all.begin() + 8, got_all.end());
+    expect_canonical_device_payloads<__bf16, 4, S>(codes, got, got_sum, "gfx1250 pk8 fp4->bf16");
+    (void)hipFree(dO);
+}
+
+TEST(CvtScalePk8Unpack, FpsanFp4ToF16CanonicalPayload)
+{
+    FPSAN_RUN_FPSAN_SEMANTICS(run_fpsan_pk8_fp4_f16_canonical);
+}
+
+TEST(CvtScalePk8Unpack, FpsanFp4ToF32CanonicalPayload)
+{
+    FPSAN_RUN_FPSAN_SEMANTICS(run_fpsan_pk8_fp4_f32_canonical);
+}
+
+TEST(CvtScalePk8Unpack, FpsanFp4ToBf16CanonicalPayload)
+{
+    FPSAN_RUN_FPSAN_SEMANTICS(run_fpsan_pk8_fp4_bf16_canonical);
+}
+
+#define PK16_SUB6_CANONICAL_TEST(CASE, WRAP, DST, LABEL)                                            \
+    template <Semantics S>                                                                          \
+    __global__ void CASE##_k(const unsigned* in, unsigned scale, unsigned* out)                     \
+    {                                                                                               \
+        fpsan::v3u32_native p;                                                                      \
+        p[0]   = in[0];                                                                             \
+        p[1]   = in[1];                                                                             \
+        p[2]   = in[2];                                                                             \
+        auto r = fpsan::WRAP<0, S, kCC>(p, scale);                                                  \
+        for(int i = 0; i < 16; ++i)                                                                 \
+        {                                                                                           \
+            const auto lane = r.get(i);                                                             \
+            out[i]          = lane.fpsan_payload();                                                 \
+            out[16 + i]     = (lane + lane).fpsan_payload();                                        \
+        }                                                                                           \
+    }                                                                                               \
+    template <Semantics S>                                                                          \
+    void CASE##_run()                                                                               \
+    {                                                                                               \
+        if(!have_device())                                                                          \
+            GTEST_SKIP() << "no HIP device";                                                        \
+        constexpr std::array<unsigned, 16> codes{0x00u,                                             \
+                                                 0x01u,                                             \
+                                                 0x1Fu,                                             \
+                                                 0x20u,                                             \
+                                                 0x21u,                                             \
+                                                 0x2Au,                                             \
+                                                 0x30u,                                             \
+                                                 0x3Fu,                                             \
+                                                 0x02u,                                             \
+                                                 0x07u,                                             \
+                                                 0x10u,                                             \
+                                                 0x18u,                                             \
+                                                 0x22u,                                             \
+                                                 0x2Fu,                                             \
+                                                 0x3Eu,                                             \
+                                                 0x15u};                                            \
+        auto                               w   = host_pack_raw_codes16(codes);                      \
+        unsigned*                          dIn = to_dev(std::vector<unsigned>(w.begin(), w.end())); \
+        unsigned*                          dO;                                                      \
+        HIP_CHECK(hipMalloc(&dO, 32 * sizeof(unsigned)));                                           \
+        CASE##_k<S><<<1, 1>>>(dIn, kE8M0_x2, dO);                                                   \
+        HIP_CHECK(hipDeviceSynchronize());                                                          \
+        auto                  got_all = from_dev(dO, 32);                                           \
+        std::vector<unsigned> got(got_all.begin(), got_all.begin() + 16);                           \
+        std::vector<unsigned> got_sum(got_all.begin() + 16, got_all.end());                         \
+        expect_canonical_device_payloads<DST, 6, S>(codes, got, got_sum, LABEL);                    \
+        (void)hipFree(dIn);                                                                         \
+        (void)hipFree(dO);                                                                          \
+    }                                                                                               \
+    TEST(CvtScalePk16Unpack, CASE)                                                                  \
+    {                                                                                               \
+        FPSAN_RUN_FPSAN_SEMANTICS(CASE##_run);                                                      \
+    }
+
+PK16_SUB6_CANONICAL_TEST(FpsanFp6ToF32CanonicalPayload,
+                         amdgcn_cvt_scale_pk16_f32_fp6,
+                         float,
+                         "gfx1250 pk16 fp6->f32")
+PK16_SUB6_CANONICAL_TEST(FpsanFp6ToF16CanonicalPayload,
+                         amdgcn_cvt_scale_pk16_f16_fp6,
+                         _Float16,
+                         "gfx1250 pk16 fp6->f16")
+PK16_SUB6_CANONICAL_TEST(FpsanFp6ToBf16CanonicalPayload,
+                         amdgcn_cvt_scale_pk16_bf16_fp6,
+                         __bf16,
+                         "gfx1250 pk16 fp6->bf16")
+PK16_SUB6_CANONICAL_TEST(FpsanBf6ToF32CanonicalPayload,
+                         amdgcn_cvt_scale_pk16_f32_bf6,
+                         float,
+                         "gfx1250 pk16 bf6->f32")
+PK16_SUB6_CANONICAL_TEST(FpsanBf6ToF16CanonicalPayload,
+                         amdgcn_cvt_scale_pk16_f16_bf6,
+                         _Float16,
+                         "gfx1250 pk16 bf6->f16")
+PK16_SUB6_CANONICAL_TEST(FpsanBf6ToBf16CanonicalPayload,
+                         amdgcn_cvt_scale_pk16_bf16_bf6,
+                         __bf16,
+                         "gfx1250 pk16 bf6->bf16")
+#undef PK16_SUB6_CANONICAL_TEST
 
 #endif // has builtin
