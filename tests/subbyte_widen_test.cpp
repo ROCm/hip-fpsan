@@ -3,8 +3,7 @@
 //
 // tests/subbyte_widen_test.cpp
 //
-// Host-level contract tests for shared fp4/fp6/bf6 widening helpers. These fail
-// on the current storage-payload implementation for algebraic semantics.
+// Host-level contract tests for shared fp4/fp6/bf6 widening helpers.
 #include "fpsan/detail/subbyte_widen.hpp"
 #include "fpsan/fpsan.hpp"
 
@@ -43,7 +42,8 @@ namespace
     template <int Width, Semantics S>
     void expect_widen_f32(std::uint32_t code, const char* label)
     {
-        const auto got  = fpsan::detail::subbyte_widen<Width, S, kCC>(code).fpsan_payload();
+        const auto got
+            = fpsan::detail::subbyte_widen_to<float, Width, S, kCC>(code).fpsan_payload();
         const auto want = fpsan_test::canonical_subbyte_widen_payload<float, Width, S, kCC>(code);
         EXPECT_EQ(got, want) << label << " code=0x" << std::hex << code << std::dec
                              << " S=" << int(S);

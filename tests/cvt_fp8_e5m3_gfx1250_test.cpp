@@ -14,8 +14,8 @@
 // special-value table, asserted directly here. Native-mode references are
 // host-computed and INDEPENDENT of the device builtin, so any implementation
 // that diverges from them fails. FPSan-mode references use the deterministic
-// width-8 storage-payload convention. Because E5M3 is not a scalar Value<>
-// element type, this stays a storage convention rather than an algebraic cast.
+// width-8 packed-field convention. Because E5M3 is not a scalar Value<> element
+// type, this stays a private packed conversion rather than a public fp8 cast.
 #include "fpsan/amdgcn_cvt.hpp"
 #include "fpsan/fpsan.hpp"
 
@@ -249,7 +249,7 @@ TEST(CvtFp8E5M3, SrPackExact)
 }
 
 // ===========================================================================
-// 4. FPSan mode: deterministic width-8 storage-payload resize (Triton signed
+// 4. FPSan mode: deterministic width-8 packed-field widen (Triton signed
 // extension, algebraic residue embedding; pack = low 8 bits), independent of
 // the device builtin.
 // ===========================================================================
@@ -278,7 +278,7 @@ TEST(CvtFp8E5M3, FpsanDecodeWiden8)
         for(int b = 0; b < 256; ++b)
         {
             auto want
-                = fpsan::detail::storage_payload_widen<8, S, kCC>(static_cast<std::uint32_t>(b))
+                = fpsan::detail::packed_field_widen<8, S, kCC>(static_cast<std::uint32_t>(b))
                       .fpsan_payload();
             EXPECT_EQ(got[b], static_cast<unsigned>(want)) << "byte 0x" << std::hex << b;
         }
