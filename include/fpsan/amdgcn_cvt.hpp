@@ -1668,7 +1668,8 @@ namespace fpsan
 
     // ---- pk16 unpack from fp6/bf6: v3u32 (16 contiguous 6-bit codes) -> v16, each
     // * scale (width-6). fp6 vs bf6 differ only in the Native-mode builtin; the
-    // FPSan-family payload widen uses the same width-6 storage convention either way.
+    // FPSan-family payload widen uses the same finite width-6 subbyte cast
+    // convention either way.
 #define FPSAN_DEFINE_CVT_SCALE_UNPACK_PK16_FP6(NAME, DstFT, VEC, BUILTIN)        \
     template <int         ScaleSel,                                              \
               Semantics   S = Semantics::Native,                                 \

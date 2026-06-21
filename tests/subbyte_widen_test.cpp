@@ -74,17 +74,32 @@ namespace
     }
 
     template <int Width, Semantics S>
+    void expect_narrow_matches_oracle(Value<float, S, kCC> v, const char* label)
+    {
+        const auto got  = fpsan::detail::subbyte_narrow_code<Width>(v);
+        const auto want = fpsan_test::canonical_subbyte_narrow_code<Width>(v);
+        EXPECT_EQ(got, want) << label << " payload=0x" << std::hex << v.fpsan_payload()
+                             << std::dec << " S=" << int(S);
+    }
+
+    template <int Width, Semantics S>
     void expect_nonfinite_narrows_to_finite_only_codes(const char* label)
     {
         if constexpr(fpsan::detail::is_algebraic_semantics(S))
         {
-            using VF          = Value<float, S, kCC>;
-            const auto gotNan = fpsan_test::canonical_subbyte_narrow_code<Width>(
-                VF{std::numeric_limits<float>::quiet_NaN()});
-            const auto gotInf = fpsan_test::canonical_subbyte_narrow_code<Width>(
-                VF{std::numeric_limits<float>::infinity()});
-            const auto gotNegInf = fpsan_test::canonical_subbyte_narrow_code<Width>(
-                VF{-std::numeric_limits<float>::infinity()});
+            using VF             = Value<float, S, kCC>;
+            const auto nan       = VF{std::numeric_limits<float>::quiet_NaN()};
+            const auto inf       = VF{std::numeric_limits<float>::infinity()};
+            const auto negInf    = VF{-std::numeric_limits<float>::infinity()};
+            const auto gotNan    = fpsan::detail::subbyte_narrow_code<Width>(nan);
+            const auto gotInf    = fpsan::detail::subbyte_narrow_code<Width>(inf);
+            const auto gotNegInf = fpsan::detail::subbyte_narrow_code<Width>(negInf);
+            EXPECT_EQ(gotNan, fpsan_test::canonical_subbyte_narrow_code<Width>(nan))
+                << label << " NaN oracle S=" << int(S);
+            EXPECT_EQ(gotInf, fpsan_test::canonical_subbyte_narrow_code<Width>(inf))
+                << label << " +Inf oracle S=" << int(S);
+            EXPECT_EQ(gotNegInf, fpsan_test::canonical_subbyte_narrow_code<Width>(negInf))
+                << label << " -Inf oracle S=" << int(S);
             EXPECT_EQ(gotNan, 0u) << label << " NaN S=" << int(S);
             EXPECT_EQ(gotInf, fpsan_test::subbyte_positive_max_code<Width>())
                 << label << " +Inf S=" << int(S);
@@ -98,6 +113,18 @@ namespace
     {
         expect_nonfinite_narrows_to_finite_only_codes<4, S>("fp4 non-finite narrow");
         expect_nonfinite_narrows_to_finite_only_codes<6, S>("fp6/bf6 non-finite narrow");
+    }
+
+    template <Semantics S>
+    void run_finite_narrow()
+    {
+        using VF = Value<float, S, kCC>;
+        const float samples[] = {-13.0f, -7.0f, -1.0f, -0.5f, 0.0f, 0.5f, 1.0f, 7.0f, 13.0f};
+        for(float x : samples)
+        {
+            expect_narrow_matches_oracle<4, S>(VF{x}, "fp4 finite narrow");
+            expect_narrow_matches_oracle<6, S>(VF{x}, "fp6/bf6 finite narrow");
+        }
     }
 
     template <Semantics S>
@@ -133,6 +160,11 @@ TEST(SubbyteWiden, Bf6UsesCanonicalCastPolicy)
 TEST(SubbyteNarrow, AlgebraicNonFinitesUseFiniteOnlyCodes)
 {
     FPSAN_RUN_ALL_VARIANTS(run_nonfinite_narrow);
+}
+
+TEST(SubbyteNarrow, ProductionHelperMatchesOracleForFiniteValues)
+{
+    FPSAN_RUN_ALL_VARIANTS(run_finite_narrow);
 }
 
 TEST(SubbyteRoundTrip, Fp4FieldWithMulCastsUsesCastTower)
