@@ -783,10 +783,10 @@ namespace fpsan
         // The f8f6f4 WMMA reaches sub-byte operands (fp6/bf6 6-bit, fp4 4-bit) that
         // cannot be Value scalar element types, so each per-lane operand is the raw
         // 512-bit packed register (v16i32 == int[16]) the builtin consumes. In FPSan
-        // mode its bits ARE the per-slot payloads: slot s occupies the contiguous
-        // Width-bit field at bit Width*s (little-endian across the 16 words), and the
-        // FPSan widen of a Width-bit code uses the storage-payload convention from
-        // subbyte_widen, exactly as the fp4/fp6 cvt-unpack path. The cross-lane
+        // mode its bits ARE the per-slot finite payload codes: slot s occupies the
+        // contiguous Width-bit field at bit Width*s (little-endian across the 16
+        // words), and the FPSan widen of a Width-bit code uses the same canonical
+        // subbyte cast policy as the fp4/fp6 cvt-unpack path. The cross-lane
         // element->(lane, slot) mapping is the SAME Wmma16x16x128Layout validated for the
         // 8-bit K=128 WMMA: the
         // grounding test confirms bit-exact builtin equality for every same-class
@@ -819,7 +819,7 @@ namespace fpsan
         {
             static_assert(Width < 8, "public FP8/BF8 operands use wmma_f8f6f4_gather_widen");
             const std::uint32_t field = wmma_sub_gather_field<Width>(pw, s, srclane);
-            return subbyte_widen<Width, S, C>(field);
+            return subbyte_widen_to<float, Width, S, C>(field);
         }
 
         template <int Format, Semantics S, Conversions C>
@@ -841,7 +841,7 @@ namespace fpsan
             }
             else
             {
-                return subbyte_widen<Width, S, C>(field);
+                return subbyte_widen_to<float, Width, S, C>(field);
             }
         }
 

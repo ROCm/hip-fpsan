@@ -775,30 +775,30 @@ namespace fpsan
     // nibble (2*Sel+1). Scale DIRECTION matches the fp8 family: UNPACK multiplies
     // by scale, PACK divides by scale.
     //
-    // In FPSan-family semantics the packed u32 holds fp4 storage payloads (4-bit)
-    // per nibble, exactly as the fp8 cvt wrappers treat bytes as fp8 payloads.
-    // There is no Value<fp4> (sub-byte is never a Value element type), so widening
-    // embeds the sign-extended storage value into the selected f32 payload
-    // semantics and narrowing keeps the low 4 bits. All scale arithmetic happens
-    // in the f32 payload ring (the scale operand is f32), with the f16/bf16 in/out
-    // variants widening to / narrowing from f32 around it.
+    // In FPSan-family semantics the packed u32 holds finite fp4 payload codes
+    // (4-bit) per nibble. There is no Value<fp4> (sub-byte is never a Value
+    // element type), so widening first embeds the finite code into the selected
+    // FPSan semantics and then follows the ordinary cast policy; narrowing casts
+    // back into the finite fp4 residue space and maps non-finite algebraic sources
+    // to finite-only codes. All scale arithmetic happens in the f32 payload ring
+    // (the scale operand is f32), with the f16/bf16 in/out variants widening to /
+    // narrowing from f32 around it.
     // =============================================================================
     namespace detail
     {
 
-        // Widen a 4-bit fp4 storage payload (low nibble of `nib`) into the selected
-        // f32 payload semantics.
+        // Widen a finite 4-bit fp4 payload code into the selected f32 payload
+        // semantics.
         template <Semantics S, Conversions C>
         FPSAN_DEVICE Value<float, S, C> fp4_nibble_to_f32(std::uint32_t nib)
         {
-            return subbyte_widen<4, S, C>(nib);
+            return subbyte_widen_to<float, 4, S, C>(nib);
         }
-        // Narrow a 32-bit f32 payload to a 4-bit fp4 payload (FPSan narrow == keep low
-        // 4 bits of the signed payload).
+        // Narrow an f32 payload to a finite 4-bit fp4 payload code.
         template <Semantics S, Conversions C>
         FPSAN_DEVICE std::uint32_t f32_to_fp4_nibble(Value<float, S, C> v)
         {
-            return static_cast<std::uint32_t>(v.fpsan_payload()) & 0xFu;
+            return subbyte_narrow_code<4>(v);
         }
         // Splice a 4-bit value into nibble pair `Sel` (low nibble = a, high = b) of an
         // existing u32, preserving the other six nibbles.
@@ -963,8 +963,9 @@ namespace fpsan
     //   2k+1=hi[k].
     //   * sr_pk32_*    : contiguous (same as pk32); seed is opaque to exact inputs.
     // Scale direction matches the rest of the family: UNPACK multiplies, PACK
-    // divides. In FPSan mode the v6u32 holds 6-bit fp6/bf6 PAYLOADS; widen sign-
-    // extends 6->32, narrow keeps the low 6 bits, all in the f32 payload ring.
+    // divides. In FPSan mode the v6u32 holds finite 6-bit fp6/bf6 payload codes;
+    // widen and narrow use the ordinary cast policy except that fp6/bf6 are not
+    // part of the FieldWithMulCasts tower.
     // =============================================================================
     using v32f_native     = float __attribute__((ext_vector_type(32)));
     using v32h_native     = _Float16 __attribute__((ext_vector_type(32)));
@@ -997,16 +998,17 @@ namespace fpsan
             if(off > 26)
                 w[wi + 1] |= v6 >> (32 - off);
         }
-        // Widen a 6-bit storage payload into the selected f32 payload semantics.
+        // Widen a finite 6-bit fp6/bf6 payload code into the selected f32 payload
+        // semantics.
         template <Semantics S, Conversions C>
         FPSAN_DEVICE Value<float, S, C> sub6_to_f32(std::uint32_t f)
         {
-            return subbyte_widen<6, S, C>(f);
+            return subbyte_widen_to<float, 6, S, C>(f);
         }
         template <Semantics S, Conversions C>
         FPSAN_DEVICE std::uint32_t f32_to_sub6(Value<float, S, C> v)
         {
-            return static_cast<std::uint32_t>(v.fpsan_payload()) & 0x3Fu;
+            return subbyte_narrow_code<6>(v);
         }
     } // namespace detail
 
@@ -1486,10 +1488,11 @@ namespace fpsan
     // which is the authoritative reference.
     //
     // FPSan model: E5M3 cannot be a Value<> element type (1 + 5 + 3 != 8, since it
-    // has no sign bit), so there is no Value<fp8_e5m3>. The FPSan path therefore
-    // remains a width-8 deterministic storage-payload resize (decode =
-    // storage_payload_widen<8>; encode = low 8 payload bits). The format's
-    // unsignedness is modeled only in (authoritative) Native mode.
+    // has no sign bit), so there is no Value<fp8_e5m3>. Triton decode follows the
+    // deterministic width-8 signed-resize payload convention; algebraic decode
+    // embeds the field as a finite residue before entering f32 payload space. Pack
+    // preserves the low 8 payload bits. The format's unsignedness is modeled only
+    // in (authoritative) Native mode.
     // =============================================================================
 #if !defined(__HIP_DEVICE_COMPILE__) || __has_builtin(__builtin_amdgcn_cvt_f32_fp8_e5m3)
     // Decode: byte ByteIdx of `packed`, interpreted as E5M3, -> f32.
@@ -1502,7 +1505,7 @@ namespace fpsan
         {
             const std::uint8_t byte = static_cast<std::uint8_t>(
                 (static_cast<std::uint32_t>(packed) >> (ByteIdx * 8)) & 0xFFu);
-            return detail::storage_payload_widen<8, S, C>(byte);
+            return detail::packed_field_widen<8, S, C>(byte);
         }
     }
 #endif
@@ -1568,8 +1571,8 @@ namespace fpsan
     // effect, and the payload model tracks precision/width, not the E8M0 multiply
     // (Float-only -- a single-lane payload model cannot reproduce the per-lane
     // byte selection anyway). FP8/BF8 unpack widens a packed fp8 payload byte via
-    // fpsan::cast from Value<fp8_*, S>; fp4/fp6 still use the sub-byte signed
-    // payload-resize convention because they are not Value element types.
+    // fpsan::cast from Value<fp8_*, S>; fp4/fp6 use the canonical sub-byte cast
+    // policy because they are finite-only packed fields, not Value element types.
     // Tests pin the Float scale operand to all-0x7f (E8M0 127 == x1) so Float and
     // FPSan agree on an exact decode, plus a separate Float-only case for a 2^n
     // scale.
@@ -1665,7 +1668,8 @@ namespace fpsan
 
     // ---- pk16 unpack from fp6/bf6: v3u32 (16 contiguous 6-bit codes) -> v16, each
     // * scale (width-6). fp6 vs bf6 differ only in the Native-mode builtin; the
-    // FPSan-family payload widen uses the same width-6 storage convention either way.
+    // FPSan-family payload widen uses the same finite width-6 subbyte cast
+    // convention either way.
 #define FPSAN_DEFINE_CVT_SCALE_UNPACK_PK16_FP6(NAME, DstFT, VEC, BUILTIN)        \
     template <int         ScaleSel,                                              \
               Semantics   S = Semantics::Native,                                 \

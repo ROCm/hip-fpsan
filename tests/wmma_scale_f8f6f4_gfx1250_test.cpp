@@ -25,6 +25,7 @@
 
 #include "fpsan_semantics.hpp"
 #include "hip_test_utils.hpp"
+#include "subbyte_oracle.hpp"
 #include "test_random.hpp"
 
 #include <hip/hip_runtime.h>
@@ -197,9 +198,9 @@ TEST(WmmaScaleF8f6f4_128, LayoutMatchesHardware)
 // Validate the shipped amdgcn_wmma_scale_f32_16x16x128_f8f6f4_sub wrapper for
 // sub-byte operands: Native mode == host block-scaled matmul (decoded values),
 // FPSan-family semantics == payload-ring block-scaled reference in the same
-// semantics. FP4/FP6/BF6 are packed storage formats, not scalar Value<> element
-// types, so these checks use the explicit storage-payload convention. FP8/BF8
-// mixed operands are public scalar Value<> types and widen through fpsan::cast.
+// semantics. FP4/FP6/BF6 are finite packed subbyte formats and canonicalize
+// through the standard FPSan cast policy. FP8/BF8 mixed operands are public
+// scalar Value<> types and widen through fpsan::cast.
 static constexpr Conversions kCC = Conversions::Explicit;
 
 static const FpFormat& fmt_of(int code)
@@ -239,7 +240,7 @@ static Value<float, S, kCC> widen_ref(std::uint32_t code)
         return fpsan::cast<float>(
             Value<fpsan::fp8_e5m2, S, kCC>::from_fpsan_payload(static_cast<std::uint8_t>(code)));
     else
-        return fpsan::detail::subbyte_widen<width_of(FMT), S, kCC>(code);
+        return fpsan_test::canonical_subbyte_widen<width_of(FMT), S, kCC>(code);
 }
 
 // Decode a scale byte per the WMMA scale-format immediate (mirrors the wrapper):
@@ -401,7 +402,7 @@ static void run_sub_scale(const char* tag)
             fref[m * N + n] = acc;
         }
 
-    // FPSan reference: payload-ring per-element scaled, storage-payload widening.
+    // FPSan reference: payload-ring per-element scaled, canonical subbyte widening.
     const std::uint32_t        amask = (1u << aw) - 1u, bmask = (1u << bw) - 1u;
     std::vector<std::uint32_t> pref(M * N);
     for(int m = 0; m < M; ++m)

@@ -17,9 +17,8 @@
 //   Float : wrapper == hardware, checked against the INDEPENDENT host OCP
 //           reference (detail::narrow_to_f32 / f32_to_narrow), NOT the builtin.
 //   FPSan : wrapper == an independent payload-domain reference built from the
-//           public Value arithmetic (sub-byte operands use storage-payload
-//           widening; pack DIVIDES by scale, unpack MULTIPLIES -- the
-//           silicon-verified MX direction). The scale
+//           public Value arithmetic and canonical subbyte casts (pack DIVIDES
+//           by scale, unpack MULTIPLIES -- the silicon-verified MX direction). The scale
 //           is deliberately != 1 so a flipped mul/div direction is caught (a
 //           pack->unpack round-trip would cancel it; these do not round-trip).
 //           For the SR ops the seed is varied to confirm it is opaque to the
@@ -28,6 +27,7 @@
 #include "fpsan/fpsan.hpp"
 
 #include "fpsan_semantics.hpp"
+#include "subbyte_oracle.hpp"
 
 #include "hip_test_utils.hpp"
 #include "test_random.hpp"
@@ -38,6 +38,7 @@
 
 #include <cmath>
 #include <cstdint>
+#include <limits>
 #include <vector>
 
 using fpsan::Conversions;
@@ -516,8 +517,13 @@ void run_c(const fpsan::detail::FpFormat& fmt)
         for(int i = 0; i < 6; ++i)
             EXPECT_EQ(g[i], expect[i]) << "Float word " << i;
     }
-    // ---- FPSan: contiguous stream of (cast<float>(v)/scale) payloads & 0x3F;
-    // seed opaque.
+    in[5]  = std::numeric_limits<float>::quiet_NaN();
+    in[9]  = std::numeric_limits<float>::infinity();
+    in[23] = std::numeric_limits<float>::quiet_NaN();
+    in[27] = -std::numeric_limits<float>::infinity();
+    (void)hipFree(dIn);
+    dIn = to_dev(in);
+    // ---- FPSan: contiguous stream of canonical subbyte narrow codes; seed opaque.
     fpsan_test::for_each_fpsan_semantics([&](auto sem) {
         constexpr Semantics S = decltype(sem)::value;
         using VF              = Value<float, S, kCC>;
@@ -529,9 +535,8 @@ void run_c(const fpsan::detail::FpFormat& fmt)
         for(int i = 0; i < 32; ++i)
         {
             VS v{static_cast<SrcElem>(in[i])};
-            codes[i]
-                = static_cast<std::uint8_t>((fpsan::cast<float>(v) / VF{scale}).fpsan_payload())
-                  & 0x3F;
+            codes[i] = static_cast<std::uint8_t>(
+                fpsan_test::canonical_subbyte_narrow_code<6>(fpsan::cast<float>(v) / VF{scale}));
         }
         unsigned expect[6];
         host_pack6(codes, 32, expect);
@@ -635,21 +640,39 @@ void run_d()
             unsigned nb = f32_to_narrow(sb / scale, kFp4E2M1) & 0xF;
             EXPECT_EQ(g, na | (nb << 4)) << "Float a=" << a << " b=" << b;
         }
-        // ---- FPSan: byte0 = (a/scale)payload | (b/scale)payload<<4; seed opaque.
+        // ---- FPSan: byte0 = canonical fp4 codes for a/scale and b/scale; seed opaque.
         fpsan_test::for_each_fpsan_semantics([&](auto sem) {
             constexpr Semantics S = decltype(sem)::value;
             using VF              = Value<float, S, kCC>;
             k_d<S, SrcElem, VEC><<<1, 1>>>(old, a, b, 0x777u + t, scale, dO);
             HIP_CHECK(hipDeviceSynchronize());
-            using VS   = Value<SrcElem, S, kCC>;
-            unsigned g = from_dev(dO, 1)[0] & 0xFF;
-            unsigned na
-                = (fpsan::cast<float>(VS{static_cast<SrcElem>(a)}) / VF{scale}).fpsan_payload()
-                  & 0xF;
-            unsigned nb
-                = (fpsan::cast<float>(VS{static_cast<SrcElem>(b)}) / VF{scale}).fpsan_payload()
-                  & 0xF;
+            using VS    = Value<SrcElem, S, kCC>;
+            unsigned g  = from_dev(dO, 1)[0] & 0xFF;
+            unsigned na = fpsan_test::canonical_subbyte_narrow_code<4>(
+                fpsan::cast<float>(VS{static_cast<SrcElem>(a)}) / VF{scale});
+            unsigned nb = fpsan_test::canonical_subbyte_narrow_code<4>(
+                fpsan::cast<float>(VS{static_cast<SrcElem>(b)}) / VF{scale});
             EXPECT_EQ(g, na | (nb << 4)) << "FPSan a=" << a << " b=" << b;
+        });
+    }
+    const float special[] = {std::numeric_limits<float>::quiet_NaN(),
+                             std::numeric_limits<float>::infinity(),
+                             -std::numeric_limits<float>::infinity()};
+    for(float a : special)
+    {
+        const float b = 2.0f;
+        fpsan_test::for_each_fpsan_semantics([&](auto sem) {
+            constexpr Semantics S = decltype(sem)::value;
+            using VF              = Value<float, S, kCC>;
+            using VS              = Value<SrcElem, S, kCC>;
+            k_d<S, SrcElem, VEC><<<1, 1>>>(old, a, b, 0x777u, scale, dO);
+            HIP_CHECK(hipDeviceSynchronize());
+            unsigned g  = from_dev(dO, 1)[0] & 0xFF;
+            unsigned na = fpsan_test::canonical_subbyte_narrow_code<4>(
+                fpsan::cast<float>(VS{static_cast<SrcElem>(a)}) / VF{scale});
+            unsigned nb = fpsan_test::canonical_subbyte_narrow_code<4>(
+                fpsan::cast<float>(VS{static_cast<SrcElem>(b)}) / VF{scale});
+            EXPECT_EQ(g, na | (nb << 4)) << "FPSan non-finite source";
         });
     }
     (void)hipFree(dO);

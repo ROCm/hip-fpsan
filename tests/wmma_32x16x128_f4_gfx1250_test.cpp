@@ -25,6 +25,7 @@
 
 #include "fpsan_semantics.hpp"
 #include "hip_test_utils.hpp"
+#include "subbyte_oracle.hpp"
 #include "test_random.hpp"
 
 #include <hip/hip_runtime.h>
@@ -173,16 +174,16 @@ TEST(WmmaF4_32x16x128, LayoutMatchesHardware)
 }
 
 // ===================== wrapper: Float + FPSan =====================
-// FP4 is a packed storage format, not a scalar Value<> element type. The FPSan
-// checks here therefore pin the storage-payload convention used by the wrapper,
-// not an algebraic Value<fp4> cast.
+// FP4 is a packed finite subbyte format, not a scalar Value<> element type. The
+// FPSan checks here pin canonical finite widening through the standard cast
+// policy.
 template <Semantics S>
 using VF = Value<float, S, kCC>;
 
 template <Semantics S>
-static VF<S> f4_storage_value(std::uint32_t code)
+static VF<S> f4_canonical_value(std::uint32_t code)
 {
-    return fpsan::detail::subbyte_widen<4, S, kCC>(code);
+    return fpsan_test::canonical_subbyte_widen<4, S, kCC>(code);
 }
 
 __global__ void
@@ -285,7 +286,7 @@ TEST(WmmaF4_32x16x128, WrapperFloatAndFPSan)
                 {
                     const std::uint32_t ca = f32_to_narrow(A[m * K + k], kFp4E2M1) & 0xF;
                     const std::uint32_t cb = f32_to_narrow(B[k * N + n], kFp4E2M1) & 0xF;
-                    acc = acc + f4_storage_value<S>(ca) * f4_storage_value<S>(cb);
+                    acc = acc + f4_canonical_value<S>(ca) * f4_canonical_value<S>(cb);
                 }
                 pref[m * N + n] = acc.fpsan_payload();
             }
@@ -430,7 +431,7 @@ static void run_modifier_f4()
                 {
                     const std::uint32_t ca = f32_to_narrow(A[m * K + k], kFp4E2M1) & 0xF;
                     const std::uint32_t cb = f32_to_narrow(B[k * N + n], kFp4E2M1) & 0xF;
-                    acc = acc + f4_storage_value<S>(ca) * f4_storage_value<S>(cb);
+                    acc = acc + f4_canonical_value<S>(ca) * f4_canonical_value<S>(cb);
                 }
                 pref[m * N + n] = acc.fpsan_payload();
             }
@@ -670,7 +671,7 @@ static void run_scale(const char* tag)
                     const std::uint32_t ca = f32_to_narrow(A[m * K + k], kFp4E2M1) & 0xF;
                     const std::uint32_t cb = f32_to_narrow(B[k * N + n], kFp4E2M1) & 0xF;
                     acc                    = acc
-                          + f4_storage_value<S>(ca) * f4_storage_value<S>(cb)
+                          + f4_canonical_value<S>(ca) * f4_canonical_value<S>(cb)
                                 * VF<S>(scale_dec(eA[m * NBY + by], SFMT))
                                 * VF<S>(scale_dec(eB[n * NBY + by], SFMT));
                 }

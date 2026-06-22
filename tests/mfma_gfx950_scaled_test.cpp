@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "mfma_gfx950_parts.hpp"
+#include "subbyte_oracle.hpp"
 
 // ---------------------------------------------------------------------------
 // Scaled f8f6f4 MFMA (16x16x128 / 32x32x64). The Float path forwards to the
@@ -448,8 +449,8 @@ TEST(ScaledMfma32x32x64_Mixed, FpsanMatchesScalarReference)
 //     run the builtin via the wrapper, compare to a numeric reference. Inputs
 //     are small exact integers, so the accumulation is exact.
 //   * FpsanMatchesScalarReference (FPSan): pack arbitrary Width-bit payloads,
-//     run the FPSan dataflow, compare to a host reference that applies the same
-//     storage-payload widening and accumulates in the payload ring --
+//     run the FPSan dataflow, compare to a host reference that applies canonical
+//     finite subbyte widening and accumulates in the payload ring --
 //     isolating the gather + extraction layout (which the Float test pins).
 // ---------------------------------------------------------------------------
 namespace
@@ -460,9 +461,9 @@ namespace
         return code <= 3 ? 6 : 4;
     }
     template <int Format, Semantics S>
-    Value<float, S, kCC> sub_storage_value(unsigned field)
+    Value<float, S, kCC> sub_canonical_value(unsigned field)
     {
-        return fpsan::detail::subbyte_widen<sub_width(Format), S, kCC>(field);
+        return fpsan_test::canonical_subbyte_widen<sub_width(Format), S, kCC>(field);
     }
     float sub_decode(int code, unsigned c)
     {
@@ -645,8 +646,8 @@ void run_scale_sub16_fpsan()
                 VF dot(0.0f);
                 for(int k = 0; k < SK; ++k)
                     dot = dot
-                          + sub_storage_value<CBSZ, S>((unsigned)Ap[i * SK + k])
-                                * sub_storage_value<BLGP, S>((unsigned)Bp[k * SN + j]);
+                          + sub_canonical_value<CBSZ, S>((unsigned)Ap[i * SK + k])
+                                * sub_canonical_value<BLGP, S>((unsigned)Bp[k * SN + j]);
                 ref[i * SN + j] = (VF(Cm[i * SN + j]) + dot * vsa * vsb).fpsan_payload();
             }
         std::uint32_t* dD;
@@ -842,8 +843,8 @@ void run_scale_sub32_fpsan()
                 VF dot(0.0f);
                 for(int k = 0; k < S2K; ++k)
                     dot = dot
-                          + sub_storage_value<CBSZ, S>((unsigned)Ap[i * S2K + k])
-                                * sub_storage_value<BLGP, S>((unsigned)Bp[k * S2N + j]);
+                          + sub_canonical_value<CBSZ, S>((unsigned)Ap[i * S2K + k])
+                                * sub_canonical_value<BLGP, S>((unsigned)Bp[k * S2N + j]);
                 ref[i * S2N + j] = (VF(Cm[i * S2N + j]) + dot * vsa * vsb).fpsan_payload();
             }
         std::uint32_t* dD;
@@ -1318,8 +1319,8 @@ void run_scale_sub16_perblock_fpsan()
                     VF blk(0.0f);
                     for(int k = 32 * kb; k < 32 * kb + 32; ++k)
                         blk = blk
-                              + sub_storage_value<CBSZ, S>((unsigned)Ap[i * SK + k])
-                                    * sub_storage_value<BLGP, S>((unsigned)Bp[k * SN + j]);
+                              + sub_canonical_value<CBSZ, S>((unsigned)Ap[i * SK + k])
+                                    * sub_canonical_value<BLGP, S>((unsigned)Bp[k * SN + j]);
                     acc = acc + blk * VF(e8(eA[i * NB + kb])) * VF(e8(eB[j * NB + kb]));
                 }
                 ref[i * SN + j] = acc.fpsan_payload();
@@ -1555,7 +1556,7 @@ TEST(ScaledMfma16x16x128_Mixed8xSub, FP6xFP8_Layout)
 }
 
 // FPSan-mode mixed 8 x sub: fp8 operand carries real fp8 values (cast widening);
-// sub operand carries arbitrary Width-bit payloads (storage-payload widening).
+// sub operand carries finite Width-bit subbyte codes (canonical widening).
 template <bool AIsSub, class Fp8Elem, int CBSZ, int BLGP>
 void run_scale16_mixed_fpsan()
 {
@@ -1602,12 +1603,12 @@ void run_scale16_mixed_fpsan()
         using VFp8            = Value<Fp8Elem, S, kCC>;
         const VF vsa(fpsan::detail::e8m0_to_float(128)), vsb(fpsan::detail::e8m0_to_float(130));
         auto     Av = [&](int i, int k) {
-            return AIsSub ? sub_storage_value<SubFmt, S>((unsigned)subpay[i * SK + k])
+            return AIsSub ? sub_canonical_value<SubFmt, S>((unsigned)subpay[i * SK + k])
                               : fpsan::cast<float>(VFp8(Fp8Elem(fp8mat[i * SK + k])));
         };
         auto Bv = [&](int k, int j) {
             return AIsSub ? fpsan::cast<float>(VFp8(Fp8Elem(fp8mat[k * SN + j])))
-                          : sub_storage_value<SubFmt, S>((unsigned)subpay[k * SN + j]);
+                          : sub_canonical_value<SubFmt, S>((unsigned)subpay[k * SN + j]);
         };
         std::vector<std::uint32_t> ref(SM * SN);
         for(int i = 0; i < SM; ++i)
@@ -1858,12 +1859,12 @@ void run_scale32_mixed_fpsan()
         using VFp8            = Value<Fp8Elem, S, kCC>;
         const VF vsa(fpsan::detail::e8m0_to_float(128)), vsb(fpsan::detail::e8m0_to_float(130));
         auto     Av = [&](int i, int k) {
-            return AIsSub ? sub_storage_value<SubFmt, S>((unsigned)subpay[i * S2K + k])
+            return AIsSub ? sub_canonical_value<SubFmt, S>((unsigned)subpay[i * S2K + k])
                               : fpsan::cast<float>(VFp8(Fp8Elem(fp8mat[i * S2K + k])));
         };
         auto Bv = [&](int k, int j) {
             return AIsSub ? fpsan::cast<float>(VFp8(Fp8Elem(fp8mat[k * S2N + j])))
-                          : sub_storage_value<SubFmt, S>((unsigned)subpay[k * S2N + j]);
+                          : sub_canonical_value<SubFmt, S>((unsigned)subpay[k * S2N + j]);
         };
         std::vector<std::uint32_t> ref(S2M * S2N);
         for(int i = 0; i < S2M; ++i)

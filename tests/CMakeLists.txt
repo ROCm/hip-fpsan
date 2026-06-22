@@ -143,6 +143,7 @@ if(TARGET GTest::gtest_main)
   fpsan_add_test(fpsan_vector_test vector_test.cpp)
   fpsan_add_test(fpsan_cast_test cast_test.cpp)
   fpsan_add_test(fpsan_fp8_test fp8_test.cpp)
+  fpsan_add_test(fpsan_subbyte_widen_test subbyte_widen_test.cpp)
   # Host<->device parity of the core algebra from a single source body. Built in
   # both configs: pure C++ checks the host invariants; HIP additionally runs the
   # same body in a kernel and asserts device == host bit-for-bit.
