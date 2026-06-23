@@ -275,11 +275,13 @@ namespace fpsan
             if(__builtin_amdgcn_wavefrontsize() == 64)
             {
                 const int lane = wave_lane_full();
-                if(((lane ^ src_lane) & 32) != 0)
-                {
-                    word = static_cast<std::uint32_t>(
-                        __builtin_amdgcn_permlane64(static_cast<int>(word)));
-                }
+                // Unconditionally perform the permlane, to avoid errors due to masked src_lane
+                auto shuffle = static_cast<std::uint32_t>(
+                    __builtin_amdgcn_permlane64(static_cast<int>(word)));
+                // Are the lane and the source lane in the same half?
+                bool cond = (lane ^ src_lane) & 32;
+
+                word = cond * shuffle + (!cond) * word;
                 src_lane &= 31;
             }
 #endif
@@ -291,6 +293,7 @@ namespace fpsan
         // stored representation (payload or float bits) is shuffled verbatim, using
         // raw cross-lane builtins (no HIP runtime dependency). 64-bit scalars
         // (double) are moved as two halves via two 32-bit shuffles.
+        // ds_permute returns 0 if the source lane is not active.
         template <class FT, Semantics S, Conversions C>
         FPSAN_DEVICE Value<FT, S, C> wave_shfl(Value<FT, S, C> v, int src_lane)
         {

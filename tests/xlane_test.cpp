@@ -770,6 +770,134 @@ TEST(Xlane, Permlane64Fpsan)
 }
 #endif // __has_builtin(__builtin_amdgcn_permlane64)
 
+// ---- detail::wave_shfl ------------------------------------------------------
+// These source patterns are intentionally divergent on wave64: one half reads
+// within its own half while the other reads across halves. That exercises the
+// composition used by detail::wave_shfl, not just the raw cross-lane wrappers.
+template <class FT>
+static __host__ __device__ inline FT wave_shfl_lane_input(int lane)
+{
+    return static_cast<FT>(lane * 11 + 5) - static_cast<FT>(200);
+}
+
+template <bool HighHalfSource>
+static __host__ __device__ inline int wave_shfl_quarter_src_lane(int lane)
+{
+#if FPSAN_TEST_FORCE_WAVE_SIZE == 64
+    if constexpr(HighHalfSource)
+        return 32 | (lane & 15);
+#else
+    (void)HighHalfSource;
+#endif
+    return lane & 15;
+}
+
+template <class FT, Semantics S, bool HighHalfSource, class Out>
+__global__ void k_wave_shfl_quarter(Out* out)
+{
+    const int         lane = threadIdx.x;
+    Value<FT, S, kCC> v{wave_shfl_lane_input<FT>(lane)};
+    const int         src_lane = wave_shfl_quarter_src_lane<HighHalfSource>(lane);
+    auto              r        = fpsan::detail::wave_shfl(v, src_lane);
+    if constexpr(S == Semantics::Native)
+        out[lane] = static_cast<FT>(r);
+    else
+        out[lane] = r.fpsan_payload();
+}
+
+template <class FT, Semantics S, bool HighHalfSource>
+void test_wave_shfl_quarter()
+{
+    int ndev = 0;
+    if(hipGetDeviceCount(&ndev) != hipSuccess || ndev == 0)
+        GTEST_SKIP() << "no HIP device";
+
+    using V   = Value<FT, S, kCC>;
+    using Out = std::conditional_t<S == Semantics::Native, FT, typename V::bits_type>;
+    Out* d_out;
+    HIP_CHECK(hipMalloc(&d_out, LANES * sizeof(Out)));
+    k_wave_shfl_quarter<FT, S, HighHalfSource><<<1, LANES>>>(d_out);
+    HIP_CHECK(hipDeviceSynchronize());
+    std::vector<Out> got(LANES);
+    HIP_CHECK(hipMemcpy(got.data(), d_out, LANES * sizeof(Out), hipMemcpyDeviceToHost));
+    for(int i = 0; i < LANES; ++i)
+    {
+        const int src_lane = wave_shfl_quarter_src_lane<HighHalfSource>(i);
+        V         src_v{wave_shfl_lane_input<FT>(src_lane)};
+        Out       expected;
+        if constexpr(S == Semantics::Native)
+            expected = static_cast<FT>(src_v);
+        else
+            expected = src_v.fpsan_payload();
+        EXPECT_EQ(got[i], expected) << "lane " << i << " src_lane " << src_lane;
+    }
+    (void)hipFree(d_out);
+}
+
+template <Semantics S>
+void test_wave_shfl_low_quarter_float()
+{
+    test_wave_shfl_quarter<float, S, false>();
+}
+
+template <Semantics S>
+void test_wave_shfl_high_quarter_float()
+{
+    test_wave_shfl_quarter<float, S, true>();
+}
+
+template <Semantics S>
+void test_wave_shfl_low_quarter_double()
+{
+    test_wave_shfl_quarter<double, S, false>();
+}
+
+template <Semantics S>
+void test_wave_shfl_high_quarter_double()
+{
+    test_wave_shfl_quarter<double, S, true>();
+}
+
+TEST(Xlane, WaveShflLowQuarterFloat)
+{
+    test_wave_shfl_low_quarter_float<Semantics::Native>();
+}
+
+TEST(Xlane, WaveShflLowQuarterFpsan)
+{
+    FPSAN_RUN_FPSAN_SEMANTICS(test_wave_shfl_low_quarter_float, );
+}
+
+TEST(Xlane, WaveShflHighQuarterFloat)
+{
+    test_wave_shfl_high_quarter_float<Semantics::Native>();
+}
+
+TEST(Xlane, WaveShflHighQuarterFpsan)
+{
+    FPSAN_RUN_FPSAN_SEMANTICS(test_wave_shfl_high_quarter_float, );
+}
+
+TEST(Xlane, WaveShflLowQuarterDouble)
+{
+    test_wave_shfl_low_quarter_double<Semantics::Native>();
+}
+
+TEST(Xlane, WaveShflLowQuarterDoubleFpsan)
+{
+    FPSAN_RUN_FPSAN_SEMANTICS(test_wave_shfl_low_quarter_double, );
+}
+
+TEST(Xlane, WaveShflHighQuarterDouble)
+{
+    test_wave_shfl_high_quarter_double<Semantics::Native>();
+}
+
+TEST(Xlane, WaveShflHighQuarterDoubleFpsan)
+{
+    FPSAN_RUN_FPSAN_SEMANTICS(test_wave_shfl_high_quarter_double, );
+}
+
 // ---- gfx1250 permlane bcast/down/up/xor (cross-mode bit-identity) -----------
 // Selector semantics are intricate; we certify the load-bearing invariant that
 // the Float and FPSan wrappers route bits identically. With input encoding the
