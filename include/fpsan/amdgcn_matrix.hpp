@@ -607,6 +607,20 @@ namespace fpsan
         // shape to the 16x16x16 dataflow but with a K=32 contraction and v16 A/B
         // fragments. Generic over Semantics so Native mode acts as a host/builtin
         // oracle and FPSan mode runs the same arithmetic in the payload ring.
+        template <int E, class AVec, class AccScalar, Semantics S, Conversions C>
+        FPSAN_DEVICE inline void
+            wmma_16x16x32_accumulate_row(const Value<AVec, S, C>& a,
+                                         int                      m_base,
+                                         int                      idx,
+                                         int                      k,
+                                         Value<AccScalar, S, C>   bv,
+                                         Value<AccScalar, S, C>&  acc)
+        {
+            const int m  = m_base + E;
+            auto      av = wave_shfl(a.get(idx), Wmma16x16x32Layout::ab_lane(m, k));
+            acc          = acc + cast<AccScalar>(av) * bv;
+        }
+
         template <class AVec, class BVec, class CVec, Semantics S, Conversions C>
         FPSAN_DEVICE Value<CVec, S, C>
             wmma_16x16x32_dataflow(Value<AVec, S, C> a, Value<BVec, S, C> b, Value<CVec, S, C> c)
@@ -616,20 +630,38 @@ namespace fpsan
             using Acc       = Value<AccScalar, S, C>;
             const int lane  = wave_lane();
             const int n     = Wmma16x16x32Layout::cd_n(lane);
-            DFrag     d{};
-            for(int e = 0; e < 8; ++e)
+            const int m_base = 8 * (lane >> 4);
+            Acc       acc0   = c.get(0);
+            Acc       acc1   = c.get(1);
+            Acc       acc2   = c.get(2);
+            Acc       acc3   = c.get(3);
+            Acc       acc4   = c.get(4);
+            Acc       acc5   = c.get(5);
+            Acc       acc6   = c.get(6);
+            Acc       acc7   = c.get(7);
+            for(int k = 0; k < 32; ++k)
             {
-                const int m   = Wmma16x16x32Layout::cd_m(lane, e);
-                Acc       acc = c.get(e);
-                for(int k = 0; k < 32; ++k)
-                {
-                    const int idx = Wmma16x16x32Layout::ab_index(k);
-                    auto      av  = wave_shfl(a.get(idx), Wmma16x16x32Layout::ab_lane(m, k));
-                    auto      bv  = wave_shfl(b.get(idx), Wmma16x16x32Layout::ab_lane(n, k));
-                    acc           = acc + cast<AccScalar>(av) * cast<AccScalar>(bv);
-                }
-                d.set(e, acc);
+                const int idx = Wmma16x16x32Layout::ab_index(k);
+                const Acc bv
+                    = cast<AccScalar>(wave_shfl(b.get(idx), Wmma16x16x32Layout::ab_lane(n, k)));
+                wmma_16x16x32_accumulate_row<0>(a, m_base, idx, k, bv, acc0);
+                wmma_16x16x32_accumulate_row<1>(a, m_base, idx, k, bv, acc1);
+                wmma_16x16x32_accumulate_row<2>(a, m_base, idx, k, bv, acc2);
+                wmma_16x16x32_accumulate_row<3>(a, m_base, idx, k, bv, acc3);
+                wmma_16x16x32_accumulate_row<4>(a, m_base, idx, k, bv, acc4);
+                wmma_16x16x32_accumulate_row<5>(a, m_base, idx, k, bv, acc5);
+                wmma_16x16x32_accumulate_row<6>(a, m_base, idx, k, bv, acc6);
+                wmma_16x16x32_accumulate_row<7>(a, m_base, idx, k, bv, acc7);
             }
+            DFrag d{};
+            d.set(0, acc0);
+            d.set(1, acc1);
+            d.set(2, acc2);
+            d.set(3, acc3);
+            d.set(4, acc4);
+            d.set(5, acc5);
+            d.set(6, acc6);
+            d.set(7, acc7);
             return d;
         }
 
@@ -648,20 +680,38 @@ namespace fpsan
             using Acc              = Value<AccScalar, S, C>;
             const int         lane = wave_lane();
             const int         n    = Wmma16x16x32Layout::cd_n(lane);
-            Value<DVec, S, C> d{};
-            for(int e = 0; e < 8; ++e)
+            const int         m_base = 8 * (lane >> 4);
+            Acc               acc0   = c.get(0);
+            Acc               acc1   = c.get(1);
+            Acc               acc2   = c.get(2);
+            Acc               acc3   = c.get(3);
+            Acc               acc4   = c.get(4);
+            Acc               acc5   = c.get(5);
+            Acc               acc6   = c.get(6);
+            Acc               acc7   = c.get(7);
+            for(int k = 0; k < 32; ++k)
             {
-                const int m   = Wmma16x16x32Layout::cd_m(lane, e);
-                Acc       acc = c.get(e);
-                for(int k = 0; k < 32; ++k)
-                {
-                    const int idx = Wmma16x16x32Layout::ab_index(k);
-                    auto      av  = wave_shfl(a.get(idx), Wmma16x16x32Layout::ab_lane(m, k));
-                    auto      bv  = wave_shfl(b.get(idx), Wmma16x16x32Layout::ab_lane(n, k));
-                    acc           = acc + cast<AccScalar>(av) * cast<AccScalar>(bv);
-                }
-                d.set(e, cast<DScalar>(acc));
+                const int idx = Wmma16x16x32Layout::ab_index(k);
+                const Acc bv
+                    = cast<AccScalar>(wave_shfl(b.get(idx), Wmma16x16x32Layout::ab_lane(n, k)));
+                wmma_16x16x32_accumulate_row<0>(a, m_base, idx, k, bv, acc0);
+                wmma_16x16x32_accumulate_row<1>(a, m_base, idx, k, bv, acc1);
+                wmma_16x16x32_accumulate_row<2>(a, m_base, idx, k, bv, acc2);
+                wmma_16x16x32_accumulate_row<3>(a, m_base, idx, k, bv, acc3);
+                wmma_16x16x32_accumulate_row<4>(a, m_base, idx, k, bv, acc4);
+                wmma_16x16x32_accumulate_row<5>(a, m_base, idx, k, bv, acc5);
+                wmma_16x16x32_accumulate_row<6>(a, m_base, idx, k, bv, acc6);
+                wmma_16x16x32_accumulate_row<7>(a, m_base, idx, k, bv, acc7);
             }
+            Value<DVec, S, C> d{};
+            d.set(0, cast<DScalar>(acc0));
+            d.set(1, cast<DScalar>(acc1));
+            d.set(2, cast<DScalar>(acc2));
+            d.set(3, cast<DScalar>(acc3));
+            d.set(4, cast<DScalar>(acc4));
+            d.set(5, cast<DScalar>(acc5));
+            d.set(6, cast<DScalar>(acc6));
+            d.set(7, cast<DScalar>(acc7));
             return d;
         }
 
@@ -699,6 +749,20 @@ namespace fpsan
         // Wave-cooperative software MMA for the gfx1250 16x16x64 fp8/bf8 shapes
         // (K=64 contraction, v32 fp8 A/B fragments, v8 C/D accumulator). Same-type
         // C/D (f32->f32 or f16->f16). Generic over Semantics.
+        template <int E, class AVec, class AccScalar, Semantics S, Conversions C>
+        FPSAN_DEVICE inline void
+            wmma_16x16x64_accumulate_row(const Value<AVec, S, C>& a,
+                                         int                      m_base,
+                                         int                      idx,
+                                         int                      k,
+                                         Value<AccScalar, S, C>   bv,
+                                         Value<AccScalar, S, C>&  acc)
+        {
+            const int m  = m_base + E;
+            auto      av = wave_shfl(a.get(idx), Wmma16x16x64Layout::ab_lane(m, k));
+            acc          = acc + cast<AccScalar>(av) * bv;
+        }
+
         template <class AVec, class BVec, class CVec, Semantics S, Conversions C>
         FPSAN_DEVICE Value<CVec, S, C>
             wmma_16x16x64_dataflow(Value<AVec, S, C> a, Value<BVec, S, C> b, Value<CVec, S, C> c)
@@ -708,20 +772,38 @@ namespace fpsan
             using Acc       = Value<AccScalar, S, C>;
             const int lane  = wave_lane();
             const int n     = Wmma16x16x64Layout::cd_n(lane);
-            DFrag     d{};
-            for(int e = 0; e < 8; ++e)
+            const int m_base = 8 * (lane >> 4);
+            Acc       acc0   = c.get(0);
+            Acc       acc1   = c.get(1);
+            Acc       acc2   = c.get(2);
+            Acc       acc3   = c.get(3);
+            Acc       acc4   = c.get(4);
+            Acc       acc5   = c.get(5);
+            Acc       acc6   = c.get(6);
+            Acc       acc7   = c.get(7);
+            for(int k = 0; k < 64; ++k)
             {
-                const int m   = Wmma16x16x64Layout::cd_m(lane, e);
-                Acc       acc = c.get(e);
-                for(int k = 0; k < 64; ++k)
-                {
-                    const int idx = Wmma16x16x64Layout::ab_index(k);
-                    auto      av  = wave_shfl(a.get(idx), Wmma16x16x64Layout::ab_lane(m, k));
-                    auto      bv  = wave_shfl(b.get(idx), Wmma16x16x64Layout::ab_lane(n, k));
-                    acc           = acc + cast<AccScalar>(av) * cast<AccScalar>(bv);
-                }
-                d.set(e, acc);
+                const int idx = Wmma16x16x64Layout::ab_index(k);
+                const Acc bv
+                    = cast<AccScalar>(wave_shfl(b.get(idx), Wmma16x16x64Layout::ab_lane(n, k)));
+                wmma_16x16x64_accumulate_row<0>(a, m_base, idx, k, bv, acc0);
+                wmma_16x16x64_accumulate_row<1>(a, m_base, idx, k, bv, acc1);
+                wmma_16x16x64_accumulate_row<2>(a, m_base, idx, k, bv, acc2);
+                wmma_16x16x64_accumulate_row<3>(a, m_base, idx, k, bv, acc3);
+                wmma_16x16x64_accumulate_row<4>(a, m_base, idx, k, bv, acc4);
+                wmma_16x16x64_accumulate_row<5>(a, m_base, idx, k, bv, acc5);
+                wmma_16x16x64_accumulate_row<6>(a, m_base, idx, k, bv, acc6);
+                wmma_16x16x64_accumulate_row<7>(a, m_base, idx, k, bv, acc7);
             }
+            DFrag d{};
+            d.set(0, acc0);
+            d.set(1, acc1);
+            d.set(2, acc2);
+            d.set(3, acc3);
+            d.set(4, acc4);
+            d.set(5, acc5);
+            d.set(6, acc6);
+            d.set(7, acc7);
             return d;
         }
 
@@ -756,6 +838,20 @@ namespace fpsan
 
         // Wave-cooperative software MMA for the gfx1250 16x16x128 fp8/bf8 shapes
         // (K=128 contraction, v64 fp8 A/B fragments, v8 C/D accumulator).
+        template <int E, class AVec, class AccScalar, Semantics S, Conversions C>
+        FPSAN_DEVICE inline void
+            wmma_16x16x128_accumulate_row(const Value<AVec, S, C>&       a,
+                                          int                            m_base,
+                                          int                            idx,
+                                          int                            k,
+                                          Value<AccScalar, S, C>         bv,
+                                          Value<AccScalar, S, C>&        acc)
+        {
+            const int m  = m_base + E;
+            auto      av = wave_shfl(a.get(idx), Wmma16x16x128Layout::ab_lane(m, k));
+            acc          = acc + cast<AccScalar>(av) * bv;
+        }
+
         template <class AVec, class BVec, class CVec, Semantics S, Conversions C>
         FPSAN_DEVICE Value<CVec, S, C>
             wmma_16x16x128_dataflow(Value<AVec, S, C> a, Value<BVec, S, C> b, Value<CVec, S, C> c)
@@ -765,20 +861,38 @@ namespace fpsan
             using Acc       = Value<AccScalar, S, C>;
             const int lane  = wave_lane();
             const int n     = Wmma16x16x128Layout::cd_n(lane);
-            DFrag     d{};
-            for(int e = 0; e < 8; ++e)
+            const int m_base = 8 * (lane >> 4);
+            Acc       acc0   = c.get(0);
+            Acc       acc1   = c.get(1);
+            Acc       acc2   = c.get(2);
+            Acc       acc3   = c.get(3);
+            Acc       acc4   = c.get(4);
+            Acc       acc5   = c.get(5);
+            Acc       acc6   = c.get(6);
+            Acc       acc7   = c.get(7);
+            for(int k = 0; k < 128; ++k)
             {
-                const int m   = Wmma16x16x128Layout::cd_m(lane, e);
-                Acc       acc = c.get(e);
-                for(int k = 0; k < 128; ++k)
-                {
-                    const int idx = Wmma16x16x128Layout::ab_index(k);
-                    auto      av  = wave_shfl(a.get(idx), Wmma16x16x128Layout::ab_lane(m, k));
-                    auto      bv  = wave_shfl(b.get(idx), Wmma16x16x128Layout::ab_lane(n, k));
-                    acc           = acc + cast<AccScalar>(av) * cast<AccScalar>(bv);
-                }
-                d.set(e, acc);
+                const int idx = Wmma16x16x128Layout::ab_index(k);
+                const Acc bv
+                    = cast<AccScalar>(wave_shfl(b.get(idx), Wmma16x16x128Layout::ab_lane(n, k)));
+                wmma_16x16x128_accumulate_row<0>(a, m_base, idx, k, bv, acc0);
+                wmma_16x16x128_accumulate_row<1>(a, m_base, idx, k, bv, acc1);
+                wmma_16x16x128_accumulate_row<2>(a, m_base, idx, k, bv, acc2);
+                wmma_16x16x128_accumulate_row<3>(a, m_base, idx, k, bv, acc3);
+                wmma_16x16x128_accumulate_row<4>(a, m_base, idx, k, bv, acc4);
+                wmma_16x16x128_accumulate_row<5>(a, m_base, idx, k, bv, acc5);
+                wmma_16x16x128_accumulate_row<6>(a, m_base, idx, k, bv, acc6);
+                wmma_16x16x128_accumulate_row<7>(a, m_base, idx, k, bv, acc7);
             }
+            DFrag d{};
+            d.set(0, acc0);
+            d.set(1, acc1);
+            d.set(2, acc2);
+            d.set(3, acc3);
+            d.set(4, acc4);
+            d.set(5, acc5);
+            d.set(6, acc6);
+            d.set(7, acc7);
             return d;
         }
 
@@ -851,6 +965,21 @@ namespace fpsan
         // Wave-cooperative software MMA for the gfx1250 16x16x128 f8f6f4 sub-byte
         // shapes (K=128, fp6/bf6/fp4 A/B operands of possibly different sub-byte
         // widths, v8f C/D accumulator). FPSan-only (Native mode calls the builtin).
+        template <int E, int WA, Semantics S, Conversions C>
+        FPSAN_DEVICE inline void
+            wmma_16x16x128_sub_accumulate_row(const int (&aw)[16],
+                                              int                  m_base,
+                                              int                  slot,
+                                              int                  k,
+                                              Value<float, S, C>   bv,
+                                              Value<float, S, C>&  acc)
+        {
+            const int m  = m_base + E;
+            auto      av = wmma_sub_gather_widen<WA, S, C>(
+                aw, slot, Wmma16x16x128Layout::ab_lane(m, k));
+            acc = acc + av * bv;
+        }
+
         template <int WA, int WB, Semantics S, Conversions C>
         FPSAN_DEVICE Value<v8f_native, S, C> wmma_16x16x128_sub_dataflow(const int (&aw)[16],
                                                                          const int (&bw)[16],
@@ -859,22 +988,38 @@ namespace fpsan
             using Acc                    = Value<float, S, C>;
             const int               lane = wave_lane();
             const int               n    = Wmma16x16x128Layout::cd_n(lane);
-            Value<v8f_native, S, C> d{};
-            for(int e = 0; e < 8; ++e)
+            const int               m_base = 8 * (lane >> 4);
+            Acc                     acc0   = c.get(0);
+            Acc                     acc1   = c.get(1);
+            Acc                     acc2   = c.get(2);
+            Acc                     acc3   = c.get(3);
+            Acc                     acc4   = c.get(4);
+            Acc                     acc5   = c.get(5);
+            Acc                     acc6   = c.get(6);
+            Acc                     acc7   = c.get(7);
+            for(int k = 0; k < 128; ++k)
             {
-                const int m   = Wmma16x16x128Layout::cd_m(lane, e);
-                Acc       acc = c.get(e);
-                for(int k = 0; k < 128; ++k)
-                {
-                    const int slot = Wmma16x16x128Layout::ab_index(k);
-                    auto      av   = wmma_sub_gather_widen<WA, S, C>(
-                        aw, slot, Wmma16x16x128Layout::ab_lane(m, k));
-                    auto bv = wmma_sub_gather_widen<WB, S, C>(
-                        bw, slot, Wmma16x16x128Layout::ab_lane(n, k));
-                    acc = acc + av * bv;
-                }
-                d.set(e, acc);
+                const int slot = Wmma16x16x128Layout::ab_index(k);
+                auto      bv   = wmma_sub_gather_widen<WB, S, C>(
+                    bw, slot, Wmma16x16x128Layout::ab_lane(n, k));
+                wmma_16x16x128_sub_accumulate_row<0, WA, S, C>(aw, m_base, slot, k, bv, acc0);
+                wmma_16x16x128_sub_accumulate_row<1, WA, S, C>(aw, m_base, slot, k, bv, acc1);
+                wmma_16x16x128_sub_accumulate_row<2, WA, S, C>(aw, m_base, slot, k, bv, acc2);
+                wmma_16x16x128_sub_accumulate_row<3, WA, S, C>(aw, m_base, slot, k, bv, acc3);
+                wmma_16x16x128_sub_accumulate_row<4, WA, S, C>(aw, m_base, slot, k, bv, acc4);
+                wmma_16x16x128_sub_accumulate_row<5, WA, S, C>(aw, m_base, slot, k, bv, acc5);
+                wmma_16x16x128_sub_accumulate_row<6, WA, S, C>(aw, m_base, slot, k, bv, acc6);
+                wmma_16x16x128_sub_accumulate_row<7, WA, S, C>(aw, m_base, slot, k, bv, acc7);
             }
+            Value<v8f_native, S, C> d{};
+            d.set(0, acc0);
+            d.set(1, acc1);
+            d.set(2, acc2);
+            d.set(3, acc3);
+            d.set(4, acc4);
+            d.set(5, acc5);
+            d.set(6, acc6);
+            d.set(7, acc7);
             return d;
         }
 
@@ -900,6 +1045,30 @@ namespace fpsan
                    + 4 * ((k >> 3) & 1) + 2 * ((k >> 1) & 1) + (k & 1);
         }
 
+        template <int FMT, Semantics S, Conversions C>
+        FPSAN_DEVICE inline Value<float, S, C>
+            wmma_16x16x128_mixed_gather(const int (&w)[16], int row_or_col, int k)
+        {
+            const int slot
+                = (FMT <= 1) ? Wmma16x16x128Layout::ab_index(k) : wmma_mix_sub_slot(k);
+            const int src_lane = (FMT <= 1) ? Wmma16x16x128Layout::ab_lane(row_or_col, k)
+                                            : wmma_mix_sub_lane(row_or_col, k);
+            return wmma_f8f6f4_gather_widen<FMT, S, C>(w, slot, src_lane);
+        }
+
+        template <int E, int AFMT, Semantics S, Conversions C>
+        FPSAN_DEVICE inline void
+            wmma_16x16x128_mixed_accumulate_row(const int (&aw)[16],
+                                                int                  m_base,
+                                                int                  k,
+                                                Value<float, S, C>   bv,
+                                                Value<float, S, C>&  acc)
+        {
+            const int m  = m_base + E;
+            auto      av = wmma_16x16x128_mixed_gather<AFMT, S, C>(aw, m, k);
+            acc = acc + av * bv;
+        }
+
         template <int AFMT, int BFMT, Semantics S, Conversions C>
         FPSAN_DEVICE Value<v8f_native, S, C> wmma_16x16x128_mixed_dataflow(
             const int (&aw)[16], const int (&bw)[16], Value<v8f_native, S, C> c)
@@ -909,27 +1078,36 @@ namespace fpsan
             using Acc                    = Value<float, S, C>;
             const int               lane = wave_lane();
             const int               n    = Wmma16x16x128Layout::cd_n(lane);
-            Value<v8f_native, S, C> d{};
-            for(int e = 0; e < 8; ++e)
+            const int               m_base = 8 * (lane >> 4);
+            Acc                     acc0   = c.get(0);
+            Acc                     acc1   = c.get(1);
+            Acc                     acc2   = c.get(2);
+            Acc                     acc3   = c.get(3);
+            Acc                     acc4   = c.get(4);
+            Acc                     acc5   = c.get(5);
+            Acc                     acc6   = c.get(6);
+            Acc                     acc7   = c.get(7);
+            for(int k = 0; k < 128; ++k)
             {
-                const int m   = Wmma16x16x128Layout::cd_m(lane, e);
-                Acc       acc = c.get(e);
-                for(int k = 0; k < 128; ++k)
-                {
-                    const int aslot
-                        = (AFMT <= 1) ? Wmma16x16x128Layout::ab_index(k) : wmma_mix_sub_slot(k);
-                    const int alane = (AFMT <= 1) ? Wmma16x16x128Layout::ab_lane(m, k)
-                                                  : wmma_mix_sub_lane(m, k);
-                    const int bslot
-                        = (BFMT <= 1) ? Wmma16x16x128Layout::ab_index(k) : wmma_mix_sub_slot(k);
-                    const int blane = (BFMT <= 1) ? Wmma16x16x128Layout::ab_lane(n, k)
-                                                  : wmma_mix_sub_lane(n, k);
-                    auto      av    = wmma_f8f6f4_gather_widen<AFMT, S, C>(aw, aslot, alane);
-                    auto      bv    = wmma_f8f6f4_gather_widen<BFMT, S, C>(bw, bslot, blane);
-                    acc             = acc + av * bv;
-                }
-                d.set(e, acc);
+                auto bv = wmma_16x16x128_mixed_gather<BFMT, S, C>(bw, n, k);
+                wmma_16x16x128_mixed_accumulate_row<0, AFMT, S, C>(aw, m_base, k, bv, acc0);
+                wmma_16x16x128_mixed_accumulate_row<1, AFMT, S, C>(aw, m_base, k, bv, acc1);
+                wmma_16x16x128_mixed_accumulate_row<2, AFMT, S, C>(aw, m_base, k, bv, acc2);
+                wmma_16x16x128_mixed_accumulate_row<3, AFMT, S, C>(aw, m_base, k, bv, acc3);
+                wmma_16x16x128_mixed_accumulate_row<4, AFMT, S, C>(aw, m_base, k, bv, acc4);
+                wmma_16x16x128_mixed_accumulate_row<5, AFMT, S, C>(aw, m_base, k, bv, acc5);
+                wmma_16x16x128_mixed_accumulate_row<6, AFMT, S, C>(aw, m_base, k, bv, acc6);
+                wmma_16x16x128_mixed_accumulate_row<7, AFMT, S, C>(aw, m_base, k, bv, acc7);
             }
+            Value<v8f_native, S, C> d{};
+            d.set(0, acc0);
+            d.set(1, acc1);
+            d.set(2, acc2);
+            d.set(3, acc3);
+            d.set(4, acc4);
+            d.set(5, acc5);
+            d.set(6, acc6);
+            d.set(7, acc7);
             return d;
         }
 
@@ -1043,6 +1221,44 @@ namespace fpsan
                 return s7;
             }
         }
+        template <class Acc>
+        struct WmmaScale4
+        {
+            Acc s0, s1, s2, s3;
+            FPSAN_DEVICE inline Acc select(int byte) const
+            {
+                return wmma_select_scale4(byte, s0, s1, s2, s3);
+            }
+        };
+        template <int ScaleFmt, class Acc, class Word>
+        FPSAN_DEVICE inline WmmaScale4<Acc> wmma_make_scale4(Word word)
+        {
+            return {wmma_scale_value_at_byte<ScaleFmt, Acc>(word, 0),
+                    wmma_scale_value_at_byte<ScaleFmt, Acc>(word, 1),
+                    wmma_scale_value_at_byte<ScaleFmt, Acc>(word, 2),
+                    wmma_scale_value_at_byte<ScaleFmt, Acc>(word, 3)};
+        }
+        template <class Acc>
+        struct WmmaScale8
+        {
+            Acc s0, s1, s2, s3, s4, s5, s6, s7;
+            FPSAN_DEVICE inline Acc select(int byte) const
+            {
+                return wmma_select_scale8(byte, s0, s1, s2, s3, s4, s5, s6, s7);
+            }
+        };
+        template <int ScaleFmt, class Acc, class Word>
+        FPSAN_DEVICE inline WmmaScale8<Acc> wmma_make_scale8(Word word)
+        {
+            return {wmma_scale_value_at_byte<ScaleFmt, Acc>(word, 0),
+                    wmma_scale_value_at_byte<ScaleFmt, Acc>(word, 1),
+                    wmma_scale_value_at_byte<ScaleFmt, Acc>(word, 2),
+                    wmma_scale_value_at_byte<ScaleFmt, Acc>(word, 3),
+                    wmma_scale_value_at_byte<ScaleFmt, Acc>(word, 4),
+                    wmma_scale_value_at_byte<ScaleFmt, Acc>(word, 5),
+                    wmma_scale_value_at_byte<ScaleFmt, Acc>(word, 6),
+                    wmma_scale_value_at_byte<ScaleFmt, Acc>(word, 7)};
+        }
 
         // ---- Wave32 16x16x128 f8f6f4 sub-byte BLOCK-SCALED WMMA dataflow ------------
         // The block-scaled f8f6f4 variant: each K element carries a per-(row/col,
@@ -1052,6 +1268,83 @@ namespace fpsan
         // col n lives at lane m / lane n (fetched with ds_bpermute), and within that
         // word the byte is wmma_sub_scale_byte(k) (scaleType/scaleFmt immediates
         // pinned 0 == E8M0). FPSan-only (Native mode calls the builtin).
+        template <int E, int WA, Semantics S, Conversions C, class Scale>
+        FPSAN_DEVICE inline void
+            wmma_16x16x128_sub_scaled_accumulate_row(const int (&aw)[16],
+                                                     int                  m_base,
+                                                     int                  slot,
+                                                     int                  k,
+                                                     int                  byte,
+                                                     Value<float, S, C>   bv,
+                                                     Value<float, S, C>   fb,
+                                                     const Scale&         fa,
+                                                     Value<float, S, C>&  acc)
+        {
+            const int m  = m_base + E;
+            auto      av = wmma_sub_gather_widen<WA, S, C>(
+                aw, slot, Wmma16x16x128Layout::ab_lane(m, k));
+            const auto fav = fa.select(byte);
+            acc            = acc + av * bv * fav * fb;
+        }
+
+        template <int E0, int WA, int WB, Semantics S, Conversions C, int AScaleFmt>
+        FPSAN_DEVICE inline void wmma_16x16x128_sub_scaled_accumulate_group(
+            const int (&aw)[16],
+            const int (&bw)[16],
+            int                             m_base,
+            int                             n,
+            int                             sa,
+            const WmmaScale4<Value<float, S, C>>& fb_scale,
+            const Value<v8f_native, S, C>&  c,
+            Value<v8f_native, S, C>&        d)
+        {
+            using Acc = Value<float, S, C>;
+
+            const int m0 = m_base + E0 + 0;
+            const int m1 = m_base + E0 + 1;
+            const int m2 = m_base + E0 + 2;
+            const int m3 = m_base + E0 + 3;
+
+            const unsigned wa0
+                = static_cast<unsigned>(__builtin_amdgcn_ds_bpermute(m0 * 4, sa));
+            const unsigned wa1
+                = static_cast<unsigned>(__builtin_amdgcn_ds_bpermute(m1 * 4, sa));
+            const unsigned wa2
+                = static_cast<unsigned>(__builtin_amdgcn_ds_bpermute(m2 * 4, sa));
+            const unsigned wa3
+                = static_cast<unsigned>(__builtin_amdgcn_ds_bpermute(m3 * 4, sa));
+
+            const auto fa0 = wmma_make_scale4<AScaleFmt, Acc>(wa0);
+            const auto fa1 = wmma_make_scale4<AScaleFmt, Acc>(wa1);
+            const auto fa2 = wmma_make_scale4<AScaleFmt, Acc>(wa2);
+            const auto fa3 = wmma_make_scale4<AScaleFmt, Acc>(wa3);
+
+            Acc acc0 = c.get(E0 + 0);
+            Acc acc1 = c.get(E0 + 1);
+            Acc acc2 = c.get(E0 + 2);
+            Acc acc3 = c.get(E0 + 3);
+            for(int k = 0; k < 128; ++k)
+            {
+                const int slot = Wmma16x16x128Layout::ab_index(k);
+                auto      bv   = wmma_sub_gather_widen<WB, S, C>(
+                    bw, slot, Wmma16x16x128Layout::ab_lane(n, k));
+                const int byte = wmma_sub_scale_byte(k);
+                const Acc fb   = fb_scale.select(byte);
+                wmma_16x16x128_sub_scaled_accumulate_row<E0 + 0, WA, S, C>(
+                    aw, m_base, slot, k, byte, bv, fb, fa0, acc0);
+                wmma_16x16x128_sub_scaled_accumulate_row<E0 + 1, WA, S, C>(
+                    aw, m_base, slot, k, byte, bv, fb, fa1, acc1);
+                wmma_16x16x128_sub_scaled_accumulate_row<E0 + 2, WA, S, C>(
+                    aw, m_base, slot, k, byte, bv, fb, fa2, acc2);
+                wmma_16x16x128_sub_scaled_accumulate_row<E0 + 3, WA, S, C>(
+                    aw, m_base, slot, k, byte, bv, fb, fa3, acc3);
+            }
+            d.set(E0 + 0, acc0);
+            d.set(E0 + 1, acc1);
+            d.set(E0 + 2, acc2);
+            d.set(E0 + 3, acc3);
+        }
+
         template <int WA, int WB, Semantics S, Conversions C, int AScaleFmt = 0, int BScaleFmt = 0>
         FPSAN_DEVICE Value<v8f_native, S, C> wmma_16x16x128_sub_scaled_dataflow(
             const int (&aw)[16], const int (&bw)[16], Value<v8f_native, S, C> c, int sa, int sb)
@@ -1059,35 +1352,14 @@ namespace fpsan
             using Acc                    = Value<float, S, C>;
             const int               lane = wave_lane();
             const int               n    = Wmma16x16x128Layout::cd_n(lane);
-            Value<v8f_native, S, C> d{};
+            const int               m_base = 8 * (lane >> 4);
             const unsigned wb  = static_cast<unsigned>(__builtin_amdgcn_ds_bpermute(n * 4, sb));
-            const Acc      fb0 = wmma_scale_value_at_byte<BScaleFmt, Acc>(wb, 0);
-            const Acc      fb1 = wmma_scale_value_at_byte<BScaleFmt, Acc>(wb, 1);
-            const Acc      fb2 = wmma_scale_value_at_byte<BScaleFmt, Acc>(wb, 2);
-            const Acc      fb3 = wmma_scale_value_at_byte<BScaleFmt, Acc>(wb, 3);
-            for(int e = 0; e < 8; ++e)
-            {
-                const int      m   = Wmma16x16x128Layout::cd_m(lane, e);
-                const unsigned wa  = static_cast<unsigned>(__builtin_amdgcn_ds_bpermute(m * 4, sa));
-                const Acc      fa0 = wmma_scale_value_at_byte<AScaleFmt, Acc>(wa, 0);
-                const Acc      fa1 = wmma_scale_value_at_byte<AScaleFmt, Acc>(wa, 1);
-                const Acc      fa2 = wmma_scale_value_at_byte<AScaleFmt, Acc>(wa, 2);
-                const Acc      fa3 = wmma_scale_value_at_byte<AScaleFmt, Acc>(wa, 3);
-                Acc            acc = c.get(e);
-                for(int k = 0; k < 128; ++k)
-                {
-                    const int slot = Wmma16x16x128Layout::ab_index(k);
-                    auto      av   = wmma_sub_gather_widen<WA, S, C>(
-                        aw, slot, Wmma16x16x128Layout::ab_lane(m, k));
-                    auto bv = wmma_sub_gather_widen<WB, S, C>(
-                        bw, slot, Wmma16x16x128Layout::ab_lane(n, k));
-                    const int byte = wmma_sub_scale_byte(k);
-                    const Acc fa   = wmma_select_scale4(byte, fa0, fa1, fa2, fa3);
-                    const Acc fb   = wmma_select_scale4(byte, fb0, fb1, fb2, fb3);
-                    acc            = acc + av * bv * fa * fb;
-                }
-                d.set(e, acc);
-            }
+            const auto     fb  = wmma_make_scale4<BScaleFmt, Acc>(wb);
+            Value<v8f_native, S, C> d{};
+            wmma_16x16x128_sub_scaled_accumulate_group<0, WA, WB, S, C, AScaleFmt>(
+                aw, bw, m_base, n, sa, fb, c, d);
+            wmma_16x16x128_sub_scaled_accumulate_group<4, WA, WB, S, C, AScaleFmt>(
+                aw, bw, m_base, n, sa, fb, c, d);
             return d;
         }
 
@@ -1096,6 +1368,81 @@ namespace fpsan
         // a 64-bit word (8 E8M0 bytes, finer granularity); the controlling byte is
         // wmma_sub_scale16_byte(k). The 64-bit scale word for row m / col n is
         // gathered from lane m / lane n with a pair of 32-bit ds_bpermutes.
+        template <int E0, int WA, int WB, Semantics S, Conversions C, int AScaleFmt>
+        FPSAN_DEVICE inline void wmma_16x16x128_sub_scaled16_accumulate_group(
+            const int (&aw)[16],
+            const int (&bw)[16],
+            int                             m_base,
+            int                             n,
+            int                             sa_lo,
+            int                             sa_hi,
+            const WmmaScale8<Value<float, S, C>>& fb_scale,
+            const Value<v8f_native, S, C>&  c,
+            Value<v8f_native, S, C>&        d)
+        {
+            using Acc = Value<float, S, C>;
+
+            const int m0 = m_base + E0 + 0;
+            const int m1 = m_base + E0 + 1;
+            const int m2 = m_base + E0 + 2;
+            const int m3 = m_base + E0 + 3;
+
+            const unsigned long long wa0
+                = (static_cast<unsigned long long>(
+                       static_cast<unsigned>(__builtin_amdgcn_ds_bpermute(m0 * 4, sa_lo)))
+                   | (static_cast<unsigned long long>(
+                          static_cast<unsigned>(__builtin_amdgcn_ds_bpermute(m0 * 4, sa_hi)))
+                      << 32));
+            const unsigned long long wa1
+                = (static_cast<unsigned long long>(
+                       static_cast<unsigned>(__builtin_amdgcn_ds_bpermute(m1 * 4, sa_lo)))
+                   | (static_cast<unsigned long long>(
+                          static_cast<unsigned>(__builtin_amdgcn_ds_bpermute(m1 * 4, sa_hi)))
+                      << 32));
+            const unsigned long long wa2
+                = (static_cast<unsigned long long>(
+                       static_cast<unsigned>(__builtin_amdgcn_ds_bpermute(m2 * 4, sa_lo)))
+                   | (static_cast<unsigned long long>(
+                          static_cast<unsigned>(__builtin_amdgcn_ds_bpermute(m2 * 4, sa_hi)))
+                      << 32));
+            const unsigned long long wa3
+                = (static_cast<unsigned long long>(
+                       static_cast<unsigned>(__builtin_amdgcn_ds_bpermute(m3 * 4, sa_lo)))
+                   | (static_cast<unsigned long long>(
+                          static_cast<unsigned>(__builtin_amdgcn_ds_bpermute(m3 * 4, sa_hi)))
+                      << 32));
+
+            const auto fa0 = wmma_make_scale8<AScaleFmt, Acc>(wa0);
+            const auto fa1 = wmma_make_scale8<AScaleFmt, Acc>(wa1);
+            const auto fa2 = wmma_make_scale8<AScaleFmt, Acc>(wa2);
+            const auto fa3 = wmma_make_scale8<AScaleFmt, Acc>(wa3);
+
+            Acc acc0 = c.get(E0 + 0);
+            Acc acc1 = c.get(E0 + 1);
+            Acc acc2 = c.get(E0 + 2);
+            Acc acc3 = c.get(E0 + 3);
+            for(int k = 0; k < 128; ++k)
+            {
+                const int slot = Wmma16x16x128Layout::ab_index(k);
+                auto      bv   = wmma_sub_gather_widen<WB, S, C>(
+                    bw, slot, Wmma16x16x128Layout::ab_lane(n, k));
+                const int byte = wmma_sub_scale16_byte(k);
+                const Acc fb   = fb_scale.select(byte);
+                wmma_16x16x128_sub_scaled_accumulate_row<E0 + 0, WA, S, C>(
+                    aw, m_base, slot, k, byte, bv, fb, fa0, acc0);
+                wmma_16x16x128_sub_scaled_accumulate_row<E0 + 1, WA, S, C>(
+                    aw, m_base, slot, k, byte, bv, fb, fa1, acc1);
+                wmma_16x16x128_sub_scaled_accumulate_row<E0 + 2, WA, S, C>(
+                    aw, m_base, slot, k, byte, bv, fb, fa2, acc2);
+                wmma_16x16x128_sub_scaled_accumulate_row<E0 + 3, WA, S, C>(
+                    aw, m_base, slot, k, byte, bv, fb, fa3, acc3);
+            }
+            d.set(E0 + 0, acc0);
+            d.set(E0 + 1, acc1);
+            d.set(E0 + 2, acc2);
+            d.set(E0 + 3, acc3);
+        }
+
         template <int WA, int WB, Semantics S, Conversions C, int AScaleFmt = 0, int BScaleFmt = 0>
         FPSAN_DEVICE Value<v8f_native, S, C>
                      wmma_16x16x128_sub_scaled16_dataflow(const int (&aw)[16],
@@ -1111,55 +1458,19 @@ namespace fpsan
             const int               sa_hi = static_cast<int>((sa >> 32) & 0xffffffff);
             const int               sb_lo = static_cast<int>(sb & 0xffffffff);
             const int               sb_hi = static_cast<int>((sb >> 32) & 0xffffffff);
-            Value<v8f_native, S, C> d{};
+            const int               m_base = 8 * (lane >> 4);
             const unsigned long long wb
                 = (static_cast<unsigned long long>(
                        static_cast<unsigned>(__builtin_amdgcn_ds_bpermute(n * 4, sb_lo)))
                    | (static_cast<unsigned long long>(
                           static_cast<unsigned>(__builtin_amdgcn_ds_bpermute(n * 4, sb_hi)))
                       << 32));
-            const Acc fb0 = wmma_scale_value_at_byte<BScaleFmt, Acc>(wb, 0);
-            const Acc fb1 = wmma_scale_value_at_byte<BScaleFmt, Acc>(wb, 1);
-            const Acc fb2 = wmma_scale_value_at_byte<BScaleFmt, Acc>(wb, 2);
-            const Acc fb3 = wmma_scale_value_at_byte<BScaleFmt, Acc>(wb, 3);
-            const Acc fb4 = wmma_scale_value_at_byte<BScaleFmt, Acc>(wb, 4);
-            const Acc fb5 = wmma_scale_value_at_byte<BScaleFmt, Acc>(wb, 5);
-            const Acc fb6 = wmma_scale_value_at_byte<BScaleFmt, Acc>(wb, 6);
-            const Acc fb7 = wmma_scale_value_at_byte<BScaleFmt, Acc>(wb, 7);
-            for(int e = 0; e < 8; ++e)
-            {
-                const int                m = Wmma16x16x128Layout::cd_m(lane, e);
-                const unsigned long long wa
-                    = (static_cast<unsigned long long>(
-                           static_cast<unsigned>(__builtin_amdgcn_ds_bpermute(m * 4, sa_lo)))
-                       | (static_cast<unsigned long long>(
-                           static_cast<unsigned>(__builtin_amdgcn_ds_bpermute(m * 4, sa_hi)))
-                          << 32));
-                const Acc fa0 = wmma_scale_value_at_byte<AScaleFmt, Acc>(wa, 0);
-                const Acc fa1 = wmma_scale_value_at_byte<AScaleFmt, Acc>(wa, 1);
-                const Acc fa2 = wmma_scale_value_at_byte<AScaleFmt, Acc>(wa, 2);
-                const Acc fa3 = wmma_scale_value_at_byte<AScaleFmt, Acc>(wa, 3);
-                const Acc fa4 = wmma_scale_value_at_byte<AScaleFmt, Acc>(wa, 4);
-                const Acc fa5 = wmma_scale_value_at_byte<AScaleFmt, Acc>(wa, 5);
-                const Acc fa6 = wmma_scale_value_at_byte<AScaleFmt, Acc>(wa, 6);
-                const Acc fa7 = wmma_scale_value_at_byte<AScaleFmt, Acc>(wa, 7);
-                Acc       acc = c.get(e);
-                for(int k = 0; k < 128; ++k)
-                {
-                    const int slot = Wmma16x16x128Layout::ab_index(k);
-                    auto      av   = wmma_sub_gather_widen<WA, S, C>(
-                        aw, slot, Wmma16x16x128Layout::ab_lane(m, k));
-                    auto bv = wmma_sub_gather_widen<WB, S, C>(
-                        bw, slot, Wmma16x16x128Layout::ab_lane(n, k));
-                    const int byte = wmma_sub_scale16_byte(k);
-                    const Acc fa = wmma_select_scale8(
-                        byte, fa0, fa1, fa2, fa3, fa4, fa5, fa6, fa7);
-                    const Acc fb = wmma_select_scale8(
-                        byte, fb0, fb1, fb2, fb3, fb4, fb5, fb6, fb7);
-                    acc = acc + av * bv * fa * fb;
-                }
-                d.set(e, acc);
-            }
+            const auto fb = wmma_make_scale8<BScaleFmt, Acc>(wb);
+            Value<v8f_native, S, C> d{};
+            wmma_16x16x128_sub_scaled16_accumulate_group<0, WA, WB, S, C, AScaleFmt>(
+                aw, bw, m_base, n, sa_lo, sa_hi, fb, c, d);
+            wmma_16x16x128_sub_scaled16_accumulate_group<4, WA, WB, S, C, AScaleFmt>(
+                aw, bw, m_base, n, sa_lo, sa_hi, fb, c, d);
             return d;
         }
 
@@ -1169,6 +1480,79 @@ namespace fpsan
         // a mix BOTH operands use the 8-bit scale-byte map wmma_mix_scale_byte(k)
         // (i32) -- distinct from the same-class sub map. The scale word for row m /
         // col n is the i32 supplied at lane m / lane n (ds_bpermute). FPSan-only.
+        template <int E, int AFMT, Semantics S, Conversions C, class Scale>
+        FPSAN_DEVICE inline void
+            wmma_16x16x128_mixed_scaled_accumulate_row(const int (&aw)[16],
+                                                       int                  m_base,
+                                                       int                  k,
+                                                       int                  byte,
+                                                       Value<float, S, C>   bv,
+                                                       Value<float, S, C>   fb,
+                                                       const Scale&         fa,
+                                                       Value<float, S, C>&  acc)
+        {
+            const int m  = m_base + E;
+            auto      av = wmma_16x16x128_mixed_gather<AFMT, S, C>(aw, m, k);
+            const auto fav = fa.select(byte);
+            acc            = acc + av * bv * fav * fb;
+        }
+
+        template <int E0, int AFMT, int BFMT, Semantics S, Conversions C, int AScaleFmt>
+        FPSAN_DEVICE inline void wmma_16x16x128_mixed_scaled_accumulate_group(
+            const int (&aw)[16],
+            const int (&bw)[16],
+            int                             m_base,
+            int                             n,
+            int                             sa,
+            const WmmaScale4<Value<float, S, C>>& fb_scale,
+            const Value<v8f_native, S, C>&  c,
+            Value<v8f_native, S, C>&        d)
+        {
+            using Acc = Value<float, S, C>;
+
+            const int m0 = m_base + E0 + 0;
+            const int m1 = m_base + E0 + 1;
+            const int m2 = m_base + E0 + 2;
+            const int m3 = m_base + E0 + 3;
+
+            const unsigned wa0
+                = static_cast<unsigned>(__builtin_amdgcn_ds_bpermute(m0 * 4, sa));
+            const unsigned wa1
+                = static_cast<unsigned>(__builtin_amdgcn_ds_bpermute(m1 * 4, sa));
+            const unsigned wa2
+                = static_cast<unsigned>(__builtin_amdgcn_ds_bpermute(m2 * 4, sa));
+            const unsigned wa3
+                = static_cast<unsigned>(__builtin_amdgcn_ds_bpermute(m3 * 4, sa));
+
+            const auto fa0 = wmma_make_scale4<AScaleFmt, Acc>(wa0);
+            const auto fa1 = wmma_make_scale4<AScaleFmt, Acc>(wa1);
+            const auto fa2 = wmma_make_scale4<AScaleFmt, Acc>(wa2);
+            const auto fa3 = wmma_make_scale4<AScaleFmt, Acc>(wa3);
+
+            Acc acc0 = c.get(E0 + 0);
+            Acc acc1 = c.get(E0 + 1);
+            Acc acc2 = c.get(E0 + 2);
+            Acc acc3 = c.get(E0 + 3);
+            for(int k = 0; k < 128; ++k)
+            {
+                auto      bv   = wmma_16x16x128_mixed_gather<BFMT, S, C>(bw, n, k);
+                const int byte = wmma_mix_scale_byte(k);
+                const Acc fb   = fb_scale.select(byte);
+                wmma_16x16x128_mixed_scaled_accumulate_row<E0 + 0, AFMT, S, C>(
+                    aw, m_base, k, byte, bv, fb, fa0, acc0);
+                wmma_16x16x128_mixed_scaled_accumulate_row<E0 + 1, AFMT, S, C>(
+                    aw, m_base, k, byte, bv, fb, fa1, acc1);
+                wmma_16x16x128_mixed_scaled_accumulate_row<E0 + 2, AFMT, S, C>(
+                    aw, m_base, k, byte, bv, fb, fa2, acc2);
+                wmma_16x16x128_mixed_scaled_accumulate_row<E0 + 3, AFMT, S, C>(
+                    aw, m_base, k, byte, bv, fb, fa3, acc3);
+            }
+            d.set(E0 + 0, acc0);
+            d.set(E0 + 1, acc1);
+            d.set(E0 + 2, acc2);
+            d.set(E0 + 3, acc3);
+        }
+
         template <int         AFMT,
                   int         BFMT,
                   Semantics   S,
@@ -1183,46 +1567,93 @@ namespace fpsan
             using Acc                    = Value<float, S, C>;
             const int               lane = wave_lane();
             const int               n    = Wmma16x16x128Layout::cd_n(lane);
-            Value<v8f_native, S, C> d{};
+            const int               m_base = 8 * (lane >> 4);
             const unsigned wb  = static_cast<unsigned>(__builtin_amdgcn_ds_bpermute(n * 4, sb));
-            const Acc      fb0 = wmma_scale_value_at_byte<BScaleFmt, Acc>(wb, 0);
-            const Acc      fb1 = wmma_scale_value_at_byte<BScaleFmt, Acc>(wb, 1);
-            const Acc      fb2 = wmma_scale_value_at_byte<BScaleFmt, Acc>(wb, 2);
-            const Acc      fb3 = wmma_scale_value_at_byte<BScaleFmt, Acc>(wb, 3);
-            for(int e = 0; e < 8; ++e)
-            {
-                const int      m   = Wmma16x16x128Layout::cd_m(lane, e);
-                const unsigned wa  = static_cast<unsigned>(__builtin_amdgcn_ds_bpermute(m * 4, sa));
-                const Acc      fa0 = wmma_scale_value_at_byte<AScaleFmt, Acc>(wa, 0);
-                const Acc      fa1 = wmma_scale_value_at_byte<AScaleFmt, Acc>(wa, 1);
-                const Acc      fa2 = wmma_scale_value_at_byte<AScaleFmt, Acc>(wa, 2);
-                const Acc      fa3 = wmma_scale_value_at_byte<AScaleFmt, Acc>(wa, 3);
-                Acc            acc = c.get(e);
-                for(int k = 0; k < 128; ++k)
-                {
-                    const int aslot
-                        = (AFMT <= 1) ? Wmma16x16x128Layout::ab_index(k) : wmma_mix_sub_slot(k);
-                    const int alane = (AFMT <= 1) ? Wmma16x16x128Layout::ab_lane(m, k)
-                                                  : wmma_mix_sub_lane(m, k);
-                    const int bslot
-                        = (BFMT <= 1) ? Wmma16x16x128Layout::ab_index(k) : wmma_mix_sub_slot(k);
-                    const int blane = (BFMT <= 1) ? Wmma16x16x128Layout::ab_lane(n, k)
-                                                  : wmma_mix_sub_lane(n, k);
-                    auto      av    = wmma_f8f6f4_gather_widen<AFMT, S, C>(aw, aslot, alane);
-                    auto      bv    = wmma_f8f6f4_gather_widen<BFMT, S, C>(bw, bslot, blane);
-                    const int byte  = wmma_mix_scale_byte(k);
-                    const Acc fa    = wmma_select_scale4(byte, fa0, fa1, fa2, fa3);
-                    const Acc fb    = wmma_select_scale4(byte, fb0, fb1, fb2, fb3);
-                    acc             = acc + av * bv * fa * fb;
-                }
-                d.set(e, acc);
-            }
+            const auto     fb  = wmma_make_scale4<BScaleFmt, Acc>(wb);
+            Value<v8f_native, S, C> d{};
+            wmma_16x16x128_mixed_scaled_accumulate_group<0, AFMT, BFMT, S, C, AScaleFmt>(
+                aw, bw, m_base, n, sa, fb, c, d);
+            wmma_16x16x128_mixed_scaled_accumulate_group<4, AFMT, BFMT, S, C, AScaleFmt>(
+                aw, bw, m_base, n, sa, fb, c, d);
             return d;
         }
 
         // scale16 (i64, 8 bytes) variant of the mixed scaled dataflow; controlling
         // byte = wmma_mix_scale16_byte(k). The 64-bit scale word for row m / col n is
         // gathered from lane m / lane n with a pair of 32-bit ds_bpermutes.
+        template <int E0, int AFMT, int BFMT, Semantics S, Conversions C, int AScaleFmt>
+        FPSAN_DEVICE inline void wmma_16x16x128_mixed_scaled16_accumulate_group(
+            const int (&aw)[16],
+            const int (&bw)[16],
+            int                             m_base,
+            int                             n,
+            int                             sa_lo,
+            int                             sa_hi,
+            const WmmaScale8<Value<float, S, C>>& fb_scale,
+            const Value<v8f_native, S, C>&  c,
+            Value<v8f_native, S, C>&        d)
+        {
+            using Acc = Value<float, S, C>;
+
+            const int m0 = m_base + E0 + 0;
+            const int m1 = m_base + E0 + 1;
+            const int m2 = m_base + E0 + 2;
+            const int m3 = m_base + E0 + 3;
+
+            const unsigned long long wa0
+                = (static_cast<unsigned long long>(
+                       static_cast<unsigned>(__builtin_amdgcn_ds_bpermute(m0 * 4, sa_lo)))
+                   | (static_cast<unsigned long long>(
+                          static_cast<unsigned>(__builtin_amdgcn_ds_bpermute(m0 * 4, sa_hi)))
+                      << 32));
+            const unsigned long long wa1
+                = (static_cast<unsigned long long>(
+                       static_cast<unsigned>(__builtin_amdgcn_ds_bpermute(m1 * 4, sa_lo)))
+                   | (static_cast<unsigned long long>(
+                          static_cast<unsigned>(__builtin_amdgcn_ds_bpermute(m1 * 4, sa_hi)))
+                      << 32));
+            const unsigned long long wa2
+                = (static_cast<unsigned long long>(
+                       static_cast<unsigned>(__builtin_amdgcn_ds_bpermute(m2 * 4, sa_lo)))
+                   | (static_cast<unsigned long long>(
+                          static_cast<unsigned>(__builtin_amdgcn_ds_bpermute(m2 * 4, sa_hi)))
+                      << 32));
+            const unsigned long long wa3
+                = (static_cast<unsigned long long>(
+                       static_cast<unsigned>(__builtin_amdgcn_ds_bpermute(m3 * 4, sa_lo)))
+                   | (static_cast<unsigned long long>(
+                          static_cast<unsigned>(__builtin_amdgcn_ds_bpermute(m3 * 4, sa_hi)))
+                      << 32));
+
+            const auto fa0 = wmma_make_scale8<AScaleFmt, Acc>(wa0);
+            const auto fa1 = wmma_make_scale8<AScaleFmt, Acc>(wa1);
+            const auto fa2 = wmma_make_scale8<AScaleFmt, Acc>(wa2);
+            const auto fa3 = wmma_make_scale8<AScaleFmt, Acc>(wa3);
+
+            Acc acc0 = c.get(E0 + 0);
+            Acc acc1 = c.get(E0 + 1);
+            Acc acc2 = c.get(E0 + 2);
+            Acc acc3 = c.get(E0 + 3);
+            for(int k = 0; k < 128; ++k)
+            {
+                auto      bv   = wmma_16x16x128_mixed_gather<BFMT, S, C>(bw, n, k);
+                const int byte = wmma_mix_scale16_byte(k);
+                const Acc fb   = fb_scale.select(byte);
+                wmma_16x16x128_mixed_scaled_accumulate_row<E0 + 0, AFMT, S, C>(
+                    aw, m_base, k, byte, bv, fb, fa0, acc0);
+                wmma_16x16x128_mixed_scaled_accumulate_row<E0 + 1, AFMT, S, C>(
+                    aw, m_base, k, byte, bv, fb, fa1, acc1);
+                wmma_16x16x128_mixed_scaled_accumulate_row<E0 + 2, AFMT, S, C>(
+                    aw, m_base, k, byte, bv, fb, fa2, acc2);
+                wmma_16x16x128_mixed_scaled_accumulate_row<E0 + 3, AFMT, S, C>(
+                    aw, m_base, k, byte, bv, fb, fa3, acc3);
+            }
+            d.set(E0 + 0, acc0);
+            d.set(E0 + 1, acc1);
+            d.set(E0 + 2, acc2);
+            d.set(E0 + 3, acc3);
+        }
+
         template <int         AFMT,
                   int         BFMT,
                   Semantics   S,
@@ -1245,60 +1676,19 @@ namespace fpsan
             const int               sa_hi = static_cast<int>((sa >> 32) & 0xffffffff);
             const int               sb_lo = static_cast<int>(sb & 0xffffffff);
             const int               sb_hi = static_cast<int>((sb >> 32) & 0xffffffff);
-            Value<v8f_native, S, C> d{};
+            const int               m_base = 8 * (lane >> 4);
             const unsigned long long wb
                 = (static_cast<unsigned long long>(
                        static_cast<unsigned>(__builtin_amdgcn_ds_bpermute(n * 4, sb_lo)))
                    | (static_cast<unsigned long long>(
                           static_cast<unsigned>(__builtin_amdgcn_ds_bpermute(n * 4, sb_hi)))
                       << 32));
-            const Acc fb0 = wmma_scale_value_at_byte<BScaleFmt, Acc>(wb, 0);
-            const Acc fb1 = wmma_scale_value_at_byte<BScaleFmt, Acc>(wb, 1);
-            const Acc fb2 = wmma_scale_value_at_byte<BScaleFmt, Acc>(wb, 2);
-            const Acc fb3 = wmma_scale_value_at_byte<BScaleFmt, Acc>(wb, 3);
-            const Acc fb4 = wmma_scale_value_at_byte<BScaleFmt, Acc>(wb, 4);
-            const Acc fb5 = wmma_scale_value_at_byte<BScaleFmt, Acc>(wb, 5);
-            const Acc fb6 = wmma_scale_value_at_byte<BScaleFmt, Acc>(wb, 6);
-            const Acc fb7 = wmma_scale_value_at_byte<BScaleFmt, Acc>(wb, 7);
-            for(int e = 0; e < 8; ++e)
-            {
-                const int                m = Wmma16x16x128Layout::cd_m(lane, e);
-                const unsigned long long wa
-                    = (static_cast<unsigned long long>(
-                           static_cast<unsigned>(__builtin_amdgcn_ds_bpermute(m * 4, sa_lo)))
-                       | (static_cast<unsigned long long>(
-                           static_cast<unsigned>(__builtin_amdgcn_ds_bpermute(m * 4, sa_hi)))
-                          << 32));
-                const Acc fa0 = wmma_scale_value_at_byte<AScaleFmt, Acc>(wa, 0);
-                const Acc fa1 = wmma_scale_value_at_byte<AScaleFmt, Acc>(wa, 1);
-                const Acc fa2 = wmma_scale_value_at_byte<AScaleFmt, Acc>(wa, 2);
-                const Acc fa3 = wmma_scale_value_at_byte<AScaleFmt, Acc>(wa, 3);
-                const Acc fa4 = wmma_scale_value_at_byte<AScaleFmt, Acc>(wa, 4);
-                const Acc fa5 = wmma_scale_value_at_byte<AScaleFmt, Acc>(wa, 5);
-                const Acc fa6 = wmma_scale_value_at_byte<AScaleFmt, Acc>(wa, 6);
-                const Acc fa7 = wmma_scale_value_at_byte<AScaleFmt, Acc>(wa, 7);
-                Acc       acc = c.get(e);
-                for(int k = 0; k < 128; ++k)
-                {
-                    const int aslot
-                        = (AFMT <= 1) ? Wmma16x16x128Layout::ab_index(k) : wmma_mix_sub_slot(k);
-                    const int alane = (AFMT <= 1) ? Wmma16x16x128Layout::ab_lane(m, k)
-                                                  : wmma_mix_sub_lane(m, k);
-                    const int bslot
-                        = (BFMT <= 1) ? Wmma16x16x128Layout::ab_index(k) : wmma_mix_sub_slot(k);
-                    const int blane = (BFMT <= 1) ? Wmma16x16x128Layout::ab_lane(n, k)
-                                                  : wmma_mix_sub_lane(n, k);
-                    auto      av    = wmma_f8f6f4_gather_widen<AFMT, S, C>(aw, aslot, alane);
-                    auto      bv    = wmma_f8f6f4_gather_widen<BFMT, S, C>(bw, bslot, blane);
-                    const int byte  = wmma_mix_scale16_byte(k);
-                    const Acc fa = wmma_select_scale8(
-                        byte, fa0, fa1, fa2, fa3, fa4, fa5, fa6, fa7);
-                    const Acc fb = wmma_select_scale8(
-                        byte, fb0, fb1, fb2, fb3, fb4, fb5, fb6, fb7);
-                    acc = acc + av * bv * fa * fb;
-                }
-                d.set(e, acc);
-            }
+            const auto fb = wmma_make_scale8<BScaleFmt, Acc>(wb);
+            Value<v8f_native, S, C> d{};
+            wmma_16x16x128_mixed_scaled16_accumulate_group<0, AFMT, BFMT, S, C, AScaleFmt>(
+                aw, bw, m_base, n, sa_lo, sa_hi, fb, c, d);
+            wmma_16x16x128_mixed_scaled16_accumulate_group<4, AFMT, BFMT, S, C, AScaleFmt>(
+                aw, bw, m_base, n, sa_lo, sa_hi, fb, c, d);
             return d;
         }
 
@@ -1355,6 +1745,19 @@ namespace fpsan
         // FPSan software MMA for gfx1250 wmma_f32_32x16x128_f4 (Native mode calls the
         // builtin). fp4 nibbles never span a dword (width 4), so the B operand's 8
         // dwords fit the [16] gather array zero-padded.
+        template <int E, Semantics S, Conversions C>
+        FPSAN_DEVICE inline void wmma_32x16x128_f4_accumulate_row(const int (&aw)[16],
+                                                                  int                m_base,
+                                                                  int                k,
+                                                                  Value<float, S, C> bv,
+                                                                  Value<float, S, C>& acc)
+        {
+            const int m = m_base + E;
+            auto av     = wmma_sub_gather_widen<4, S, C>(
+                aw, Wmma32x16x128F4Layout::a_slot(m, k), Wmma32x16x128F4Layout::a_lane(m, k));
+            acc = acc + av * bv;
+        }
+
         template <Semantics S, Conversions C>
         FPSAN_DEVICE Value<v16f_native, S, C> wmma_32x16x128_f4_dataflow(const int (&aw)[16],
                                                                          const int (&bw)[16],
@@ -1363,22 +1766,61 @@ namespace fpsan
             using Acc                     = Value<float, S, C>;
             const int                lane = wave_lane();
             const int                n    = Wmma32x16x128F4Layout::cd_n(lane);
-            Value<v16f_native, S, C> d{};
-            for(int e = 0; e < 16; ++e)
+            const int                m_base = 16 * (lane >> 4);
+            Acc                      acc0   = c.get(0);
+            Acc                      acc1   = c.get(1);
+            Acc                      acc2   = c.get(2);
+            Acc                      acc3   = c.get(3);
+            Acc                      acc4   = c.get(4);
+            Acc                      acc5   = c.get(5);
+            Acc                      acc6   = c.get(6);
+            Acc                      acc7   = c.get(7);
+            Acc                      acc8   = c.get(8);
+            Acc                      acc9   = c.get(9);
+            Acc                      acc10  = c.get(10);
+            Acc                      acc11  = c.get(11);
+            Acc                      acc12  = c.get(12);
+            Acc                      acc13  = c.get(13);
+            Acc                      acc14  = c.get(14);
+            Acc                      acc15  = c.get(15);
+            for(int k = 0; k < 128; ++k)
             {
-                const int m   = Wmma32x16x128F4Layout::cd_m(lane, e);
-                Acc       acc = c.get(e);
-                for(int k = 0; k < 128; ++k)
-                {
-                    auto av = wmma_sub_gather_widen<4, S, C>(aw,
-                                                             Wmma32x16x128F4Layout::a_slot(m, k),
-                                                             Wmma32x16x128F4Layout::a_lane(m, k));
-                    auto bv = wmma_sub_gather_widen<4, S, C>(
-                        bw, Wmma32x16x128F4Layout::b_slot(k), Wmma32x16x128F4Layout::b_lane(n, k));
-                    acc = acc + av * bv;
-                }
-                d.set(e, acc);
+                auto bv = wmma_sub_gather_widen<4, S, C>(
+                    bw, Wmma32x16x128F4Layout::b_slot(k), Wmma32x16x128F4Layout::b_lane(n, k));
+                wmma_32x16x128_f4_accumulate_row<0, S, C>(aw, m_base, k, bv, acc0);
+                wmma_32x16x128_f4_accumulate_row<1, S, C>(aw, m_base, k, bv, acc1);
+                wmma_32x16x128_f4_accumulate_row<2, S, C>(aw, m_base, k, bv, acc2);
+                wmma_32x16x128_f4_accumulate_row<3, S, C>(aw, m_base, k, bv, acc3);
+                wmma_32x16x128_f4_accumulate_row<4, S, C>(aw, m_base, k, bv, acc4);
+                wmma_32x16x128_f4_accumulate_row<5, S, C>(aw, m_base, k, bv, acc5);
+                wmma_32x16x128_f4_accumulate_row<6, S, C>(aw, m_base, k, bv, acc6);
+                wmma_32x16x128_f4_accumulate_row<7, S, C>(aw, m_base, k, bv, acc7);
+                wmma_32x16x128_f4_accumulate_row<8, S, C>(aw, m_base, k, bv, acc8);
+                wmma_32x16x128_f4_accumulate_row<9, S, C>(aw, m_base, k, bv, acc9);
+                wmma_32x16x128_f4_accumulate_row<10, S, C>(aw, m_base, k, bv, acc10);
+                wmma_32x16x128_f4_accumulate_row<11, S, C>(aw, m_base, k, bv, acc11);
+                wmma_32x16x128_f4_accumulate_row<12, S, C>(aw, m_base, k, bv, acc12);
+                wmma_32x16x128_f4_accumulate_row<13, S, C>(aw, m_base, k, bv, acc13);
+                wmma_32x16x128_f4_accumulate_row<14, S, C>(aw, m_base, k, bv, acc14);
+                wmma_32x16x128_f4_accumulate_row<15, S, C>(aw, m_base, k, bv, acc15);
             }
+            Value<v16f_native, S, C> d{};
+            d.set(0, acc0);
+            d.set(1, acc1);
+            d.set(2, acc2);
+            d.set(3, acc3);
+            d.set(4, acc4);
+            d.set(5, acc5);
+            d.set(6, acc6);
+            d.set(7, acc7);
+            d.set(8, acc8);
+            d.set(9, acc9);
+            d.set(10, acc10);
+            d.set(11, acc11);
+            d.set(12, acc12);
+            d.set(13, acc13);
+            d.set(14, acc14);
+            d.set(15, acc15);
             return d;
         }
 
@@ -1386,6 +1828,81 @@ namespace fpsan
         // A-scale word for row m gathered from lane scale_lane_a(m); B-scale word for
         // col n from lane n. ScaleI is the per-lane operand width (4 -> i32, 8 -> i64
         // E8M0 bytes); ByteFn maps k -> controlling byte.
+        template <int E, Semantics S, Conversions C>
+        FPSAN_DEVICE inline void
+            wmma_32x16x128_f4_scaled_accumulate_row(const int (&aw)[16],
+                                                    int                m_base,
+                                                    int                k,
+                                                    int                byte,
+                                                    Value<float, S, C> bv,
+                                                    Value<float, S, C> fb,
+                                                    const WmmaScale4<Value<float, S, C>>& fa,
+                                                    Value<float, S, C>& acc)
+        {
+            const int m  = m_base + E;
+            auto      av = wmma_sub_gather_widen<4, S, C>(
+                aw, Wmma32x16x128F4Layout::a_slot(m, k), Wmma32x16x128F4Layout::a_lane(m, k));
+            const auto fav = fa.select(byte);
+            acc            = acc + av * bv * fav * fb;
+        }
+
+        template <int E0, Semantics S, Conversions C, int AScaleFmt>
+        FPSAN_DEVICE inline void wmma_32x16x128_f4_scaled_accumulate_group(
+            const int (&aw)[16],
+            const int (&bw)[16],
+            int                             m_base,
+            int                             n,
+            int                             sa,
+            const WmmaScale4<Value<float, S, C>>& fb_scale,
+            const Value<v16f_native, S, C>& c,
+            Value<v16f_native, S, C>&       d)
+        {
+            using Acc = Value<float, S, C>;
+
+            const int m0 = m_base + E0 + 0;
+            const int m1 = m_base + E0 + 1;
+            const int m2 = m_base + E0 + 2;
+            const int m3 = m_base + E0 + 3;
+
+            const unsigned wa0 = static_cast<unsigned>(
+                __builtin_amdgcn_ds_bpermute(Wmma32x16x128F4Layout::scale_lane_a(m0) * 4, sa));
+            const unsigned wa1 = static_cast<unsigned>(
+                __builtin_amdgcn_ds_bpermute(Wmma32x16x128F4Layout::scale_lane_a(m1) * 4, sa));
+            const unsigned wa2 = static_cast<unsigned>(
+                __builtin_amdgcn_ds_bpermute(Wmma32x16x128F4Layout::scale_lane_a(m2) * 4, sa));
+            const unsigned wa3 = static_cast<unsigned>(
+                __builtin_amdgcn_ds_bpermute(Wmma32x16x128F4Layout::scale_lane_a(m3) * 4, sa));
+
+            const auto fa0 = wmma_make_scale4<AScaleFmt, Acc>(wa0);
+            const auto fa1 = wmma_make_scale4<AScaleFmt, Acc>(wa1);
+            const auto fa2 = wmma_make_scale4<AScaleFmt, Acc>(wa2);
+            const auto fa3 = wmma_make_scale4<AScaleFmt, Acc>(wa3);
+
+            Acc acc0 = c.get(E0 + 0);
+            Acc acc1 = c.get(E0 + 1);
+            Acc acc2 = c.get(E0 + 2);
+            Acc acc3 = c.get(E0 + 3);
+            for(int k = 0; k < 128; ++k)
+            {
+                auto bv = wmma_sub_gather_widen<4, S, C>(
+                    bw, Wmma32x16x128F4Layout::b_slot(k), Wmma32x16x128F4Layout::b_lane(n, k));
+                const int byte = wmma_sub_scale_byte(k);
+                const Acc fb   = fb_scale.select(byte);
+                wmma_32x16x128_f4_scaled_accumulate_row<E0 + 0, S, C>(
+                    aw, m_base, k, byte, bv, fb, fa0, acc0);
+                wmma_32x16x128_f4_scaled_accumulate_row<E0 + 1, S, C>(
+                    aw, m_base, k, byte, bv, fb, fa1, acc1);
+                wmma_32x16x128_f4_scaled_accumulate_row<E0 + 2, S, C>(
+                    aw, m_base, k, byte, bv, fb, fa2, acc2);
+                wmma_32x16x128_f4_scaled_accumulate_row<E0 + 3, S, C>(
+                    aw, m_base, k, byte, bv, fb, fa3, acc3);
+            }
+            d.set(E0 + 0, acc0);
+            d.set(E0 + 1, acc1);
+            d.set(E0 + 2, acc2);
+            d.set(E0 + 3, acc3);
+        }
+
         template <Semantics S, Conversions C, int AScaleFmt = 0, int BScaleFmt = 0>
         FPSAN_DEVICE Value<v16f_native, S, C> wmma_32x16x128_f4_scaled_dataflow(
             const int (&aw)[16], const int (&bw)[16], Value<v16f_native, S, C> c, int sa, int sb)
@@ -1393,37 +1910,116 @@ namespace fpsan
             using Acc           = Value<float, S, C>;
             const int      lane = wave_lane();
             const int      n    = Wmma32x16x128F4Layout::cd_n(lane);
+            const int      m_base = 16 * (lane >> 4);
             const unsigned wb   = static_cast<unsigned>(__builtin_amdgcn_ds_bpermute(n * 4, sb));
-            const Acc      fb0  = wmma_scale_value_at_byte<BScaleFmt, Acc>(wb, 0);
-            const Acc      fb1  = wmma_scale_value_at_byte<BScaleFmt, Acc>(wb, 1);
-            const Acc      fb2  = wmma_scale_value_at_byte<BScaleFmt, Acc>(wb, 2);
-            const Acc      fb3  = wmma_scale_value_at_byte<BScaleFmt, Acc>(wb, 3);
+            const auto     fb   = wmma_make_scale4<BScaleFmt, Acc>(wb);
             Value<v16f_native, S, C> d{};
-            for(int e = 0; e < 16; ++e)
-            {
-                const int      m  = Wmma32x16x128F4Layout::cd_m(lane, e);
-                const unsigned wa = static_cast<unsigned>(
-                    __builtin_amdgcn_ds_bpermute(Wmma32x16x128F4Layout::scale_lane_a(m) * 4, sa));
-                const Acc fa0 = wmma_scale_value_at_byte<AScaleFmt, Acc>(wa, 0);
-                const Acc fa1 = wmma_scale_value_at_byte<AScaleFmt, Acc>(wa, 1);
-                const Acc fa2 = wmma_scale_value_at_byte<AScaleFmt, Acc>(wa, 2);
-                const Acc fa3 = wmma_scale_value_at_byte<AScaleFmt, Acc>(wa, 3);
-                Acc acc = c.get(e);
-                for(int k = 0; k < 128; ++k)
-                {
-                    auto av = wmma_sub_gather_widen<4, S, C>(aw,
-                                                             Wmma32x16x128F4Layout::a_slot(m, k),
-                                                             Wmma32x16x128F4Layout::a_lane(m, k));
-                    auto bv = wmma_sub_gather_widen<4, S, C>(
-                        bw, Wmma32x16x128F4Layout::b_slot(k), Wmma32x16x128F4Layout::b_lane(n, k));
-                    const int byte = wmma_sub_scale_byte(k);
-                    const Acc fa   = wmma_select_scale4(byte, fa0, fa1, fa2, fa3);
-                    const Acc fb   = wmma_select_scale4(byte, fb0, fb1, fb2, fb3);
-                    acc            = acc + av * bv * fa * fb;
-                }
-                d.set(e, acc);
-            }
+            wmma_32x16x128_f4_scaled_accumulate_group<0, S, C, AScaleFmt>(
+                aw, bw, m_base, n, sa, fb, c, d);
+            wmma_32x16x128_f4_scaled_accumulate_group<4, S, C, AScaleFmt>(
+                aw, bw, m_base, n, sa, fb, c, d);
+            wmma_32x16x128_f4_scaled_accumulate_group<8, S, C, AScaleFmt>(
+                aw, bw, m_base, n, sa, fb, c, d);
+            wmma_32x16x128_f4_scaled_accumulate_group<12, S, C, AScaleFmt>(
+                aw, bw, m_base, n, sa, fb, c, d);
             return d;
+        }
+
+        template <int E, Semantics S, Conversions C>
+        FPSAN_DEVICE inline void
+            wmma_32x16x128_f4_scaled16_accumulate_row(const int (&aw)[16],
+                                                      int                m_base,
+                                                      int                k,
+                                                      int                byte,
+                                                      Value<float, S, C> bv,
+                                                      Value<float, S, C> fb,
+                                                      const WmmaScale8<Value<float, S, C>>& fa,
+                                                      Value<float, S, C>& acc)
+        {
+            const int m  = m_base + E;
+            auto      av = wmma_sub_gather_widen<4, S, C>(
+                aw, Wmma32x16x128F4Layout::a_slot(m, k), Wmma32x16x128F4Layout::a_lane(m, k));
+            const auto fav = fa.select(byte);
+            acc            = acc + av * bv * fav * fb;
+        }
+
+        template <int E0, Semantics S, Conversions C, int AScaleFmt>
+        FPSAN_DEVICE inline void wmma_32x16x128_f4_scaled16_accumulate_group(
+            const int (&aw)[16],
+            const int (&bw)[16],
+            int                             m_base,
+            int                             n,
+            int                             sa_lo,
+            int                             sa_hi,
+            const WmmaScale8<Value<float, S, C>>& fb_scale,
+            const Value<v16f_native, S, C>& c,
+            Value<v16f_native, S, C>&       d)
+        {
+            using Acc = Value<float, S, C>;
+
+            const int m0 = m_base + E0 + 0;
+            const int m1 = m_base + E0 + 1;
+            const int m2 = m_base + E0 + 2;
+            const int m3 = m_base + E0 + 3;
+
+            const int la0 = Wmma32x16x128F4Layout::scale_lane_a(m0) * 4;
+            const int la1 = Wmma32x16x128F4Layout::scale_lane_a(m1) * 4;
+            const int la2 = Wmma32x16x128F4Layout::scale_lane_a(m2) * 4;
+            const int la3 = Wmma32x16x128F4Layout::scale_lane_a(m3) * 4;
+
+            const unsigned long long wa0
+                = (static_cast<unsigned long long>(
+                       static_cast<unsigned>(__builtin_amdgcn_ds_bpermute(la0, sa_lo)))
+                   | (static_cast<unsigned long long>(
+                          static_cast<unsigned>(__builtin_amdgcn_ds_bpermute(la0, sa_hi)))
+                      << 32));
+            const unsigned long long wa1
+                = (static_cast<unsigned long long>(
+                       static_cast<unsigned>(__builtin_amdgcn_ds_bpermute(la1, sa_lo)))
+                   | (static_cast<unsigned long long>(
+                          static_cast<unsigned>(__builtin_amdgcn_ds_bpermute(la1, sa_hi)))
+                      << 32));
+            const unsigned long long wa2
+                = (static_cast<unsigned long long>(
+                       static_cast<unsigned>(__builtin_amdgcn_ds_bpermute(la2, sa_lo)))
+                   | (static_cast<unsigned long long>(
+                          static_cast<unsigned>(__builtin_amdgcn_ds_bpermute(la2, sa_hi)))
+                      << 32));
+            const unsigned long long wa3
+                = (static_cast<unsigned long long>(
+                       static_cast<unsigned>(__builtin_amdgcn_ds_bpermute(la3, sa_lo)))
+                   | (static_cast<unsigned long long>(
+                          static_cast<unsigned>(__builtin_amdgcn_ds_bpermute(la3, sa_hi)))
+                      << 32));
+
+            const auto fa0 = wmma_make_scale8<AScaleFmt, Acc>(wa0);
+            const auto fa1 = wmma_make_scale8<AScaleFmt, Acc>(wa1);
+            const auto fa2 = wmma_make_scale8<AScaleFmt, Acc>(wa2);
+            const auto fa3 = wmma_make_scale8<AScaleFmt, Acc>(wa3);
+
+            Acc acc0 = c.get(E0 + 0);
+            Acc acc1 = c.get(E0 + 1);
+            Acc acc2 = c.get(E0 + 2);
+            Acc acc3 = c.get(E0 + 3);
+            for(int k = 0; k < 128; ++k)
+            {
+                auto bv = wmma_sub_gather_widen<4, S, C>(
+                    bw, Wmma32x16x128F4Layout::b_slot(k), Wmma32x16x128F4Layout::b_lane(n, k));
+                const int byte = wmma_sub_scale16_byte(k);
+                const Acc fb = fb_scale.select(byte);
+                wmma_32x16x128_f4_scaled16_accumulate_row<E0 + 0, S, C>(
+                    aw, m_base, k, byte, bv, fb, fa0, acc0);
+                wmma_32x16x128_f4_scaled16_accumulate_row<E0 + 1, S, C>(
+                    aw, m_base, k, byte, bv, fb, fa1, acc1);
+                wmma_32x16x128_f4_scaled16_accumulate_row<E0 + 2, S, C>(
+                    aw, m_base, k, byte, bv, fb, fa2, acc2);
+                wmma_32x16x128_f4_scaled16_accumulate_row<E0 + 3, S, C>(
+                    aw, m_base, k, byte, bv, fb, fa3, acc3);
+            }
+            d.set(E0 + 0, acc0);
+            d.set(E0 + 1, acc1);
+            d.set(E0 + 2, acc2);
+            d.set(E0 + 3, acc3);
         }
 
         template <Semantics S, Conversions C, int AScaleFmt = 0, int BScaleFmt = 0>
@@ -1447,50 +2043,17 @@ namespace fpsan
                    | (static_cast<unsigned long long>(
                           static_cast<unsigned>(__builtin_amdgcn_ds_bpermute(n * 4, sb_hi)))
                       << 32));
-            const Acc fb0 = wmma_scale_value_at_byte<BScaleFmt, Acc>(wb, 0);
-            const Acc fb1 = wmma_scale_value_at_byte<BScaleFmt, Acc>(wb, 1);
-            const Acc fb2 = wmma_scale_value_at_byte<BScaleFmt, Acc>(wb, 2);
-            const Acc fb3 = wmma_scale_value_at_byte<BScaleFmt, Acc>(wb, 3);
-            const Acc fb4 = wmma_scale_value_at_byte<BScaleFmt, Acc>(wb, 4);
-            const Acc fb5 = wmma_scale_value_at_byte<BScaleFmt, Acc>(wb, 5);
-            const Acc fb6 = wmma_scale_value_at_byte<BScaleFmt, Acc>(wb, 6);
-            const Acc fb7 = wmma_scale_value_at_byte<BScaleFmt, Acc>(wb, 7);
+            const auto fb = wmma_make_scale8<BScaleFmt, Acc>(wb);
             Value<v16f_native, S, C> d{};
-            for(int e = 0; e < 16; ++e)
-            {
-                const int                m  = Wmma32x16x128F4Layout::cd_m(lane, e);
-                const int                la = Wmma32x16x128F4Layout::scale_lane_a(m) * 4;
-                const unsigned long long wa
-                    = (static_cast<unsigned long long>(
-                           static_cast<unsigned>(__builtin_amdgcn_ds_bpermute(la, sa_lo)))
-                       | (static_cast<unsigned long long>(
-                              static_cast<unsigned>(__builtin_amdgcn_ds_bpermute(la, sa_hi)))
-                          << 32));
-                const Acc fa0 = wmma_scale_value_at_byte<AScaleFmt, Acc>(wa, 0);
-                const Acc fa1 = wmma_scale_value_at_byte<AScaleFmt, Acc>(wa, 1);
-                const Acc fa2 = wmma_scale_value_at_byte<AScaleFmt, Acc>(wa, 2);
-                const Acc fa3 = wmma_scale_value_at_byte<AScaleFmt, Acc>(wa, 3);
-                const Acc fa4 = wmma_scale_value_at_byte<AScaleFmt, Acc>(wa, 4);
-                const Acc fa5 = wmma_scale_value_at_byte<AScaleFmt, Acc>(wa, 5);
-                const Acc fa6 = wmma_scale_value_at_byte<AScaleFmt, Acc>(wa, 6);
-                const Acc fa7 = wmma_scale_value_at_byte<AScaleFmt, Acc>(wa, 7);
-                Acc acc = c.get(e);
-                for(int k = 0; k < 128; ++k)
-                {
-                    auto av = wmma_sub_gather_widen<4, S, C>(aw,
-                                                             Wmma32x16x128F4Layout::a_slot(m, k),
-                                                             Wmma32x16x128F4Layout::a_lane(m, k));
-                    auto bv = wmma_sub_gather_widen<4, S, C>(
-                        bw, Wmma32x16x128F4Layout::b_slot(k), Wmma32x16x128F4Layout::b_lane(n, k));
-                    const int byte = wmma_sub_scale16_byte(k);
-                    const Acc fa = wmma_select_scale8(
-                        byte, fa0, fa1, fa2, fa3, fa4, fa5, fa6, fa7);
-                    const Acc fb = wmma_select_scale8(
-                        byte, fb0, fb1, fb2, fb3, fb4, fb5, fb6, fb7);
-                    acc = acc + av * bv * fa * fb;
-                }
-                d.set(e, acc);
-            }
+            const int m_base = 16 * (lane >> 4);
+            wmma_32x16x128_f4_scaled16_accumulate_group<0, S, C, AScaleFmt>(
+                aw, bw, m_base, n, sa_lo, sa_hi, fb, c, d);
+            wmma_32x16x128_f4_scaled16_accumulate_group<4, S, C, AScaleFmt>(
+                aw, bw, m_base, n, sa_lo, sa_hi, fb, c, d);
+            wmma_32x16x128_f4_scaled16_accumulate_group<8, S, C, AScaleFmt>(
+                aw, bw, m_base, n, sa_lo, sa_hi, fb, c, d);
+            wmma_32x16x128_f4_scaled16_accumulate_group<12, S, C, AScaleFmt>(
+                aw, bw, m_base, n, sa_lo, sa_hi, fb, c, d);
             return d;
         }
 
