@@ -990,6 +990,59 @@ namespace fpsan
             else
                 return e8m0_to_float(byte);
         }
+        template <int ScaleFmt, class Acc, class Word>
+        FPSAN_DEVICE inline Acc wmma_scale_value_at_byte(Word word, int byte)
+        {
+            return Acc(wmma_scale_byte_to_float<ScaleFmt>(
+                static_cast<unsigned>((word >> (8 * byte)) & static_cast<Word>(0xFFu))));
+        }
+        template <class Acc>
+        FPSAN_DEVICE inline Acc
+            wmma_select_scale4(int byte, const Acc& s0, const Acc& s1, const Acc& s2, const Acc& s3)
+        {
+            switch(byte)
+            {
+            case 0:
+                return s0;
+            case 1:
+                return s1;
+            case 2:
+                return s2;
+            default:
+                return s3;
+            }
+        }
+        template <class Acc>
+        FPSAN_DEVICE inline Acc wmma_select_scale8(int        byte,
+                                                   const Acc& s0,
+                                                   const Acc& s1,
+                                                   const Acc& s2,
+                                                   const Acc& s3,
+                                                   const Acc& s4,
+                                                   const Acc& s5,
+                                                   const Acc& s6,
+                                                   const Acc& s7)
+        {
+            switch(byte)
+            {
+            case 0:
+                return s0;
+            case 1:
+                return s1;
+            case 2:
+                return s2;
+            case 3:
+                return s3;
+            case 4:
+                return s4;
+            case 5:
+                return s5;
+            case 6:
+                return s6;
+            default:
+                return s7;
+            }
+        }
 
         // ---- Wave32 16x16x128 f8f6f4 sub-byte BLOCK-SCALED WMMA dataflow ------------
         // The block-scaled f8f6f4 variant: each K element carries a per-(row/col,
@@ -1007,11 +1060,19 @@ namespace fpsan
             const int               lane = wave_lane();
             const int               n    = Wmma16x16x128Layout::cd_n(lane);
             Value<v8f_native, S, C> d{};
+            const unsigned wb  = static_cast<unsigned>(__builtin_amdgcn_ds_bpermute(n * 4, sb));
+            const Acc      fb0 = wmma_scale_value_at_byte<BScaleFmt, Acc>(wb, 0);
+            const Acc      fb1 = wmma_scale_value_at_byte<BScaleFmt, Acc>(wb, 1);
+            const Acc      fb2 = wmma_scale_value_at_byte<BScaleFmt, Acc>(wb, 2);
+            const Acc      fb3 = wmma_scale_value_at_byte<BScaleFmt, Acc>(wb, 3);
             for(int e = 0; e < 8; ++e)
             {
                 const int      m   = Wmma16x16x128Layout::cd_m(lane, e);
                 const unsigned wa  = static_cast<unsigned>(__builtin_amdgcn_ds_bpermute(m * 4, sa));
-                const unsigned wb  = static_cast<unsigned>(__builtin_amdgcn_ds_bpermute(n * 4, sb));
+                const Acc      fa0 = wmma_scale_value_at_byte<AScaleFmt, Acc>(wa, 0);
+                const Acc      fa1 = wmma_scale_value_at_byte<AScaleFmt, Acc>(wa, 1);
+                const Acc      fa2 = wmma_scale_value_at_byte<AScaleFmt, Acc>(wa, 2);
+                const Acc      fa3 = wmma_scale_value_at_byte<AScaleFmt, Acc>(wa, 3);
                 Acc            acc = c.get(e);
                 for(int k = 0; k < 128; ++k)
                 {
@@ -1021,9 +1082,9 @@ namespace fpsan
                     auto bv = wmma_sub_gather_widen<WB, S, C>(
                         bw, slot, Wmma16x16x128Layout::ab_lane(n, k));
                     const int byte = wmma_sub_scale_byte(k);
-                    const Acc fa(wmma_scale_byte_to_float<AScaleFmt>((wa >> (8 * byte)) & 0xFFu));
-                    const Acc fb(wmma_scale_byte_to_float<BScaleFmt>((wb >> (8 * byte)) & 0xFFu));
-                    acc = acc + av * bv * fa * fb;
+                    const Acc fa   = wmma_select_scale4(byte, fa0, fa1, fa2, fa3);
+                    const Acc fb   = wmma_select_scale4(byte, fb0, fb1, fb2, fb3);
+                    acc            = acc + av * bv * fa * fb;
                 }
                 d.set(e, acc);
             }
@@ -1051,6 +1112,20 @@ namespace fpsan
             const int               sb_lo = static_cast<int>(sb & 0xffffffff);
             const int               sb_hi = static_cast<int>((sb >> 32) & 0xffffffff);
             Value<v8f_native, S, C> d{};
+            const unsigned long long wb
+                = (static_cast<unsigned long long>(
+                       static_cast<unsigned>(__builtin_amdgcn_ds_bpermute(n * 4, sb_lo)))
+                   | (static_cast<unsigned long long>(
+                          static_cast<unsigned>(__builtin_amdgcn_ds_bpermute(n * 4, sb_hi)))
+                      << 32));
+            const Acc fb0 = wmma_scale_value_at_byte<BScaleFmt, Acc>(wb, 0);
+            const Acc fb1 = wmma_scale_value_at_byte<BScaleFmt, Acc>(wb, 1);
+            const Acc fb2 = wmma_scale_value_at_byte<BScaleFmt, Acc>(wb, 2);
+            const Acc fb3 = wmma_scale_value_at_byte<BScaleFmt, Acc>(wb, 3);
+            const Acc fb4 = wmma_scale_value_at_byte<BScaleFmt, Acc>(wb, 4);
+            const Acc fb5 = wmma_scale_value_at_byte<BScaleFmt, Acc>(wb, 5);
+            const Acc fb6 = wmma_scale_value_at_byte<BScaleFmt, Acc>(wb, 6);
+            const Acc fb7 = wmma_scale_value_at_byte<BScaleFmt, Acc>(wb, 7);
             for(int e = 0; e < 8; ++e)
             {
                 const int                m = Wmma16x16x128Layout::cd_m(lane, e);
@@ -1058,15 +1133,17 @@ namespace fpsan
                     = (static_cast<unsigned long long>(
                            static_cast<unsigned>(__builtin_amdgcn_ds_bpermute(m * 4, sa_lo)))
                        | (static_cast<unsigned long long>(
-                              static_cast<unsigned>(__builtin_amdgcn_ds_bpermute(m * 4, sa_hi)))
+                           static_cast<unsigned>(__builtin_amdgcn_ds_bpermute(m * 4, sa_hi)))
                           << 32));
-                const unsigned long long wb
-                    = (static_cast<unsigned long long>(
-                           static_cast<unsigned>(__builtin_amdgcn_ds_bpermute(n * 4, sb_lo)))
-                       | (static_cast<unsigned long long>(
-                              static_cast<unsigned>(__builtin_amdgcn_ds_bpermute(n * 4, sb_hi)))
-                          << 32));
-                Acc acc = c.get(e);
+                const Acc fa0 = wmma_scale_value_at_byte<AScaleFmt, Acc>(wa, 0);
+                const Acc fa1 = wmma_scale_value_at_byte<AScaleFmt, Acc>(wa, 1);
+                const Acc fa2 = wmma_scale_value_at_byte<AScaleFmt, Acc>(wa, 2);
+                const Acc fa3 = wmma_scale_value_at_byte<AScaleFmt, Acc>(wa, 3);
+                const Acc fa4 = wmma_scale_value_at_byte<AScaleFmt, Acc>(wa, 4);
+                const Acc fa5 = wmma_scale_value_at_byte<AScaleFmt, Acc>(wa, 5);
+                const Acc fa6 = wmma_scale_value_at_byte<AScaleFmt, Acc>(wa, 6);
+                const Acc fa7 = wmma_scale_value_at_byte<AScaleFmt, Acc>(wa, 7);
+                Acc       acc = c.get(e);
                 for(int k = 0; k < 128; ++k)
                 {
                     const int slot = Wmma16x16x128Layout::ab_index(k);
@@ -1075,10 +1152,10 @@ namespace fpsan
                     auto bv = wmma_sub_gather_widen<WB, S, C>(
                         bw, slot, Wmma16x16x128Layout::ab_lane(n, k));
                     const int byte = wmma_sub_scale16_byte(k);
-                    const Acc fa(wmma_scale_byte_to_float<AScaleFmt>(
-                        static_cast<unsigned>((wa >> (8 * byte)) & 0xFFull)));
-                    const Acc fb(wmma_scale_byte_to_float<BScaleFmt>(
-                        static_cast<unsigned>((wb >> (8 * byte)) & 0xFFull)));
+                    const Acc fa = wmma_select_scale8(
+                        byte, fa0, fa1, fa2, fa3, fa4, fa5, fa6, fa7);
+                    const Acc fb = wmma_select_scale8(
+                        byte, fb0, fb1, fb2, fb3, fb4, fb5, fb6, fb7);
                     acc = acc + av * bv * fa * fb;
                 }
                 d.set(e, acc);
@@ -1107,11 +1184,19 @@ namespace fpsan
             const int               lane = wave_lane();
             const int               n    = Wmma16x16x128Layout::cd_n(lane);
             Value<v8f_native, S, C> d{};
+            const unsigned wb  = static_cast<unsigned>(__builtin_amdgcn_ds_bpermute(n * 4, sb));
+            const Acc      fb0 = wmma_scale_value_at_byte<BScaleFmt, Acc>(wb, 0);
+            const Acc      fb1 = wmma_scale_value_at_byte<BScaleFmt, Acc>(wb, 1);
+            const Acc      fb2 = wmma_scale_value_at_byte<BScaleFmt, Acc>(wb, 2);
+            const Acc      fb3 = wmma_scale_value_at_byte<BScaleFmt, Acc>(wb, 3);
             for(int e = 0; e < 8; ++e)
             {
                 const int      m   = Wmma16x16x128Layout::cd_m(lane, e);
                 const unsigned wa  = static_cast<unsigned>(__builtin_amdgcn_ds_bpermute(m * 4, sa));
-                const unsigned wb  = static_cast<unsigned>(__builtin_amdgcn_ds_bpermute(n * 4, sb));
+                const Acc      fa0 = wmma_scale_value_at_byte<AScaleFmt, Acc>(wa, 0);
+                const Acc      fa1 = wmma_scale_value_at_byte<AScaleFmt, Acc>(wa, 1);
+                const Acc      fa2 = wmma_scale_value_at_byte<AScaleFmt, Acc>(wa, 2);
+                const Acc      fa3 = wmma_scale_value_at_byte<AScaleFmt, Acc>(wa, 3);
                 Acc            acc = c.get(e);
                 for(int k = 0; k < 128; ++k)
                 {
@@ -1126,9 +1211,9 @@ namespace fpsan
                     auto      av    = wmma_f8f6f4_gather_widen<AFMT, S, C>(aw, aslot, alane);
                     auto      bv    = wmma_f8f6f4_gather_widen<BFMT, S, C>(bw, bslot, blane);
                     const int byte  = wmma_mix_scale_byte(k);
-                    const Acc fa(wmma_scale_byte_to_float<AScaleFmt>((wa >> (8 * byte)) & 0xFFu));
-                    const Acc fb(wmma_scale_byte_to_float<BScaleFmt>((wb >> (8 * byte)) & 0xFFu));
-                    acc = acc + av * bv * fa * fb;
+                    const Acc fa    = wmma_select_scale4(byte, fa0, fa1, fa2, fa3);
+                    const Acc fb    = wmma_select_scale4(byte, fb0, fb1, fb2, fb3);
+                    acc             = acc + av * bv * fa * fb;
                 }
                 d.set(e, acc);
             }
@@ -1161,6 +1246,20 @@ namespace fpsan
             const int               sb_lo = static_cast<int>(sb & 0xffffffff);
             const int               sb_hi = static_cast<int>((sb >> 32) & 0xffffffff);
             Value<v8f_native, S, C> d{};
+            const unsigned long long wb
+                = (static_cast<unsigned long long>(
+                       static_cast<unsigned>(__builtin_amdgcn_ds_bpermute(n * 4, sb_lo)))
+                   | (static_cast<unsigned long long>(
+                          static_cast<unsigned>(__builtin_amdgcn_ds_bpermute(n * 4, sb_hi)))
+                      << 32));
+            const Acc fb0 = wmma_scale_value_at_byte<BScaleFmt, Acc>(wb, 0);
+            const Acc fb1 = wmma_scale_value_at_byte<BScaleFmt, Acc>(wb, 1);
+            const Acc fb2 = wmma_scale_value_at_byte<BScaleFmt, Acc>(wb, 2);
+            const Acc fb3 = wmma_scale_value_at_byte<BScaleFmt, Acc>(wb, 3);
+            const Acc fb4 = wmma_scale_value_at_byte<BScaleFmt, Acc>(wb, 4);
+            const Acc fb5 = wmma_scale_value_at_byte<BScaleFmt, Acc>(wb, 5);
+            const Acc fb6 = wmma_scale_value_at_byte<BScaleFmt, Acc>(wb, 6);
+            const Acc fb7 = wmma_scale_value_at_byte<BScaleFmt, Acc>(wb, 7);
             for(int e = 0; e < 8; ++e)
             {
                 const int                m = Wmma16x16x128Layout::cd_m(lane, e);
@@ -1168,15 +1267,17 @@ namespace fpsan
                     = (static_cast<unsigned long long>(
                            static_cast<unsigned>(__builtin_amdgcn_ds_bpermute(m * 4, sa_lo)))
                        | (static_cast<unsigned long long>(
-                              static_cast<unsigned>(__builtin_amdgcn_ds_bpermute(m * 4, sa_hi)))
+                           static_cast<unsigned>(__builtin_amdgcn_ds_bpermute(m * 4, sa_hi)))
                           << 32));
-                const unsigned long long wb
-                    = (static_cast<unsigned long long>(
-                           static_cast<unsigned>(__builtin_amdgcn_ds_bpermute(n * 4, sb_lo)))
-                       | (static_cast<unsigned long long>(
-                              static_cast<unsigned>(__builtin_amdgcn_ds_bpermute(n * 4, sb_hi)))
-                          << 32));
-                Acc acc = c.get(e);
+                const Acc fa0 = wmma_scale_value_at_byte<AScaleFmt, Acc>(wa, 0);
+                const Acc fa1 = wmma_scale_value_at_byte<AScaleFmt, Acc>(wa, 1);
+                const Acc fa2 = wmma_scale_value_at_byte<AScaleFmt, Acc>(wa, 2);
+                const Acc fa3 = wmma_scale_value_at_byte<AScaleFmt, Acc>(wa, 3);
+                const Acc fa4 = wmma_scale_value_at_byte<AScaleFmt, Acc>(wa, 4);
+                const Acc fa5 = wmma_scale_value_at_byte<AScaleFmt, Acc>(wa, 5);
+                const Acc fa6 = wmma_scale_value_at_byte<AScaleFmt, Acc>(wa, 6);
+                const Acc fa7 = wmma_scale_value_at_byte<AScaleFmt, Acc>(wa, 7);
+                Acc       acc = c.get(e);
                 for(int k = 0; k < 128; ++k)
                 {
                     const int aslot
@@ -1190,10 +1291,10 @@ namespace fpsan
                     auto      av    = wmma_f8f6f4_gather_widen<AFMT, S, C>(aw, aslot, alane);
                     auto      bv    = wmma_f8f6f4_gather_widen<BFMT, S, C>(bw, bslot, blane);
                     const int byte  = wmma_mix_scale16_byte(k);
-                    const Acc fa(wmma_scale_byte_to_float<AScaleFmt>(
-                        static_cast<unsigned>((wa >> (8 * byte)) & 0xFFull)));
-                    const Acc fb(wmma_scale_byte_to_float<BScaleFmt>(
-                        static_cast<unsigned>((wb >> (8 * byte)) & 0xFFull)));
+                    const Acc fa = wmma_select_scale8(
+                        byte, fa0, fa1, fa2, fa3, fa4, fa5, fa6, fa7);
+                    const Acc fb = wmma_select_scale8(
+                        byte, fb0, fb1, fb2, fb3, fb4, fb5, fb6, fb7);
                     acc = acc + av * bv * fa * fb;
                 }
                 d.set(e, acc);
@@ -1293,12 +1394,20 @@ namespace fpsan
             const int      lane = wave_lane();
             const int      n    = Wmma32x16x128F4Layout::cd_n(lane);
             const unsigned wb   = static_cast<unsigned>(__builtin_amdgcn_ds_bpermute(n * 4, sb));
+            const Acc      fb0  = wmma_scale_value_at_byte<BScaleFmt, Acc>(wb, 0);
+            const Acc      fb1  = wmma_scale_value_at_byte<BScaleFmt, Acc>(wb, 1);
+            const Acc      fb2  = wmma_scale_value_at_byte<BScaleFmt, Acc>(wb, 2);
+            const Acc      fb3  = wmma_scale_value_at_byte<BScaleFmt, Acc>(wb, 3);
             Value<v16f_native, S, C> d{};
             for(int e = 0; e < 16; ++e)
             {
                 const int      m  = Wmma32x16x128F4Layout::cd_m(lane, e);
                 const unsigned wa = static_cast<unsigned>(
                     __builtin_amdgcn_ds_bpermute(Wmma32x16x128F4Layout::scale_lane_a(m) * 4, sa));
+                const Acc fa0 = wmma_scale_value_at_byte<AScaleFmt, Acc>(wa, 0);
+                const Acc fa1 = wmma_scale_value_at_byte<AScaleFmt, Acc>(wa, 1);
+                const Acc fa2 = wmma_scale_value_at_byte<AScaleFmt, Acc>(wa, 2);
+                const Acc fa3 = wmma_scale_value_at_byte<AScaleFmt, Acc>(wa, 3);
                 Acc acc = c.get(e);
                 for(int k = 0; k < 128; ++k)
                 {
@@ -1308,9 +1417,9 @@ namespace fpsan
                     auto bv = wmma_sub_gather_widen<4, S, C>(
                         bw, Wmma32x16x128F4Layout::b_slot(k), Wmma32x16x128F4Layout::b_lane(n, k));
                     const int byte = wmma_sub_scale_byte(k);
-                    const Acc fa(wmma_scale_byte_to_float<AScaleFmt>((wa >> (8 * byte)) & 0xFFu));
-                    const Acc fb(wmma_scale_byte_to_float<BScaleFmt>((wb >> (8 * byte)) & 0xFFu));
-                    acc = acc + av * bv * fa * fb;
+                    const Acc fa   = wmma_select_scale4(byte, fa0, fa1, fa2, fa3);
+                    const Acc fb   = wmma_select_scale4(byte, fb0, fb1, fb2, fb3);
+                    acc            = acc + av * bv * fa * fb;
                 }
                 d.set(e, acc);
             }
@@ -1338,6 +1447,14 @@ namespace fpsan
                    | (static_cast<unsigned long long>(
                           static_cast<unsigned>(__builtin_amdgcn_ds_bpermute(n * 4, sb_hi)))
                       << 32));
+            const Acc fb0 = wmma_scale_value_at_byte<BScaleFmt, Acc>(wb, 0);
+            const Acc fb1 = wmma_scale_value_at_byte<BScaleFmt, Acc>(wb, 1);
+            const Acc fb2 = wmma_scale_value_at_byte<BScaleFmt, Acc>(wb, 2);
+            const Acc fb3 = wmma_scale_value_at_byte<BScaleFmt, Acc>(wb, 3);
+            const Acc fb4 = wmma_scale_value_at_byte<BScaleFmt, Acc>(wb, 4);
+            const Acc fb5 = wmma_scale_value_at_byte<BScaleFmt, Acc>(wb, 5);
+            const Acc fb6 = wmma_scale_value_at_byte<BScaleFmt, Acc>(wb, 6);
+            const Acc fb7 = wmma_scale_value_at_byte<BScaleFmt, Acc>(wb, 7);
             Value<v16f_native, S, C> d{};
             for(int e = 0; e < 16; ++e)
             {
@@ -1349,6 +1466,14 @@ namespace fpsan
                        | (static_cast<unsigned long long>(
                               static_cast<unsigned>(__builtin_amdgcn_ds_bpermute(la, sa_hi)))
                           << 32));
+                const Acc fa0 = wmma_scale_value_at_byte<AScaleFmt, Acc>(wa, 0);
+                const Acc fa1 = wmma_scale_value_at_byte<AScaleFmt, Acc>(wa, 1);
+                const Acc fa2 = wmma_scale_value_at_byte<AScaleFmt, Acc>(wa, 2);
+                const Acc fa3 = wmma_scale_value_at_byte<AScaleFmt, Acc>(wa, 3);
+                const Acc fa4 = wmma_scale_value_at_byte<AScaleFmt, Acc>(wa, 4);
+                const Acc fa5 = wmma_scale_value_at_byte<AScaleFmt, Acc>(wa, 5);
+                const Acc fa6 = wmma_scale_value_at_byte<AScaleFmt, Acc>(wa, 6);
+                const Acc fa7 = wmma_scale_value_at_byte<AScaleFmt, Acc>(wa, 7);
                 Acc acc = c.get(e);
                 for(int k = 0; k < 128; ++k)
                 {
@@ -1358,10 +1483,10 @@ namespace fpsan
                     auto bv = wmma_sub_gather_widen<4, S, C>(
                         bw, Wmma32x16x128F4Layout::b_slot(k), Wmma32x16x128F4Layout::b_lane(n, k));
                     const int byte = wmma_sub_scale16_byte(k);
-                    const Acc fa(wmma_scale_byte_to_float<AScaleFmt>(
-                        static_cast<unsigned>((wa >> (8 * byte)) & 0xFFull)));
-                    const Acc fb(wmma_scale_byte_to_float<BScaleFmt>(
-                        static_cast<unsigned>((wb >> (8 * byte)) & 0xFFull)));
+                    const Acc fa = wmma_select_scale8(
+                        byte, fa0, fa1, fa2, fa3, fa4, fa5, fa6, fa7);
+                    const Acc fb = wmma_select_scale8(
+                        byte, fb0, fb1, fb2, fb3, fb4, fb5, fb6, fb7);
                     acc = acc + av * bv * fa * fb;
                 }
                 d.set(e, acc);
