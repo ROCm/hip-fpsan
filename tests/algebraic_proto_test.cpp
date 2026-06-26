@@ -79,12 +79,14 @@ static void test_width(const char* name, AlgVariant field, AlgVariant exp)
     }
     check(xx == cnt, "x/x == 1 (field)");
 
-    // Inf / NaN table
-    check(alg_div1(cf, 1, 0) == cf.inf_code, "1/0 = Inf");
-    check(alg_div1(cf, 1, cf.inf_code) == 0, "1/Inf = 0");
+    // Inf / NaN table. The leaf ops are templated on the payload type U; pass
+    // u64-typed arguments so U deduces to u64 here (raw int literals would deduce
+    // a signed U with no wider_t mapping).
+    check(alg_div1(cf, u64{1}, u64{0}) == cf.inf_code, "1/0 = Inf");
+    check(alg_div1(cf, u64{1}, cf.inf_code) == 0, "1/Inf = 0");
     check(alg_add1(cf, cf.inf_code, cf.inf_code) == cf.nan_code, "Inf+Inf = NaN");
-    check(alg_mul1(cf, 0, cf.inf_code) == cf.nan_code, "0*Inf = NaN");
-    check(alg_add1(cf, cf.nan_code, 5) == cf.nan_code, "NaN absorbs");
+    check(alg_mul1(cf, u64{0}, cf.inf_code) == cf.nan_code, "0*Inf = NaN");
+    check(alg_add1(cf, cf.nan_code, u64{5}) == cf.nan_code, "NaN absorbs");
 
     // exp homomorphism (SophieGermain variant, >= 8 bits): exp(a+b) = exp(a)*exp(b)
     check(ce.two_moduli, "SophieGermain variant has exp at this width");
@@ -99,7 +101,7 @@ static void test_width(const char* name, AlgVariant field, AlgVariant exp)
         eh += alg_exp1(ce, alg_add1(ce, a, b)) == alg_mul1(ce, alg_exp1(ce, a), alg_exp1(ce, b));
     }
     check(eh == en, "exp(a+b)=exp(a)*exp(b) (CRT)");
-    check(alg_exp1(ce, 0) == 1, "exp(0)=1");
+    check(alg_exp1(ce, u64{0}) == 1, "exp(0)=1");
 
     // exp2 is a second homomorphism on the same channel; log2 inverts it
     long e2 = 0, l2 = 0;
@@ -116,8 +118,8 @@ static void test_width(const char* name, AlgVariant field, AlgVariant exp)
     }
     check(e2 == en, "exp2(a+b)=exp2(a)*exp2(b) (CRT)");
     check(l2 == en, "exp2(log2(exp2 v))=exp2 v (log2 inverts exp2)");
-    check(alg_exp2_1(ce, 0) == 1, "exp2(0)=1");
-    check(alg_exp2_1(ce, 1) != alg_exp1(ce, 1), "exp2 != exp (distinct base change)");
+    check(alg_exp2_1(ce, u64{0}) == 1, "exp2(0)=1");
+    check(alg_exp2_1(ce, u64{1}) != alg_exp1(ce, u64{1}), "exp2 != exp (distinct base change)");
 
     // Field variant does NOT get the homomorphism (hash-based tag)
     check(!cf.two_moduli, "Field variant has no exp");

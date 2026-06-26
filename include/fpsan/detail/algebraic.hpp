@@ -50,6 +50,52 @@ namespace fpsan
         using u64  = std::uint64_t;
         using u128 = unsigned __int128;
 
+        // ---- per-width integer traits for the modular layer ----------------------
+        // The modular arithmetic only ever needs a "2x-widened" type to hold a
+        // transient product a*b (< n^2 < 2^(2w)); everything else stays in the
+        // natural payload type U (the bits element type, e.g. uint16_t for
+        // _Float16). Keeping U narrow -- instead of widening every lane to u64 with a
+        // u128 intermediate -- keeps register pressure proportional to the float
+        // width, which matters on 32-bit-register GPUs. The residues and the two
+        // sentinels (n = Inf, n+1 = NaN) all fit in U by construction: the Field
+        // primes are chosen just below 2^w leaving >= 2 free codes.
+        //
+        //   wider_t<U>:        uint8->uint16, uint16->uint32, uint32->uint64,
+        //                      uint64->unsigned __int128  (for a*b products)
+        //   signed_wide_t<U>:  int16 / int32 / int64 / __int128
+        //                      (for the Bezout coefficients in extended Euclid;
+        //                       bounded by n in magnitude, so signed-2x is exact)
+        template <class U>
+        struct alg_wider;
+        template <>
+        struct alg_wider<std::uint8_t>
+        {
+            using type        = std::uint16_t;
+            using signed_type = std::int16_t;
+        };
+        template <>
+        struct alg_wider<std::uint16_t>
+        {
+            using type        = std::uint32_t;
+            using signed_type = std::int32_t;
+        };
+        template <>
+        struct alg_wider<std::uint32_t>
+        {
+            using type        = std::uint64_t;
+            using signed_type = std::int64_t;
+        };
+        template <>
+        struct alg_wider<std::uint64_t>
+        {
+            using type        = unsigned __int128;
+            using signed_type = __int128;
+        };
+        template <class U>
+        using wider_t = typename alg_wider<U>::type;
+        template <class U>
+        using signed_wide_t = typename alg_wider<U>::signed_type;
+
         // The divergence point inside this implementation layer. The public
         // Semantics names are mapped onto these internal variants in value.hpp;
         // keeping the enum here avoids depending on value.hpp from this detail
@@ -293,20 +339,21 @@ namespace fpsan
             bool     format_nan_as_neg_zero = false;
         };
 
-        // Modular multiply through a 128-bit intermediate, so it is correct for
-        // moduli all the way up to ~2^64 (64-bit element types), not just n < 2^32
-        // where a u64 product sufficed.
+        // Modular multiply through a 2x-widened intermediate: the only product in
+        // the modular layer that can exceed the payload type. For U = u64 this is
+        // the old u128 path (n up to ~2^64); for narrower U it stays in the
+        // matching narrow widened type (uint16/uint32/uint64), so f8/f16/f32 never
+        // touch 64/128-bit arithmetic here. Inputs are residues in [0, n).
+        template <class U>
+        FPSAN_HOST_DEVICE constexpr U alg_mulmod(U a, U b, U n)
+        {
+            return (U)(((wider_t<U>)a * (wider_t<U>)b) % n);
+        }
+        // u64-typed convenience overload for the cast tower and discrete-log helpers
+        // (alg_cast1, alg_dlog_*), which operate on u64 fields throughout.
         FPSAN_HOST_DEVICE constexpr u64 alg_mulmod(u64 a, u64 b, u64 n)
         {
-            // Avoid emitting 128-bit remainder helpers for small FPSan moduli; once
-            // reduced, the product fits in u64 and gives the same result.
-            if(n <= 0xffffffffull)
-            {
-                a %= n;
-                b %= n;
-                return (a * b) % n;
-            }
-            return (u64)(((u128)a * (u128)b) % n);
+            return alg_mulmod<u64>(a, b, n);
         }
 
         template <class ElementType>
@@ -366,51 +413,80 @@ namespace fpsan
         // exceed 2^64, so a u64 wrap (s < a) must be handled like the s >= n case --
         // s - n then yields the correct residue modulo 2^64. (For n < 2^32, as in the
         // narrower widths, the wrap never happens and this matches the old s>=n form.)
-        FPSAN_HOST_DEVICE constexpr u64 alg_addmod(u64 a, u64 b, u64 n)
+        // addmod stays entirely in the narrow type U: a + b can be up to 2n-2,
+        // which overflows U when n is near 2^w, but the wrap check (s < a) detects
+        // exactly that overflow -- the same trick the u64 code used for n near 2^64
+        // -- so s - n recovers the right residue modulo 2^w. No widening needed.
+        template <class U>
+        FPSAN_HOST_DEVICE constexpr U alg_addmod(U a, U b, U n)
         {
-            u64 s = a + b;
-            return (s < a || s >= n) ? s - n : s;
+            U s = (U)(a + b);
+            return (s < a || s >= n) ? (U)(s - n) : s;
         }
-        FPSAN_HOST_DEVICE constexpr u64 alg_submod(u64 a, u64 b, u64 n)
+        template <class U>
+        FPSAN_HOST_DEVICE constexpr U alg_submod(U a, U b, U n)
         {
-            return (a >= b) ? (a - b) : (n - (b - a)); // a, b in [0, n): no overflow
+            return (a >= b) ? (U)(a - b) : (U)(n - (b - a)); // a, b in [0, n): no overflow
         }
-        FPSAN_HOST_DEVICE constexpr u64 alg_powmod(u64 b, u64 e, u64 n)
+        template <class U>
+        FPSAN_HOST_DEVICE constexpr U alg_powmod(U b, U e, U n)
         {
-            u64 r = 1 % n;
-            b %= n;
+            U r = (U)(1 % n);
+            b   = (U)(b % n);
             while(e)
             {
                 if(e & 1)
-                    r = alg_mulmod(r, b, n);
-                b = alg_mulmod(b, b, n);
+                    r = alg_mulmod<U>(r, b, n);
+                b = alg_mulmod<U>(b, b, n);
                 e >>= 1;
             }
             return r;
+        }
+        // u64-typed convenience overloads (cast tower / discrete-log helpers).
+        FPSAN_HOST_DEVICE constexpr u64 alg_addmod(u64 a, u64 b, u64 n)
+        {
+            return alg_addmod<u64>(a, b, n);
+        }
+        FPSAN_HOST_DEVICE constexpr u64 alg_submod(u64 a, u64 b, u64 n)
+        {
+            return alg_submod<u64>(a, b, n);
+        }
+        FPSAN_HOST_DEVICE constexpr u64 alg_powmod(u64 b, u64 e, u64 n)
+        {
+            return alg_powmod<u64>(b, e, n);
         }
         // Returns the inverse, or n (an out-of-range sentinel) if a is a non-unit.
         // Remainders stay in u64 (< n <= ~2^64); the Bezout coefficients are kept in
         // a signed 128-bit type so this is exact for moduli up to ~2^64 -- the old
         // int64 coefficients overflowed once n exceeded 2^63.
-        FPSAN_HOST_DEVICE constexpr u64 alg_inv(u64 a, u64 n)
+        // Remainders stay in U (< n <= ~2^w); the Bezout coefficients are kept in
+        // the SIGNED 2x-widened type so this is exact for moduli up to ~2^w -- a
+        // signed type the same width as U could overflow once n exceeds 2^(w-1).
+        template <class U>
+        FPSAN_HOST_DEVICE constexpr U alg_inv(U a, U n)
         {
-            __int128 t = 0, newt = 1;
-            u64      r = n, newr = a % n;
+            using S = signed_wide_t<U>;
+            S t = 0, newt = 1;
+            U r = n, newr = (U)(a % n);
             while(newr != 0)
             {
-                u64      q   = r / newr;
-                __int128 tmp = t - (__int128)q * newt;
-                t            = newt;
-                newt         = tmp;
-                u64 rr       = r - q * newr;
-                r            = newr;
-                newr         = rr;
+                U q   = (U)(r / newr);
+                S tmp = (S)(t - (S)q * newt);
+                t     = newt;
+                newt  = tmp;
+                U rr  = (U)(r - (U)(q * newr));
+                r     = newr;
+                newr  = rr;
             }
             if(r != 1)
                 return n; // not invertible (zero-divisor)
             if(t < 0)
-                t += (__int128)n;
-            return (u64)t;
+                t += (S)n;
+            return (U)t;
+        }
+        FPSAN_HOST_DEVICE constexpr u64 alg_inv(u64 a, u64 n)
+        {
+            return alg_inv<u64>(a, n);
         }
 
         // A cheap operation-tagged scramble: the "free generator" for operations
@@ -426,112 +502,131 @@ namespace fpsan
 
         // ---- scalar payload ops on residues (incl. the Inf/NaN projective rules) -
         // Codes: [0,n) finite; n = Inf; n+1 = NaN.
-        FPSAN_HOST_DEVICE constexpr bool alg_is_inf(const AlgConfig& c, u64 p)
+        //
+        // These leaf ops are templated on the payload type U (the bits element type,
+        // e.g. uint16_t for _Float16). The AlgConfig stores its fields as u64; each
+        // op casts the fields it needs (n, inf_code = n, nan_code = n+1, g, d, inv2,
+        // ...) down to U. This is safe because every residue and sentinel is < 2^w
+        // by construction (the prime n sits just below 2^w with >= 2 free codes, so
+        // n and n+1 still fit in U). Default U = u64 keeps the external u64 callers
+        // (proto test, cast tower) working unchanged.
+        template <class U = u64>
+        FPSAN_HOST_DEVICE constexpr bool alg_is_inf(const AlgConfig& c, U p)
         {
-            return p == c.inf_code;
+            return p == (U)c.inf_code;
         }
-        FPSAN_HOST_DEVICE constexpr bool alg_is_nan(const AlgConfig& c, u64 p)
+        template <class U = u64>
+        FPSAN_HOST_DEVICE constexpr bool alg_is_nan(const AlgConfig& c, U p)
         {
-            return p == c.nan_code;
+            return p == (U)c.nan_code;
         }
-        FPSAN_HOST_DEVICE constexpr bool alg_is_fin(const AlgConfig& c, u64 p)
+        template <class U = u64>
+        FPSAN_HOST_DEVICE constexpr bool alg_is_fin(const AlgConfig& c, U p)
         {
-            return p < c.n;
+            return p < (U)c.n;
         }
 
-        FPSAN_HOST_DEVICE constexpr u64 alg_neg1(const AlgConfig& c, u64 a)
+        template <class U = u64>
+        FPSAN_HOST_DEVICE constexpr U alg_neg1(const AlgConfig& c, U a)
         {
-            if(!alg_is_fin(c, a))
+            if(!alg_is_fin<U>(c, a))
                 return a; // -Inf == Inf (unsigned), -NaN == NaN
-            return a == 0 ? 0 : c.n - a;
+            return a == 0 ? (U)0 : (U)((U)c.n - a);
         }
-        FPSAN_HOST_DEVICE constexpr u64 alg_add1(const AlgConfig& c, u64 a, u64 b)
+        template <class U = u64>
+        FPSAN_HOST_DEVICE constexpr U alg_add1(const AlgConfig& c, U a, U b)
         {
-            if(alg_is_nan(c, a) || alg_is_nan(c, b))
-                return c.nan_code;
-            if(alg_is_inf(c, a) || alg_is_inf(c, b))
-                return (alg_is_inf(c, a) && alg_is_inf(c, b)) ? c.nan_code : c.inf_code;
-            return alg_addmod(a, b, c.n);
+            if(alg_is_nan<U>(c, a) || alg_is_nan<U>(c, b))
+                return (U)c.nan_code;
+            if(alg_is_inf<U>(c, a) || alg_is_inf<U>(c, b))
+                return (alg_is_inf<U>(c, a) && alg_is_inf<U>(c, b)) ? (U)c.nan_code : (U)c.inf_code;
+            return alg_addmod<U>(a, b, (U)c.n);
         }
-        FPSAN_HOST_DEVICE constexpr u64 alg_sub1(const AlgConfig& c, u64 a, u64 b)
+        template <class U = u64>
+        FPSAN_HOST_DEVICE constexpr U alg_sub1(const AlgConfig& c, U a, U b)
         {
-            return alg_add1(c, a, alg_neg1(c, b));
+            return alg_add1<U>(c, a, alg_neg1<U>(c, b));
         }
-        FPSAN_HOST_DEVICE constexpr u64 alg_mul1(const AlgConfig& c, u64 a, u64 b)
+        template <class U = u64>
+        FPSAN_HOST_DEVICE constexpr U alg_mul1(const AlgConfig& c, U a, U b)
         {
-            if(alg_is_nan(c, a) || alg_is_nan(c, b))
-                return c.nan_code;
-            const bool ai = alg_is_inf(c, a), bi = alg_is_inf(c, b);
-            const bool az = (alg_is_fin(c, a) && a == 0), bz = (alg_is_fin(c, b) && b == 0);
+            if(alg_is_nan<U>(c, a) || alg_is_nan<U>(c, b))
+                return (U)c.nan_code;
+            const bool ai = alg_is_inf<U>(c, a), bi = alg_is_inf<U>(c, b);
+            const bool az = (alg_is_fin<U>(c, a) && a == 0), bz = (alg_is_fin<U>(c, b) && b == 0);
             if(ai || bi)
-                return (az || bz) ? c.nan_code : c.inf_code; // 0*Inf -> NaN
-            return alg_mulmod(a, b, c.n);
+                return (az || bz) ? (U)c.nan_code : (U)c.inf_code; // 0*Inf -> NaN
+            return alg_mulmod<U>(a, b, (U)c.n);
         }
-        FPSAN_HOST_DEVICE constexpr u64 alg_div1(const AlgConfig& c, u64 a, u64 b)
+        template <class U = u64>
+        FPSAN_HOST_DEVICE constexpr U alg_div1(const AlgConfig& c, U a, U b)
         {
-            if(alg_is_nan(c, a) || alg_is_nan(c, b))
-                return c.nan_code;
-            const bool ai = alg_is_inf(c, a), bi = alg_is_inf(c, b);
+            if(alg_is_nan<U>(c, a) || alg_is_nan<U>(c, b))
+                return (U)c.nan_code;
+            const bool ai = alg_is_inf<U>(c, a), bi = alg_is_inf<U>(c, b);
             if(ai && bi)
-                return c.nan_code; // Inf/Inf
+                return (U)c.nan_code; // Inf/Inf
             if(ai)
-                return c.inf_code; // Inf/finite
+                return (U)c.inf_code; // Inf/finite
             if(bi)
-                return 0; // finite/Inf -> 0
+                return (U)0; // finite/Inf -> 0
             if(b == 0)
-                return a == 0 ? c.nan_code : c.inf_code; // 0/0 -> NaN, x/0 -> Inf
-            const u64 inv = alg_inv(b, c.n);
-            if(inv == c.n)
-                return c.nan_code; // zero-divisor (CRT variant) -> poison
-            return alg_mulmod(a, inv, c.n);
+                return a == 0 ? (U)c.nan_code : (U)c.inf_code; // 0/0 -> NaN, x/0 -> Inf
+            const U inv = alg_inv<U>(b, (U)c.n);
+            if(inv == (U)c.n)
+                return (U)c.nan_code; // zero-divisor (CRT variant) -> poison
+            return alg_mulmod<U>(a, inv, (U)c.n);
         }
-        FPSAN_HOST_DEVICE constexpr u64 alg_fast_div1(const AlgConfig& c, u64 a, u64 b)
+        template <class U = u64>
+        FPSAN_HOST_DEVICE constexpr U alg_fast_div1(const AlgConfig& c, U a, U b)
         {
-            if(alg_is_nan(c, a) || alg_is_nan(c, b))
-                return c.nan_code;
-            const bool ai = alg_is_inf(c, a), bi = alg_is_inf(c, b);
+            if(alg_is_nan<U>(c, a) || alg_is_nan<U>(c, b))
+                return (U)c.nan_code;
+            const bool ai = alg_is_inf<U>(c, a), bi = alg_is_inf<U>(c, b);
             if(ai && bi)
-                return c.nan_code; // Inf/Inf
+                return (U)c.nan_code; // Inf/Inf
             if(ai)
-                return c.inf_code; // Inf/finite
+                return (U)c.inf_code; // Inf/finite
             if(bi)
-                return 0; // finite/Inf -> 0
+                return (U)0; // finite/Inf -> 0
             if(b == 0)
-                return a == 0 ? c.nan_code : c.inf_code; // 0/0 -> NaN, x/0 -> Inf
+                return a == 0 ? (U)c.nan_code : (U)c.inf_code; // 0/0 -> NaN, x/0 -> Inf
             if(a == 0)
-                return 0; // zero divided by a finite nonzero value stays zero
+                return (U)0; // zero divided by a finite nonzero value stays zero
             if(b == 1)
                 return a; // x/1 stays x without paying for an inverse
-            return alg_tag(0x646976ull /*"div"*/,
-                           alg_addmod(a, alg_tag(0x6279ull /*"by"*/, b, c.n), c.n),
-                           c.n);
+            return (U)alg_tag(0x646976ull /*"div"*/,
+                              alg_addmod<u64>(a, alg_tag(0x6279ull /*"by"*/, b, c.n), c.n),
+                              c.n);
         }
-        FPSAN_HOST_DEVICE constexpr u64 alg_exp1(const AlgConfig& c, u64 a)
+        template <class U = u64>
+        FPSAN_HOST_DEVICE constexpr U alg_exp1(const AlgConfig& c, U a)
         {
-            if(!alg_is_fin(c, a))
-                return c.nan_code; // exp(Inf) ambiguous (unsigned), exp(NaN)=NaN
+            if(!alg_is_fin<U>(c, a))
+                return (U)c.nan_code; // exp(Inf) ambiguous (unsigned), exp(NaN)=NaN
             if(c.two_moduli)
-                return alg_powmod(c.g, a % c.d, c.n); // g^(v mod d): the homomorphism
-            return alg_tag(/*tag "exp"*/ 0x657870ull, a, c.n);
+                return alg_powmod<U>((U)c.g, (U)(a % (U)c.d), (U)c.n); // g^(v mod d)
+            return (U)alg_tag(/*tag "exp"*/ 0x657870ull, a, c.n);
         }
 
         // phi_n of a raw float bit-pattern of the element type (one lane).
-        FPSAN_HOST_DEVICE constexpr u64 alg_embed1(const AlgConfig& c, u64 raw)
+        template <class U = u64>
+        FPSAN_HOST_DEVICE constexpr U alg_embed1(const AlgConfig& c, U raw)
         {
-            const u64 sign      = (raw >> (c.bit_width - 1)) & 1;
-            const u64 expf      = (raw >> c.mant_bits) & c.exp_max;
-            const u64 mantf     = raw & c.mant_mask;
-            const u64 sign_mask = u64{1} << (c.bit_width - 1);
+            const U sign      = (U)((raw >> (c.bit_width - 1)) & 1);
+            const U expf      = (U)((raw >> c.mant_bits) & (U)c.exp_max);
+            const U mantf     = (U)(raw & (U)c.mant_mask);
+            const U sign_mask = (U)(U{1} << (c.bit_width - 1));
             if(c.format_has_nan && c.format_nan_as_neg_zero && raw == sign_mask)
-                return c.nan_code;
-            if(expf == c.exp_max)
+                return (U)c.nan_code;
+            if(expf == (U)c.exp_max)
             {
                 if(c.format_has_infinity)
-                    return mantf == 0 ? c.inf_code : c.nan_code;
-                if(c.format_has_nan && !c.format_nan_as_neg_zero && mantf == c.mant_mask)
-                    return c.nan_code;
+                    return mantf == 0 ? (U)c.inf_code : (U)c.nan_code;
+                if(c.format_has_nan && !c.format_nan_as_neg_zero && mantf == (U)c.mant_mask)
+                    return (U)c.nan_code;
             }
-            u64 mag = 0;
+            U   mag = 0;
             int e   = 0;
             if(expf == 0)
             {
@@ -542,13 +637,14 @@ namespace fpsan
             }
             else
             {
-                mag = (u64{1} << c.mant_bits) | mantf;
+                mag = (U)((U{1} << c.mant_bits) | mantf);
                 e   = (int)expf - c.bias - (int)c.mant_bits;
             }
-            u64 r  = mag % c.n;
-            u64 pw = e >= 0 ? alg_powmod(2, (u64)e, c.n) : alg_powmod(c.inv2, (u64)(-e), c.n);
-            r      = alg_mulmod(r, pw, c.n);
-            return sign ? (r == 0 ? 0 : c.n - r) : r;
+            U r  = (U)(mag % (U)c.n);
+            U pw = e >= 0 ? alg_powmod<U>((U)2, (U)e, (U)c.n)
+                          : alg_powmod<U>((U)c.inv2, (U)(-e), (U)c.n);
+            r    = alg_mulmod<U>(r, pw, (U)c.n);
+            return sign ? (U)(r == 0 ? 0 : (U)c.n - r) : r;
         }
 
         // phi_n^{-1} is NOT well-defined (the residue does not determine the value),
@@ -558,36 +654,42 @@ namespace fpsan
         // A finite residue is returned as-is (a deterministic but meaningless bit
         // pattern).
         // Algebraic Values are meant to be compared by payload, not unembedded.
-        FPSAN_HOST_DEVICE constexpr u64 alg_unembed1(const AlgConfig& c, u64 p)
+        template <class U = u64>
+        FPSAN_HOST_DEVICE constexpr U alg_unembed1(const AlgConfig& c, U p)
         {
-            const u64 sign_mask = u64{1} << (c.bit_width - 1);
-            const u64 nan_bits
-                = c.format_nan_as_neg_zero ? sign_mask : ((c.exp_max << c.mant_bits) | c.mant_mask);
-            if(c.has_inf_nan && p == c.inf_code)
+            const U sign_mask = (U)(U{1} << (c.bit_width - 1));
+            const U nan_bits  = c.format_nan_as_neg_zero
+                                    ? sign_mask
+                                    : (U)(((U)c.exp_max << c.mant_bits) | (U)c.mant_mask);
+            if(c.has_inf_nan && p == (U)c.inf_code)
             {
                 if(c.format_has_infinity)
-                    return c.exp_max << c.mant_bits; // +Inf
+                    return (U)((U)c.exp_max << c.mant_bits); // +Inf
                 if(c.format_has_nan)
                     return nan_bits;
             }
-            if(c.has_inf_nan && p == c.nan_code)
-                return c.format_has_nan ? nan_bits : 0;
-            const u64 width_mask = (c.bit_width >= 64) ? ~u64{0} : ((u64{1} << c.bit_width) - 1);
-            return p & width_mask;
+            if(c.has_inf_nan && p == (U)c.nan_code)
+                return c.format_has_nan ? nan_bits : (U)0;
+            const U width_mask
+                = (c.bit_width >= (sizeof(U) * 8)) ? (U)~U{0} : (U)((U{1} << c.bit_width) - 1);
+            return (U)(p & width_mask);
         }
 
         // ---- vector wrappers: apply the scalar core lane-wise (cf. ring_div) -----
+        // The lambdas below pass the NATURAL lane element type L (the bits element
+        // type, e.g. uint16_t for _Float16) to op, not u64 -- so the templated leaf
+        // ops instantiate at the narrow width and never widen a lane to u64.
         template <class Bits, class Op>
         FPSAN_HOST_DEVICE constexpr Bits alg_lanewise1(Bits a, Op op)
         {
             if constexpr(!is_clang_vector_v<Bits>)
-                return static_cast<Bits>(op((u64)a));
+                return static_cast<Bits>(op(a));
             else
             {
                 using L = bits_lane_t<Bits>;
                 Bits out{};
                 for(unsigned i = 0; i < sizeof(Bits) / sizeof(L); ++i)
-                    out[i] = static_cast<L>(op((u64)a[i]));
+                    out[i] = static_cast<L>(op(static_cast<L>(a[i])));
                 return out;
             }
         }
@@ -595,13 +697,13 @@ namespace fpsan
         FPSAN_HOST_DEVICE constexpr Bits alg_lanewise2(Bits a, Bits b, Op op)
         {
             if constexpr(!is_clang_vector_v<Bits>)
-                return static_cast<Bits>(op((u64)a, (u64)b));
+                return static_cast<Bits>(op(a, b));
             else
             {
                 using L = bits_lane_t<Bits>;
                 Bits out{};
                 for(unsigned i = 0; i < sizeof(Bits) / sizeof(L); ++i)
-                    out[i] = static_cast<L>(op((u64)a[i], (u64)b[i]));
+                    out[i] = static_cast<L>(op(static_cast<L>(a[i]), static_cast<L>(b[i])));
                 return out;
             }
         }
@@ -609,47 +711,47 @@ namespace fpsan
         template <class Bits>
         FPSAN_HOST_DEVICE constexpr Bits alg_embed(const AlgConfig& c, Bits raw)
         {
-            return alg_lanewise1(raw, [&](u64 x) { return alg_embed1(c, x); });
+            return alg_lanewise1(raw, [&](auto x) { return alg_embed1(c, x); });
         }
         template <class Bits>
         FPSAN_HOST_DEVICE constexpr Bits alg_unembed(const AlgConfig& c, Bits p)
         {
-            return alg_lanewise1(p, [&](u64 x) { return alg_unembed1(c, x); });
+            return alg_lanewise1(p, [&](auto x) { return alg_unembed1(c, x); });
         }
         template <class Bits>
         FPSAN_HOST_DEVICE constexpr Bits alg_add(const AlgConfig& c, Bits a, Bits b)
         {
-            return alg_lanewise2(a, b, [&](u64 x, u64 y) { return alg_add1(c, x, y); });
+            return alg_lanewise2(a, b, [&](auto x, auto y) { return alg_add1(c, x, y); });
         }
         template <class Bits>
         FPSAN_HOST_DEVICE constexpr Bits alg_sub(const AlgConfig& c, Bits a, Bits b)
         {
-            return alg_lanewise2(a, b, [&](u64 x, u64 y) { return alg_sub1(c, x, y); });
+            return alg_lanewise2(a, b, [&](auto x, auto y) { return alg_sub1(c, x, y); });
         }
         template <class Bits>
         FPSAN_HOST_DEVICE constexpr Bits alg_mul(const AlgConfig& c, Bits a, Bits b)
         {
-            return alg_lanewise2(a, b, [&](u64 x, u64 y) { return alg_mul1(c, x, y); });
+            return alg_lanewise2(a, b, [&](auto x, auto y) { return alg_mul1(c, x, y); });
         }
         template <class Bits>
         FPSAN_HOST_DEVICE constexpr Bits alg_div(const AlgConfig& c, Bits a, Bits b)
         {
-            return alg_lanewise2(a, b, [&](u64 x, u64 y) { return alg_div1(c, x, y); });
+            return alg_lanewise2(a, b, [&](auto x, auto y) { return alg_div1(c, x, y); });
         }
         template <class Bits>
         FPSAN_HOST_DEVICE constexpr Bits alg_fast_div(const AlgConfig& c, Bits a, Bits b)
         {
-            return alg_lanewise2(a, b, [&](u64 x, u64 y) { return alg_fast_div1(c, x, y); });
+            return alg_lanewise2(a, b, [&](auto x, auto y) { return alg_fast_div1(c, x, y); });
         }
         template <class Bits>
         FPSAN_HOST_DEVICE constexpr Bits alg_neg(const AlgConfig& c, Bits a)
         {
-            return alg_lanewise1(a, [&](u64 x) { return alg_neg1(c, x); });
+            return alg_lanewise1(a, [&](auto x) { return alg_neg1(c, x); });
         }
         template <class Bits>
         FPSAN_HOST_DEVICE constexpr Bits alg_exp(const AlgConfig& c, Bits a)
         {
-            return alg_lanewise1(a, [&](u64 x) { return alg_exp1(c, x); });
+            return alg_lanewise1(a, [&](auto x) { return alg_exp1(c, x); });
         }
 
         // Op-tagged free generator for operations with no honored identity in the
