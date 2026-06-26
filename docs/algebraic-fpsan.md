@@ -52,7 +52,7 @@ inside their supported algebraic fragment.
 
 ```mermaid
 flowchart LR
-  root{Need Triton FPSan compatibility?}
+  root{"Want to treat only -1, 0, +1 as actual values, and every other constant as indeterminates, like Triton?"}
   root -- Yes --> triton[Semantics::Triton]
   root -- No --> start[Semantics::Field]
 
@@ -67,7 +67,7 @@ flowchart LR
   perf -- Yes --> aFastSwitch
   perf -- No --> zExtra
 
-  aFastSwitch --> still{Still too slow? Or need exp/log/sin/cos laws?}
+  aFastSwitch --> still{Still too slow? Or need exp/sin/cos laws?}
   subgraph fastChoices[" "]
     direction TB
     triton
@@ -79,7 +79,7 @@ flowchart LR
 
   zExtra -- Multiplicative casts --> mul[Semantics::FieldWithMulCasts]
   zExtra -- Exp/log laws --> sg[Semantics::SophieGermainRing]
-  zExtra -- sin/cos laws --> py[Semantics::PythagoreanRing]
+  zExtra -- exp/log/sin/cos laws --> py[Semantics::PythagoreanRing]
   zExtra -- No --> field[Semantics::Field]
 
   classDef triton fill:#fff4d6,stroke:#a66a00,color:#2f2300;
@@ -226,14 +226,10 @@ Markers:
 | `erf`, `tanh`, `floor`, `ceil`, unmodeled externs | tag | tag | tag | tag | tag | tag |
 | **Performance overhead**, lower is better; relative to native; measured on x86 CPU and AMD RDNA4 | | | | | | |
 | f32 `+ - *` hot loops | ✅ ~1x | ✅ <10x | ✅ <10x | ✅ <10x | ✅ <10x | ✅ <10x |
-| f32 division hot loops | ✅ <10x | ⚠️ 10-100x | ✅ <10x tag | ⚠️ 10-100x | ⚠️ 10-100x | ⚠️ 10-100x |
-| f32 `sqrt` hot loops | ✅ <10x tag | ⚠️ 100-1000x | ✅ <10x tag | ⚠️ 100-1000x | ⚠️ 100-1000x | ⚠️ 100-1000x |
+| f32 division hot loops | ✅ <10x | ✅ <10x | ✅ <10x tag | ✅ <10x | ✅ <10x | ✅ <10x |
+| f32 `sqrt` hot loops | ✅ <10x tag | ⚠️ 10-100x | ✅ <10x tag | ⚠️ 10-100x | ⚠️ 10-100x | ⚠️ 10-100x |
 | fp8/f16↔f32 casts | ✅ <10x | ✅ <10x | ✅ <10x | ❌ CPU ~100x<br>RDNA4 ~10,000x | ✅ <10x | ✅ <10x |
 | f32↔f64 casts | ✅ <10x | ✅ <10x | ✅ <10x | ❌ CPU ~10,000x<br>RDNA4 ~100,000x | ✅ <10x | ✅ <10x |
-| **Other behavior** | | | | | | |
-| `min`/`max`/comparisons follow IEEE-754 numeric order | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
-| subnormals need special handling | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
-| finite leaf-collision risk | fixed by scramble | rerollable | rerollable | rerollable | rerollable | rerollable |
 
 Notes:
 
@@ -255,17 +251,13 @@ Notes:
   `e4m3`↔`e5m2`. Triton casts, `Semantics::Field`/`FieldFast` casts, and the
   composite algebraic casts are cheap integer conventions.
 - Core `+ - *` arithmetic remains under 10x native in the microbenchmarks.
-  Faithful division usually costs tens of x, while faithful algebraic roots can
-  reach hundreds of x or more, especially on RDNA4.
+  Faithful division is also under 10x; faithful algebraic roots cost tens of x.
 - `sqrt` is multiplicative in the faithful algebraic semantics. `FieldFast` makes it
   a tag; in the other algebraic semantics, the stronger round trip
   `sqrt(x)^2 == x` holds on square residues. That is about half of a prime
   field; in the composite ring modes the condition is componentwise.
 - `tag` means the function is still deterministic and operation-distinguishing.
   It simply does not claim an identity such as `log(x*y) == log(x)+log(y)`.
-- No finite ring has a total order compatible with its arithmetic. All
-  FPSan-family semantics therefore make `min`, `max`, and comparisons deterministic
-  fingerprint-order operations, not IEEE-754 numeric-order operations.
 
 ## Limits to keep in mind
 
