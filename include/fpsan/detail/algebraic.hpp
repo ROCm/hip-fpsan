@@ -47,6 +47,7 @@ namespace fpsan
 {
     namespace detail
     {
+        using u32  = std::uint32_t;
         using u64  = std::uint64_t;
         using u128 = unsigned __int128;
 
@@ -491,13 +492,40 @@ namespace fpsan
 
         // A cheap operation-tagged scramble: the "free generator" for operations
         // with no honored identity in the selected algebraic semantics.
-        FPSAN_HOST_DEVICE constexpr u64 alg_tag(u64 op_tag, u64 payload, u64 n)
+        // For <=32-bit element widths the 32-bit murmur3 finalizer is a bijection
+        // over the payload domain, so its residue mod n is as uniform -- the
+        // collision rate is set by n, not the mixer width -- as the 64-bit
+        // splitmix64 used at 64 bits, at ~1/3 the GPU registers (op_tag is folded
+        // to 32 bits). The 64-bit path is unchanged, so f64 tags are bit-identical;
+        // <=32-bit tag fingerprints are rerolled (still deterministic, op-distinct,
+        // same collision rate -- tags carry no algebraic identity, so the exact
+        // values are arbitrary).
+        template <class U>
+        FPSAN_HOST_DEVICE constexpr U alg_tag(u64 op_tag, U payload, U n)
         {
-            u64 z = (payload + 1) * 0x9E3779B97F4A7C15ull + op_tag;
+            if constexpr(sizeof(U) <= 4)
+            {
+                const u32 o = (u32)op_tag ^ (u32)(op_tag >> 32);
+                u32       z = (u32)payload + 1u;
+                z           = z * 0x9E3779B9u + o;
+                z ^= z >> 16;
+                z *= 0x85EBCA6Bu;
+                z ^= z >> 13;
+                z *= 0xC2B2AE35u;
+                z ^= z >> 16;
+                z ^= o * 0x85EBCA6Bu;
+                z ^= z >> 16;
+                z *= 0x85EBCA6Bu;
+                z ^= z >> 13;
+                z *= 0xC2B2AE35u;
+                z ^= z >> 16;
+                return (U)(z % (u32)n);
+            }
+            u64 z = ((u64)payload + 1) * 0x9E3779B97F4A7C15ull + op_tag;
             z     = (z ^ (z >> 30)) * 0xBF58476D1CE4E5B9ull;
             z     = (z ^ (z >> 27)) * 0x94D049BB133111EBull;
             z ^= z >> 31;
-            return z % n;
+            return (U)(z % n);
         }
 
         // ---- scalar payload ops on residues (incl. the Inf/NaN projective rules) -
@@ -595,9 +623,9 @@ namespace fpsan
                 return (U)0; // zero divided by a finite nonzero value stays zero
             if(b == 1)
                 return a; // x/1 stays x without paying for an inverse
-            return (U)alg_tag(0x646976ull /*"div"*/,
-                              alg_addmod<u64>(a, alg_tag(0x6279ull /*"by"*/, b, c.n), c.n),
-                              c.n);
+            return alg_tag<U>(0x646976ull /*"div"*/,
+                              alg_addmod<U>(a, alg_tag<U>(0x6279ull /*"by"*/, b, (U)c.n), (U)c.n),
+                              (U)c.n);
         }
         template <class U = u64>
         FPSAN_HOST_DEVICE constexpr U alg_exp1(const AlgConfig& c, U a)
@@ -606,7 +634,7 @@ namespace fpsan
                 return (U)c.nan_code; // exp(Inf) ambiguous (unsigned), exp(NaN)=NaN
             if(c.two_moduli)
                 return alg_powmod<U>((U)c.g, (U)(a % (U)c.d), (U)c.n); // g^(v mod d)
-            return (U)alg_tag(/*tag "exp"*/ 0x657870ull, a, c.n);
+            return alg_tag<U>(/*tag "exp"*/ 0x657870ull, a, (U)c.n);
         }
 
         // phi_n of a raw float bit-pattern of the element type (one lane).
@@ -757,14 +785,15 @@ namespace fpsan
         // Op-tagged free generator for operations with no honored identity in the
         // selected algebraic semantics: deterministic and op-distinct, but not an
         // algebraic law.
-        FPSAN_HOST_DEVICE constexpr u64 alg_tagged1(const AlgConfig& c, u64 a, u64 tag)
+        template <class U>
+        FPSAN_HOST_DEVICE constexpr U alg_tagged1(const AlgConfig& c, U a, u64 tag)
         {
-            return alg_is_fin(c, a) ? alg_tag(tag, a, c.n) : c.nan_code;
+            return alg_is_fin<U>(c, a) ? alg_tag<U>(tag, a, (U)c.n) : (U)c.nan_code;
         }
         template <class Bits>
         FPSAN_HOST_DEVICE constexpr Bits alg_tagged(const AlgConfig& c, Bits a, u64 tag)
         {
-            return alg_lanewise1(a, [&](u64 x) { return alg_tagged1(c, x, tag); });
+            return alg_lanewise1(a, [&](auto x) { return alg_tagged1(c, x, tag); });
         }
 
         // ---- multiplicative roots: sqrt, rsqrt, cbrt (power maps x^e on units) ----
@@ -798,7 +827,7 @@ namespace fpsan
         FPSAN_HOST_DEVICE constexpr U alg_cbrt1(const AlgConfig& c, U x)
         {
             if(!c.has_cbrt)
-                return (U)alg_tagged1(c, (u64)x, 0x63627274ull /*"cbrt"*/);
+                return alg_tagged1<U>(c, x, 0x63627274ull /*"cbrt"*/);
             if(alg_is_nan<U>(c, x))
                 return (U)c.nan_code;
             if(alg_is_inf<U>(c, x))
@@ -822,16 +851,17 @@ namespace fpsan
         }
 
         // Binary tag (e.g. fmod): deterministic in both operands.
-        FPSAN_HOST_DEVICE constexpr u64 alg_tagged2_1(const AlgConfig& c, u64 a, u64 b, u64 tag)
+        template <class U>
+        FPSAN_HOST_DEVICE constexpr U alg_tagged2_1(const AlgConfig& c, U a, U b, u64 tag)
         {
-            if(!alg_is_fin(c, a) || !alg_is_fin(c, b))
-                return c.nan_code;
-            return alg_tag(tag, alg_tag(tag, a, c.n) + b, c.n);
+            if(!alg_is_fin<U>(c, a) || !alg_is_fin<U>(c, b))
+                return (U)c.nan_code;
+            return alg_tag<U>(tag, (U)(alg_tag<U>(tag, a, (U)c.n) + b), (U)c.n);
         }
         template <class Bits>
         FPSAN_HOST_DEVICE constexpr Bits alg_tagged2(const AlgConfig& c, Bits a, Bits b, u64 tag)
         {
-            return alg_lanewise2(a, b, [&](u64 x, u64 y) { return alg_tagged2_1(c, x, y, tag); });
+            return alg_lanewise2(a, b, [&](auto x, auto y) { return alg_tagged2_1(c, x, y, tag); });
         }
 
         // Generic extern/libdevice fallback in the residue ring: a deterministic,
@@ -1149,7 +1179,7 @@ namespace fpsan
         FPSAN_HOST_DEVICE constexpr U alg_expb_1(const AlgConfig& c, U a, U K, u64 tag)
         {
             if(!c.two_moduli)
-                return (U)alg_tagged1(c, (u64)a, tag);
+                return alg_tagged1<U>(c, a, tag);
             if(!alg_is_fin<U>(c, a))
                 return (U)c.nan_code;
             // exponent (K * (a mod d)) mod d: the product needs the widened type.
@@ -1160,7 +1190,7 @@ namespace fpsan
         FPSAN_HOST_DEVICE constexpr U alg_logb_1(const AlgConfig& c, U r, U K, u64 tag)
         {
             if(!c.two_moduli)
-                return (U)alg_tagged1(c, (u64)r, tag);
+                return alg_tagged1<U>(c, r, tag);
             if(!alg_is_fin<U>(c, r))
                 return (U)c.nan_code;
             if(r == 0)
@@ -1256,7 +1286,7 @@ namespace fpsan
         FPSAN_HOST_DEVICE constexpr U alg_cos1(const AlgConfig& c, U r)
         {
             if(!c.has_sin_cos)
-                return (U)alg_tagged1(c, (u64)r, 0x636F73ull /*"cos"*/);
+                return alg_tagged1<U>(c, r, 0x636F73ull /*"cos"*/);
             if(!alg_is_fin<U>(c, r))
                 return (U)c.nan_code;
             return alg_rotor<U>(c, r).re;
@@ -1265,7 +1295,7 @@ namespace fpsan
         FPSAN_HOST_DEVICE constexpr U alg_sin1(const AlgConfig& c, U r)
         {
             if(!c.has_sin_cos)
-                return (U)alg_tagged1(c, (u64)r, 0x73696Eull /*"sin"*/);
+                return alg_tagged1<U>(c, r, 0x73696Eull /*"sin"*/);
             if(!alg_is_fin<U>(c, r))
                 return (U)c.nan_code;
             return alg_rotor<U>(c, r).im;
