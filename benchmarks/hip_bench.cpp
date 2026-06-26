@@ -67,16 +67,16 @@ namespace
         return acc ^ (bits + 0x9e3779b97f4a7c15ull + (acc << 6) + (acc >> 2));
     }
 
-    template <fpsan::Semantics S>
+    template <class FT, fpsan::Semantics S>
     __global__ void addmul_preembed_kernel(
-        const typename fpsan::Value<float, S, fpsan::Conversions::Explicit>::bits_type* a_in,
-        const typename fpsan::Value<float, S, fpsan::Conversions::Explicit>::bits_type* b_in,
-        const typename fpsan::Value<float, S, fpsan::Conversions::Explicit>::bits_type* c_in,
-        unsigned                                                                        input_mask,
-        unsigned long long*                                                             out,
-        int                                                                             iters)
+        const typename fpsan::Value<FT, S, fpsan::Conversions::Explicit>::bits_type* a_in,
+        const typename fpsan::Value<FT, S, fpsan::Conversions::Explicit>::bits_type* b_in,
+        const typename fpsan::Value<FT, S, fpsan::Conversions::Explicit>::bits_type* c_in,
+        unsigned                                                                     input_mask,
+        unsigned long long*                                                          out,
+        int                                                                          iters)
     {
-        using V                = fpsan::Value<float, S, fpsan::Conversions::Explicit>;
+        using V                = fpsan::Value<FT, S, fpsan::Conversions::Explicit>;
         const int          tid = blockIdx.x * blockDim.x + threadIdx.x;
         V                  x = V::from_storage_bits(a_in[static_cast<unsigned>(tid) & input_mask]);
         unsigned long long checksum = 0;
@@ -97,15 +97,15 @@ namespace
         out[tid] = checksum ^ storage_u64(x);
     }
 
-    template <fpsan::Semantics S>
+    template <class FT, fpsan::Semantics S>
     __global__ void div_preembed_kernel(
-        const typename fpsan::Value<float, S, fpsan::Conversions::Explicit>::bits_type* a_in,
-        const typename fpsan::Value<float, S, fpsan::Conversions::Explicit>::bits_type* b_in,
-        unsigned                                                                        input_mask,
-        unsigned long long*                                                             out,
-        int                                                                             iters)
+        const typename fpsan::Value<FT, S, fpsan::Conversions::Explicit>::bits_type* a_in,
+        const typename fpsan::Value<FT, S, fpsan::Conversions::Explicit>::bits_type* b_in,
+        unsigned                                                                     input_mask,
+        unsigned long long*                                                          out,
+        int                                                                          iters)
     {
-        using V                = fpsan::Value<float, S, fpsan::Conversions::Explicit>;
+        using V                = fpsan::Value<FT, S, fpsan::Conversions::Explicit>;
         const int          tid = blockIdx.x * blockDim.x + threadIdx.x;
         V                  x = V::from_storage_bits(a_in[static_cast<unsigned>(tid) & input_mask]);
         unsigned long long checksum = 0;
@@ -123,14 +123,14 @@ namespace
         out[tid] = checksum ^ storage_u64(x);
     }
 
-    template <fpsan::Semantics S>
+    template <class FT, fpsan::Semantics S>
     __global__ void sqrt_preembed_kernel(
-        const typename fpsan::Value<float, S, fpsan::Conversions::Explicit>::bits_type* a_in,
-        unsigned                                                                        input_mask,
-        unsigned long long*                                                             out,
-        int                                                                             iters)
+        const typename fpsan::Value<FT, S, fpsan::Conversions::Explicit>::bits_type* a_in,
+        unsigned                                                                     input_mask,
+        unsigned long long*                                                          out,
+        int                                                                          iters)
     {
-        using V                = fpsan::Value<float, S, fpsan::Conversions::Explicit>;
+        using V                = fpsan::Value<FT, S, fpsan::Conversions::Explicit>;
         const int          tid = blockIdx.x * blockDim.x + threadIdx.x;
         V                  x = V::from_storage_bits(a_in[static_cast<unsigned>(tid) & input_mask]);
         unsigned long long checksum = 0;
@@ -143,6 +143,62 @@ namespace
             checksum  = mix(checksum, storage_u64(x));
         }
         out[tid] = checksum ^ storage_u64(x);
+    }
+
+    // Generic unary transcendental kernel: applies Op to bounded array inputs
+    // (no accumulation, so the native baseline stays finite). Exercises the
+    // powmod (exp/log) and rotor (sin/cos) channels that arithmetic skips -- the
+    // paths where a per-width 128-bit regression is catastrophic on GPU.
+    struct OpExp
+    {
+        template <class V>
+        __device__ static V apply(V v)
+        {
+            return fpsan::exp(v);
+        }
+    };
+    struct OpLog
+    {
+        template <class V>
+        __device__ static V apply(V v)
+        {
+            return fpsan::log(v);
+        }
+    };
+    struct OpSin
+    {
+        template <class V>
+        __device__ static V apply(V v)
+        {
+            return fpsan::sin(v);
+        }
+    };
+    struct OpCos
+    {
+        template <class V>
+        __device__ static V apply(V v)
+        {
+            return fpsan::cos(v);
+        }
+    };
+    template <class FT, fpsan::Semantics S, class Op>
+    __global__ void unary_preembed_kernel(
+        const typename fpsan::Value<FT, S, fpsan::Conversions::Explicit>::bits_type* a_in,
+        unsigned                                                                     input_mask,
+        unsigned long long*                                                          out,
+        int                                                                          iters)
+    {
+        using V                     = fpsan::Value<FT, S, fpsan::Conversions::Explicit>;
+        const int          tid      = blockIdx.x * blockDim.x + threadIdx.x;
+        unsigned long long checksum = 0;
+        for(int i = 0; i < iters; ++i)
+        {
+            const unsigned ia
+                = (static_cast<unsigned>(tid) + 17u * static_cast<unsigned>(i)) & input_mask;
+            const V a = V::from_storage_bits(a_in[ia]);
+            checksum  = mix(checksum, storage_u64(Op::apply(a)));
+        }
+        out[tid] = checksum;
     }
 
     template <fpsan::Semantics S, class FromFT, class ToFT>
@@ -222,10 +278,10 @@ namespace
         return Result{group, case_name, semantics, ns_per_iter, count, iters, checksum};
     }
 
-    template <fpsan::Semantics S>
-    void run_arith_for_semantics(std::vector<Result>& results)
+    template <class FT, fpsan::Semantics S>
+    void run_arith_for_semantics(std::vector<Result>& results, const char* wtag)
     {
-        using V    = fpsan::Value<float, S, fpsan::Conversions::Explicit>;
+        using V    = fpsan::Value<FT, S, fpsan::Conversions::Explicit>;
         using Bits = typename V::bits_type;
 
         constexpr unsigned input_count = 4096;
@@ -233,9 +289,10 @@ namespace
         for(unsigned i = 0; i < input_count; ++i)
         {
             const float jitter = static_cast<float>((i * 37) % 997);
-            h_a[i]             = V(sample<float>(0.00011f + jitter * 1.0e-8f)).to_storage_bits();
-            h_b[i]             = V(sample<float>(0.99989f + jitter * 4.0e-8f)).to_storage_bits();
-            h_c[i]             = V(sample<float>(0.00003f + jitter * 1.0e-8f)).to_storage_bits();
+            h_a[i]             = V(sample<FT>(0.25f + jitter * 1.0e-4f))
+                         .to_storage_bits(); // (0,~0.35], ok sqrt/log
+            h_b[i] = V(sample<FT>(0.99989f + jitter * 4.0e-8f)).to_storage_bits();
+            h_c[i] = V(sample<FT>(0.00003f + jitter * 1.0e-8f)).to_storage_bits();
         }
 
         Bits* d_a = nullptr;
@@ -248,18 +305,42 @@ namespace
         HIP_CHECK(hipMemcpy(d_b, h_b.data(), h_b.size() * sizeof(Bits), hipMemcpyHostToDevice));
         HIP_CHECK(hipMemcpy(d_c, h_c.data(), h_c.size() * sizeof(Bits), hipMemcpyHostToDevice));
 
-        const char* s = fpsan::semantics_name(S);
+        const char* s  = fpsan::semantics_name(S);
+        auto        nm = [wtag](const char* op) { return std::string(wtag) + " " + op; };
+        results.push_back(run_gpu_case("arithmetic",
+                                       nm("add/mul/sub").c_str(),
+                                       s,
+                                       256,
+                                       256,
+                                       1024,
+                                       [=](unsigned long long* out) {
+                                           addmul_preembed_kernel<FT, S><<<256, 256>>>(
+                                               d_a, d_b, d_c, input_count - 1, out, 1024);
+                                       }));
         results.push_back(run_gpu_case(
-            "arithmetic", "f32 add/mul/sub", s, 256, 256, 1024, [=](unsigned long long* out) {
-                addmul_preembed_kernel<S><<<256, 256>>>(d_a, d_b, d_c, input_count - 1, out, 1024);
+            "arithmetic", nm("add/div").c_str(), s, 256, 256, 512, [=](unsigned long long* out) {
+                div_preembed_kernel<FT, S><<<256, 256>>>(d_a, d_b, input_count - 1, out, 512);
             }));
         results.push_back(run_gpu_case(
-            "arithmetic", "f32 add/div", s, 256, 256, 512, [=](unsigned long long* out) {
-                div_preembed_kernel<S><<<256, 256>>>(d_a, d_b, input_count - 1, out, 512);
+            "arithmetic", nm("add/sqrt").c_str(), s, 256, 256, 512, [=](unsigned long long* out) {
+                sqrt_preembed_kernel<FT, S><<<256, 256>>>(d_a, input_count - 1, out, 512);
+            }));
+        // exp/sin/cos exercise the powmod (exp) and rotor (sin/cos) channels --
+        // the bounded ~O(log n) loops where the 128-bit width regression lived.
+        // log is deliberately omitted on GPU: faithful log is a discrete-log
+        // SEARCH (Pollard rho), not a width-sensitive modexp, and its cost trips
+        // the GPU watchdog. It is measured on the host (cpu_bench) instead.
+        results.push_back(run_gpu_case(
+            "transcendental", nm("exp").c_str(), s, 256, 256, 64, [=](unsigned long long* out) {
+                unary_preembed_kernel<FT, S, OpExp><<<256, 256>>>(d_a, input_count - 1, out, 64);
             }));
         results.push_back(run_gpu_case(
-            "arithmetic", "f32 add/sqrt", s, 256, 256, 512, [=](unsigned long long* out) {
-                sqrt_preembed_kernel<S><<<256, 256>>>(d_a, input_count - 1, out, 512);
+            "transcendental", nm("sin").c_str(), s, 256, 256, 64, [=](unsigned long long* out) {
+                unary_preembed_kernel<FT, S, OpSin><<<256, 256>>>(d_a, input_count - 1, out, 64);
+            }));
+        results.push_back(run_gpu_case(
+            "transcendental", nm("cos").c_str(), s, 256, 256, 64, [=](unsigned long long* out) {
+                unary_preembed_kernel<FT, S, OpCos><<<256, 256>>>(d_a, input_count - 1, out, 64);
             }));
 
         HIP_CHECK(hipFree(d_a));
@@ -367,13 +448,20 @@ int main()
     std::vector<Result> results;
     results.reserve(80);
 
-    run_arith_for_semantics<fpsan::Semantics::Native>(results);
-    run_arith_for_semantics<fpsan::Semantics::Triton>(results);
-    run_arith_for_semantics<fpsan::Semantics::Field>(results);
-    run_arith_for_semantics<fpsan::Semantics::FieldFast>(results);
-    run_arith_for_semantics<fpsan::Semantics::FieldWithMulCasts>(results);
-    run_arith_for_semantics<fpsan::Semantics::SophieGermainRing>(results);
-    run_arith_for_semantics<fpsan::Semantics::PythagoreanRing>(results);
+    // Both a 32-bit and a 16-bit element width: the modular arithmetic narrows
+    // per width, so narrow types must be measured directly on the GPU (an
+    // f32-only suite hid a 128-bit regression in narrow widths and transcendentals).
+#define FPSAN_GPU_ARITH_ALL_SEMANTICS(FT, WTAG)                                      \
+    run_arith_for_semantics<FT, fpsan::Semantics::Native>(results, WTAG);            \
+    run_arith_for_semantics<FT, fpsan::Semantics::Triton>(results, WTAG);            \
+    run_arith_for_semantics<FT, fpsan::Semantics::Field>(results, WTAG);             \
+    run_arith_for_semantics<FT, fpsan::Semantics::FieldFast>(results, WTAG);         \
+    run_arith_for_semantics<FT, fpsan::Semantics::FieldWithMulCasts>(results, WTAG); \
+    run_arith_for_semantics<FT, fpsan::Semantics::SophieGermainRing>(results, WTAG); \
+    run_arith_for_semantics<FT, fpsan::Semantics::PythagoreanRing>(results, WTAG);
+    FPSAN_GPU_ARITH_ALL_SEMANTICS(float, "f32")
+    FPSAN_GPU_ARITH_ALL_SEMANTICS(_Float16, "f16")
+#undef FPSAN_GPU_ARITH_ALL_SEMANTICS
 
     run_casts_for_semantics<fpsan::Semantics::Native>(results);
     run_casts_for_semantics<fpsan::Semantics::Triton>(results);

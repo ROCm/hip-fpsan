@@ -774,48 +774,51 @@ namespace fpsan
         // sqrt(x)^2==x holds on the square residues (~1/2 of a prime field), and
         // cbrt(x)^3==x holds for ALL x where has_cbrt (3 coprime to the group
         // exponent). Where 3 divides it, cbrt falls back to a tag.
-        FPSAN_HOST_DEVICE constexpr u64 alg_sqrt1(const AlgConfig& c, u64 x)
+        template <class U>
+        FPSAN_HOST_DEVICE constexpr U alg_sqrt1(const AlgConfig& c, U x)
         {
-            if(alg_is_nan(c, x))
-                return c.nan_code;
-            if(alg_is_inf(c, x))
-                return c.inf_code; // sqrt(Inf) = Inf
-            return alg_powmod(x, c.sqrt_exp, c.n); // sqrt(0) = 0
+            if(alg_is_nan<U>(c, x))
+                return (U)c.nan_code;
+            if(alg_is_inf<U>(c, x))
+                return (U)c.inf_code; // sqrt(Inf) = Inf
+            return alg_powmod<U>(x, (U)c.sqrt_exp, (U)c.n); // sqrt(0) = 0
         }
-        FPSAN_HOST_DEVICE constexpr u64 alg_rsqrt1(const AlgConfig& c, u64 x)
+        template <class U>
+        FPSAN_HOST_DEVICE constexpr U alg_rsqrt1(const AlgConfig& c, U x)
         {
-            if(alg_is_nan(c, x))
-                return c.nan_code;
-            if(alg_is_inf(c, x))
+            if(alg_is_nan<U>(c, x))
+                return (U)c.nan_code;
+            if(alg_is_inf<U>(c, x))
                 return 0; // 1/sqrt(Inf) = 0
             if(x == 0)
-                return c.inf_code; // 1/sqrt(0) = Inf
-            return alg_powmod(x, c.rsqrt_exp, c.n);
+                return (U)c.inf_code; // 1/sqrt(0) = Inf
+            return alg_powmod<U>(x, (U)c.rsqrt_exp, (U)c.n);
         }
-        FPSAN_HOST_DEVICE constexpr u64 alg_cbrt1(const AlgConfig& c, u64 x)
+        template <class U>
+        FPSAN_HOST_DEVICE constexpr U alg_cbrt1(const AlgConfig& c, U x)
         {
             if(!c.has_cbrt)
-                return alg_tagged1(c, x, 0x63627274ull /*"cbrt"*/);
-            if(alg_is_nan(c, x))
-                return c.nan_code;
-            if(alg_is_inf(c, x))
-                return c.inf_code; // cbrt(Inf) = Inf
-            return alg_powmod(x, c.cbrt_exp, c.n); // cbrt(0) = 0
+                return (U)alg_tagged1(c, (u64)x, 0x63627274ull /*"cbrt"*/);
+            if(alg_is_nan<U>(c, x))
+                return (U)c.nan_code;
+            if(alg_is_inf<U>(c, x))
+                return (U)c.inf_code; // cbrt(Inf) = Inf
+            return alg_powmod<U>(x, (U)c.cbrt_exp, (U)c.n); // cbrt(0) = 0
         }
         template <class Bits>
         FPSAN_HOST_DEVICE constexpr Bits alg_sqrt(const AlgConfig& c, Bits x)
         {
-            return alg_lanewise1(x, [&](u64 v) { return alg_sqrt1(c, v); });
+            return alg_lanewise1(x, [&](auto v) { return alg_sqrt1(c, v); });
         }
         template <class Bits>
         FPSAN_HOST_DEVICE constexpr Bits alg_rsqrt(const AlgConfig& c, Bits x)
         {
-            return alg_lanewise1(x, [&](u64 v) { return alg_rsqrt1(c, v); });
+            return alg_lanewise1(x, [&](auto v) { return alg_rsqrt1(c, v); });
         }
         template <class Bits>
         FPSAN_HOST_DEVICE constexpr Bits alg_cbrt(const AlgConfig& c, Bits x)
         {
-            return alg_lanewise1(x, [&](u64 v) { return alg_cbrt1(c, v); });
+            return alg_lanewise1(x, [&](auto v) { return alg_cbrt1(c, v); });
         }
 
         // Binary tag (e.g. fmod): deterministic in both operands.
@@ -1142,64 +1145,73 @@ namespace fpsan
             return (k == alg_exp2_base(d)) ? (2 + (k - 1) % (d - 2)) : k;
         }
 
-        FPSAN_HOST_DEVICE constexpr u64 alg_expb_1(const AlgConfig& c, u64 a, u64 K, u64 tag)
+        template <class U>
+        FPSAN_HOST_DEVICE constexpr U alg_expb_1(const AlgConfig& c, U a, U K, u64 tag)
         {
             if(!c.two_moduli)
-                return alg_tagged1(c, a, tag);
-            if(!alg_is_fin(c, a))
-                return c.nan_code;
-            return alg_powmod(c.g, (K * (a % c.d)) % c.d, c.n); // g^(K*v mod d)
+                return (U)alg_tagged1(c, (u64)a, tag);
+            if(!alg_is_fin<U>(c, a))
+                return (U)c.nan_code;
+            // exponent (K * (a mod d)) mod d: the product needs the widened type.
+            return alg_powmod<U>(
+                (U)c.g, alg_mulmod<U>(K, (U)(a % (U)c.d), (U)c.d), (U)c.n); // g^(K*v mod d)
         }
-        FPSAN_HOST_DEVICE constexpr u64 alg_logb_1(const AlgConfig& c, u64 r, u64 K, u64 tag)
+        template <class U>
+        FPSAN_HOST_DEVICE constexpr U alg_logb_1(const AlgConfig& c, U r, U K, u64 tag)
         {
             if(!c.two_moduli)
-                return alg_tagged1(c, r, tag);
-            if(!alg_is_fin(c, r))
-                return c.nan_code;
+                return (U)alg_tagged1(c, (u64)r, tag);
+            if(!alg_is_fin<U>(c, r))
+                return (U)c.nan_code;
             if(r == 0)
-                return c.inf_code;
-            const u64 k = alg_dlog1(c, r);
-            if(k >= c.d)
-                return c.nan_code;
-            const u64 Kinv = alg_powmod(K, c.d - 2, c.d); // K^(d-2) = K^-1 mod prime d
-            return ((c.n / c.d) * alg_mulmod(Kinv, k, c.d)) % c.n;
+                return (U)c.inf_code;
+            const U k = (U)alg_dlog1(c, (u64)r);
+            if(k >= (U)c.d)
+                return (U)c.nan_code;
+            const U Kinv = alg_powmod<U>(K, (U)(c.d - 2), (U)c.d); // K^(d-2) = K^-1 mod prime d
+            // (n/d) * (Kinv*k mod d), reduced mod n: widen the outer product.
+            return (U)(((wider_t<U>)(U)(c.n / c.d) * alg_mulmod<U>(Kinv, k, (U)c.d)) % (U)c.n);
         }
-        FPSAN_HOST_DEVICE constexpr u64 alg_exp2_1(const AlgConfig& c, u64 a)
+        template <class U>
+        FPSAN_HOST_DEVICE constexpr U alg_exp2_1(const AlgConfig& c, U a)
         {
-            return alg_expb_1(c, a, alg_exp2_base(c.d), 0x65787032ull /*"exp2"*/);
+            return alg_expb_1<U>(c, a, (U)alg_exp2_base(c.d), 0x65787032ull /*"exp2"*/);
         }
-        FPSAN_HOST_DEVICE constexpr u64 alg_log2_1(const AlgConfig& c, u64 r)
+        template <class U>
+        FPSAN_HOST_DEVICE constexpr U alg_log2_1(const AlgConfig& c, U r)
         {
-            return alg_logb_1(c, r, alg_exp2_base(c.d), 0x6C6F6732ull /*"log2"*/);
+            return alg_logb_1<U>(c, r, (U)alg_exp2_base(c.d), 0x6C6F6732ull /*"log2"*/);
         }
-        FPSAN_HOST_DEVICE constexpr u64 alg_exp10_1(const AlgConfig& c, u64 a)
+        template <class U>
+        FPSAN_HOST_DEVICE constexpr U alg_exp10_1(const AlgConfig& c, U a)
         {
-            return alg_expb_1(c, a, alg_exp10_base(c.d), 0x6578703130ull /*"exp10"*/);
+            return alg_expb_1<U>(c, a, (U)alg_exp10_base(c.d), 0x6578703130ull /*"exp10"*/);
         }
-        FPSAN_HOST_DEVICE constexpr u64 alg_log10_1(const AlgConfig& c, u64 r)
+        template <class U>
+        FPSAN_HOST_DEVICE constexpr U alg_log10_1(const AlgConfig& c, U r)
         {
-            return alg_logb_1(c, r, alg_exp10_base(c.d), 0x6C6F673130ull /*"log10"*/);
+            return alg_logb_1<U>(c, r, (U)alg_exp10_base(c.d), 0x6C6F673130ull /*"log10"*/);
         }
 
         template <class Bits>
         FPSAN_HOST_DEVICE constexpr Bits alg_exp2(const AlgConfig& c, Bits a)
         {
-            return alg_lanewise1(a, [&](u64 x) { return alg_exp2_1(c, x); });
+            return alg_lanewise1(a, [&](auto x) { return alg_exp2_1(c, x); });
         }
         template <class Bits>
         FPSAN_HOST_DEVICE constexpr Bits alg_log2(const AlgConfig& c, Bits r)
         {
-            return alg_lanewise1(r, [&](u64 x) { return alg_log2_1(c, x); });
+            return alg_lanewise1(r, [&](auto x) { return alg_log2_1(c, x); });
         }
         template <class Bits>
         FPSAN_HOST_DEVICE constexpr Bits alg_exp10(const AlgConfig& c, Bits a)
         {
-            return alg_lanewise1(a, [&](u64 x) { return alg_exp10_1(c, x); });
+            return alg_lanewise1(a, [&](auto x) { return alg_exp10_1(c, x); });
         }
         template <class Bits>
         FPSAN_HOST_DEVICE constexpr Bits alg_log10(const AlgConfig& c, Bits r)
         {
-            return alg_lanewise1(r, [&](u64 x) { return alg_log10_1(c, x); });
+            return alg_lanewise1(r, [&](auto x) { return alg_log10_1(c, x); });
         }
 
         // ---- sin / cos via an order-d rotation in (Z/n)[i], i^2 = -1 -----------
@@ -1207,58 +1219,66 @@ namespace fpsan
         // order d and the complex multiplication realizes the rotation, the
         // angle-addition formulas hold exactly in Z/n. Semantics without this
         // rotor keep sin/cos as tags.
+        template <class U>
         struct AlgC
         {
-            u64 re = 0, im = 0;
+            U re = 0, im = 0;
         };
-        FPSAN_HOST_DEVICE constexpr AlgC alg_cmul(AlgC a, AlgC b, u64 n)
+        template <class U>
+        FPSAN_HOST_DEVICE constexpr AlgC<U> alg_cmul(AlgC<U> a, AlgC<U> b, U n)
         {
             // (ar+ai i)(br+bi i) = (ar br - ai bi) + (ar bi + ai br) i  mod n
-            const u64 re = alg_submod(alg_mulmod(a.re, b.re, n), alg_mulmod(a.im, b.im, n), n);
-            const u64 im = alg_addmod(alg_mulmod(a.re, b.im, n), alg_mulmod(a.im, b.re, n), n);
+            const U re
+                = alg_submod<U>(alg_mulmod<U>(a.re, b.re, n), alg_mulmod<U>(a.im, b.im, n), n);
+            const U im
+                = alg_addmod<U>(alg_mulmod<U>(a.re, b.im, n), alg_mulmod<U>(a.im, b.re, n), n);
             return {re, im};
         }
-        FPSAN_HOST_DEVICE constexpr AlgC alg_cpow(AlgC base, u64 e, u64 n)
+        template <class U>
+        FPSAN_HOST_DEVICE constexpr AlgC<U> alg_cpow(AlgC<U> base, U e, U n)
         {
-            AlgC r{1 % n, 0};
+            AlgC<U> r{(U)(1 % n), 0};
             while(e)
             {
                 if(e & 1)
-                    r = alg_cmul(r, base, n);
-                base = alg_cmul(base, base, n);
+                    r = alg_cmul<U>(r, base, n);
+                base = alg_cmul<U>(base, base, n);
                 e >>= 1;
             }
             return r;
         }
-        FPSAN_HOST_DEVICE constexpr AlgC alg_rotor(const AlgConfig& c, u64 r)
+        template <class U>
+        FPSAN_HOST_DEVICE constexpr AlgC<U> alg_rotor(const AlgConfig& c, U r)
         {
-            return alg_cpow({c.omega_re, c.omega_im}, r % c.d, c.n);
+            return alg_cpow<U>(AlgC<U>{(U)c.omega_re, (U)c.omega_im}, (U)(r % (U)c.d), (U)c.n);
         }
-        FPSAN_HOST_DEVICE constexpr u64 alg_cos1(const AlgConfig& c, u64 r)
+        template <class U>
+        FPSAN_HOST_DEVICE constexpr U alg_cos1(const AlgConfig& c, U r)
         {
             if(!c.has_sin_cos)
-                return alg_tagged1(c, r, 0x636F73ull /*"cos"*/);
-            if(!alg_is_fin(c, r))
-                return c.nan_code;
-            return alg_rotor(c, r).re;
+                return (U)alg_tagged1(c, (u64)r, 0x636F73ull /*"cos"*/);
+            if(!alg_is_fin<U>(c, r))
+                return (U)c.nan_code;
+            return alg_rotor<U>(c, r).re;
         }
-        FPSAN_HOST_DEVICE constexpr u64 alg_sin1(const AlgConfig& c, u64 r)
+        template <class U>
+        FPSAN_HOST_DEVICE constexpr U alg_sin1(const AlgConfig& c, U r)
         {
             if(!c.has_sin_cos)
-                return alg_tagged1(c, r, 0x73696Eull /*"sin"*/);
-            if(!alg_is_fin(c, r))
-                return c.nan_code;
-            return alg_rotor(c, r).im;
+                return (U)alg_tagged1(c, (u64)r, 0x73696Eull /*"sin"*/);
+            if(!alg_is_fin<U>(c, r))
+                return (U)c.nan_code;
+            return alg_rotor<U>(c, r).im;
         }
         template <class Bits>
         FPSAN_HOST_DEVICE constexpr Bits alg_cos(const AlgConfig& c, Bits r)
         {
-            return alg_lanewise1(r, [&](u64 x) { return alg_cos1(c, x); });
+            return alg_lanewise1(r, [&](auto x) { return alg_cos1(c, x); });
         }
         template <class Bits>
         FPSAN_HOST_DEVICE constexpr Bits alg_sin(const AlgConfig& c, Bits r)
         {
-            return alg_lanewise1(r, [&](u64 x) { return alg_sin1(c, x); });
+            return alg_lanewise1(r, [&](auto x) { return alg_sin1(c, x); });
         }
 
     } // namespace detail
