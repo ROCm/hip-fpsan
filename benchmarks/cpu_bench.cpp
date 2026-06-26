@@ -90,11 +90,17 @@ namespace
         return Result{group, case_name, semantics, best_ns, iters, checksum};
     }
 
-    template <fpsan::Semantics S>
-    void bench_arith(std::vector<Result>& results)
+    // Benchmark the width-sensitive scalar ops for one float type FT and one
+    // semantics S. Templating on FT (not just S) is deliberate: the modular
+    // arithmetic narrows per element width, so a regression can hide in a narrow
+    // type while f32 looks fine -- exactly how an exp2/sqrt 128-bit regression
+    // slipped through when only f32 was measured. The transcendental loops
+    // (exp/log/sin/cos) exercise the powmod/rotor paths that arithmetic does not.
+    template <class FT, fpsan::Semantics S>
+    void bench_arith(std::vector<Result>& results, const char* wtag)
     {
-        using V = fpsan::Value<float, S, fpsan::Conversions::Explicit>;
-        std::vector<V> a_values;
+        using V = fpsan::Value<FT, S, fpsan::Conversions::Explicit>;
+        std::vector<V> a_values; // small positive (valid for sqrt/log)
         std::vector<V> b_values;
         std::vector<V> c_values;
         a_values.reserve(1024);
@@ -103,13 +109,13 @@ namespace
         for(int i = 0; i < 1024; ++i)
         {
             const float jitter = static_cast<float>((i * 37) % 997);
-            a_values.emplace_back(sample<float>(0.00011f + jitter * 1.0e-8f));
-            b_values.emplace_back(sample<float>(0.99989f + jitter * 4.0e-8f));
-            c_values.emplace_back(sample<float>(0.00003f + jitter * 1.0e-8f));
+            a_values.emplace_back(sample<FT>(0.25f + jitter * 1.0e-4f)); // in (0, ~0.35]
+            b_values.emplace_back(sample<FT>(0.99989f + jitter * 4.0e-8f));
+            c_values.emplace_back(sample<FT>(0.00003f + jitter * 1.0e-8f));
         }
 
         auto add_mul = [a_values, b_values, c_values](std::size_t iters) -> std::uint64_t {
-            V             x(sample<float>(1.25f));
+            V             x(sample<FT>(1.25f));
             std::uint64_t acc = 0;
             for(std::size_t i = 0; i < iters; ++i)
             {
@@ -121,7 +127,7 @@ namespace
             return acc ^ storage_u64(x);
         };
         auto div_loop = [a_values, b_values](std::size_t iters) -> std::uint64_t {
-            V             x(sample<float>(1.25f));
+            V             x(sample<FT>(1.25f));
             std::uint64_t acc = 0;
             for(std::size_t i = 0; i < iters; ++i)
             {
@@ -132,7 +138,7 @@ namespace
             return acc ^ storage_u64(x);
         };
         auto sqrt_loop = [a_values](std::size_t iters) -> std::uint64_t {
-            V             x(sample<float>(1.25f));
+            V             x(sample<FT>(1.25f));
             std::uint64_t acc = 0;
             for(std::size_t i = 0; i < iters; ++i)
             {
@@ -142,13 +148,38 @@ namespace
             }
             return acc ^ storage_u64(x);
         };
+        // Transcendentals: apply to bounded array values (no accumulation into x,
+        // so the native baseline stays finite). exp/log use the exp/dlog channels;
+        // sin/cos use the rotor channel -- all powmod-based on the faithful rings.
+        auto unary_loop = [a_values](auto op) {
+            return [a_values, op](std::size_t iters) -> std::uint64_t {
+                std::uint64_t acc = 0;
+                for(std::size_t i = 0; i < iters; ++i)
+                    acc = mix(acc, storage_u64(op(a_values[i & 1023])));
+                return acc;
+            };
+        };
+        auto exp_loop = unary_loop([](V v) { return fpsan::exp(v); });
+        auto log_loop = unary_loop([](V v) { return fpsan::log(v); });
+        auto sin_loop = unary_loop([](V v) { return fpsan::sin(v); });
+        auto cos_loop = unary_loop([](V v) { return fpsan::cos(v); });
 
         const char* s = fpsan::semantics_name(S);
+        auto        nm = [wtag](const char* op) { return std::string(wtag) + " " + op; };
         results.push_back(
-            run_case("arithmetic", "f32 add/mul/sub", s, add_mul, 4096, 1u << 26, 70.0));
-        results.push_back(run_case("arithmetic", "f32 add/div", s, div_loop, 1024, 1u << 24, 70.0));
+            run_case("arithmetic", nm("add/mul/sub").c_str(), s, add_mul, 4096, 1u << 26, 70.0));
         results.push_back(
-            run_case("arithmetic", "f32 add/sqrt", s, sqrt_loop, 1024, 1u << 24, 70.0));
+            run_case("arithmetic", nm("add/div").c_str(), s, div_loop, 1024, 1u << 24, 70.0));
+        results.push_back(
+            run_case("arithmetic", nm("add/sqrt").c_str(), s, sqrt_loop, 1024, 1u << 24, 70.0));
+        results.push_back(
+            run_case("transcendental", nm("exp").c_str(), s, exp_loop, 1024, 1u << 23, 70.0));
+        results.push_back(
+            run_case("transcendental", nm("log").c_str(), s, log_loop, 1024, 1u << 23, 70.0));
+        results.push_back(
+            run_case("transcendental", nm("sin").c_str(), s, sin_loop, 1024, 1u << 23, 70.0));
+        results.push_back(
+            run_case("transcendental", nm("cos").c_str(), s, cos_loop, 1024, 1u << 23, 70.0));
     }
 
     template <fpsan::Semantics S, class FromFT, class ToFT>
@@ -232,13 +263,20 @@ int main()
     std::vector<Result> results;
     results.reserve(80);
 
-    bench_arith<fpsan::Semantics::Native>(results);
-    bench_arith<fpsan::Semantics::Triton>(results);
-    bench_arith<fpsan::Semantics::Field>(results);
-    bench_arith<fpsan::Semantics::FieldFast>(results);
-    bench_arith<fpsan::Semantics::FieldWithMulCasts>(results);
-    bench_arith<fpsan::Semantics::SophieGermainRing>(results);
-    bench_arith<fpsan::Semantics::PythagoreanRing>(results);
+    // Run every semantics at both a 32-bit and a 16-bit element width: the
+    // modular arithmetic narrows per width, so narrow types must be measured
+    // directly (an f32-only suite hid a 128-bit regression in narrow widths).
+#define FPSAN_BENCH_ARITH_ALL_SEMANTICS(FT, WTAG)                        \
+    bench_arith<FT, fpsan::Semantics::Native>(results, WTAG);            \
+    bench_arith<FT, fpsan::Semantics::Triton>(results, WTAG);            \
+    bench_arith<FT, fpsan::Semantics::Field>(results, WTAG);             \
+    bench_arith<FT, fpsan::Semantics::FieldFast>(results, WTAG);         \
+    bench_arith<FT, fpsan::Semantics::FieldWithMulCasts>(results, WTAG); \
+    bench_arith<FT, fpsan::Semantics::SophieGermainRing>(results, WTAG); \
+    bench_arith<FT, fpsan::Semantics::PythagoreanRing>(results, WTAG);
+    FPSAN_BENCH_ARITH_ALL_SEMANTICS(float, "f32")
+    FPSAN_BENCH_ARITH_ALL_SEMANTICS(_Float16, "f16")
+#undef FPSAN_BENCH_ARITH_ALL_SEMANTICS
 
     bench_casts_for_semantics<fpsan::Semantics::Native>(results);
     bench_casts_for_semantics<fpsan::Semantics::Triton>(results);
