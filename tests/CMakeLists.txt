@@ -3,11 +3,11 @@
 #
 # tests/CMakeLists.txt
 
-# When FPSAN_ENABLE_HIP is ON, compile every test source as HIP so the same
+# When a HIP compiler is available, compile every test source as HIP so the same
 # tests exercise the device path.  We tag sources with the HIP language rather
 # than swapping the compiler, which is the established CMake practice.
 # (enable_language(HIP) happens at the top level so examples/ sees it too.)
-if(FPSAN_ENABLE_HIP)
+if(CMAKE_HIP_COMPILER)
   set(FPSAN_TEST_LANG HIP)
 else()
   set(FPSAN_TEST_LANG CXX)
@@ -149,7 +149,7 @@ if(TARGET GTest::gtest_main)
   # same body in a kernel and asserts device == host bit-for-bit.
   fpsan_add_test(fpsan_parity_test parity_test.cpp)
   # GPU execution tests: only meaningful when compiling as HIP.
-  if(FPSAN_ENABLE_HIP)
+  if(CMAKE_HIP_COMPILER)
     # Tests whose kernels touch only gfx9-era / portable builtins (shfl,
     # mbcnt, basic ds_*, classify, atomic_fadd...) build on every supported
     # arch.

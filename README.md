@@ -125,33 +125,33 @@ intrinsic dataflow on fingerprints.
 Configure out of tree with ordinary CMake command lines:
 
 ```bash
-# Pure C++.
-cmake -S . -B build/cxx -G Ninja -DFPSAN_ENABLE_HIP=OFF
+# Pure C++. -DCMAKE_HIP_COMPILER= forces the host path even if this box has a
+# HIP toolchain; on a non-ROCm machine it is unnecessary (no compiler is found).
+cmake -S . -B build/cxx -G Ninja -DCMAKE_HIP_COMPILER=
 cmake --build build/cxx
 ctest --test-dir build/cxx --output-on-failure
 
-# HIP C++ for RDNA4 / gfx1201.
+# HIP C++ for RDNA4 / gfx1201. HIP turns on automatically once the ROCm
+# toolchain is found (see ROCM_PATH below); there is no separate enable flag.
 cmake -S . -B build/hip-gfx1201 -G Ninja \
-  -DFPSAN_ENABLE_HIP=ON \
   -DCMAKE_HIP_ARCHITECTURES=gfx1201
 cmake --build build/hip-gfx1201
 ctest --test-dir build/hip-gfx1201 --output-on-failure
 
 # HIP C++ for CDNA4 / gfx950. Running tests needs matching hardware.
 cmake -S . -B build/hip-gfx950 -G Ninja \
-  -DFPSAN_ENABLE_HIP=ON \
   -DCMAKE_HIP_ARCHITECTURES=gfx950
 cmake --build build/hip-gfx950
 
 # Optional microbenchmarks.
 cmake -S . -B build/cxx-bench -G Ninja \
-  -DFPSAN_ENABLE_HIP=OFF \
+  -DCMAKE_HIP_COMPILER= \
   -DFPSAN_BUILD_BENCHMARKS=ON
 cmake --build build/cxx-bench --target fpsan_cpu_bench
 
 # Optional Python bindings.
 cmake -S . -B build/python -G Ninja \
-  -DFPSAN_ENABLE_HIP=OFF \
+  -DCMAKE_HIP_COMPILER= \
   -DFPSAN_BUILD_PYTHON=ON
 cmake --build build/python
 ctest --test-dir build/python -R fpsan_python_test --output-on-failure
@@ -165,10 +165,12 @@ or override the pieces directly with `-DCMAKE_HIP_COMPILER=...`,
 `-DCMAKE_HIP_COMPILER_ROCM_ROOT=...`, `-DCMAKE_HIP_ARCHITECTURES=...`.
 
 CMake options: `FPSAN_BUILD_TESTS` (ON), `FPSAN_BUILD_EXAMPLES` (ON),
-`FPSAN_BUILD_BENCHMARKS` (OFF), `FPSAN_BUILD_PYTHON` (OFF),
-`FPSAN_ENABLE_HIP`. The latter defaults to ON when a HIP toolchain is available
-and OFF otherwise: it follows the standard `CMAKE_HIP_COMPILER` variable, which
-is derived from `ROCM_PATH` (resolved as `-DROCM_PATH=...` >
-`$ENV{ROCM_PATH}` > `rocm-sdk path --root` > `/opt/rocm`), set explicitly, or
-found on `PATH` by `check_language(HIP)`. Set `-DFPSAN_ENABLE_HIP=OFF` to force
-a pure-C++ build even where a HIP toolchain exists.
+`FPSAN_BUILD_BENCHMARKS` (OFF), `FPSAN_BUILD_PYTHON` (OFF).
+
+There is no separate HIP enable toggle. Tests and examples build as HIP C++
+whenever a HIP compiler is available, and as pure C++ otherwise -- the single
+source of truth is the standard `CMAKE_HIP_COMPILER`, derived from `ROCM_PATH`
+(resolved as `-DROCM_PATH=...` > `$ENV{ROCM_PATH}` > `rocm-sdk path --root` >
+`/opt/rocm`), set explicitly with `-DCMAKE_HIP_COMPILER=...`, or found on `PATH`
+by `check_language(HIP)`. To force a pure-C++ build on a machine that *has* a
+HIP toolchain, set it empty: `-DCMAKE_HIP_COMPILER=`.

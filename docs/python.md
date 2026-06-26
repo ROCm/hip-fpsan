@@ -19,7 +19,7 @@ The bindings are off by default:
 
 ```bash
 cmake -S . -B build/python -G Ninja \
-  -DFPSAN_ENABLE_HIP=OFF \
+  -DCMAKE_HIP_COMPILER= \
   -DFPSAN_BUILD_PYTHON=ON
 cmake --build build/python
 ctest --test-dir build/python -R fpsan_python_test --output-on-failure
@@ -35,7 +35,7 @@ nanobind checkout:
 
 ```bash
 cmake -S . -B build/python -G Ninja \
-  -DFPSAN_ENABLE_HIP=OFF \
+  -DCMAKE_HIP_COMPILER= \
   -DFPSAN_BUILD_PYTHON=ON \
   -DFPSAN_BUILD_TESTS=OFF \
   -DFETCHCONTENT_SOURCE_DIR_NANOBIND=/path/to/nanobind
