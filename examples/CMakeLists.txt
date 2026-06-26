@@ -9,7 +9,7 @@
 
 function(fpsan_add_example name src)
   add_executable(${name} ${src})
-  if(FPSAN_ENABLE_HIP)
+  if(CMAKE_HIP_COMPILER)
     set_source_files_properties(${src} PROPERTIES LANGUAGE HIP)
   endif()
   target_link_libraries(${name} PRIVATE fpsan::fpsan fpsan_project_warnings)
@@ -26,6 +26,6 @@ fpsan_add_example(fpsan_example_porting porting_example.cpp)
 # gfx12 (RDNA4), K=32 WMMA on gfx1250, MFMA on gfx950 -- and is a hard compile
 # error on architectures without a matrix code path. No arch is selected here;
 # that choice lives in the source and follows CMAKE_HIP_ARCHITECTURES.
-if(FPSAN_ENABLE_HIP)
+if(CMAKE_HIP_COMPILER)
   fpsan_add_example(fpsan_example_reduction_demo reduction_demo.cpp)
 endif()

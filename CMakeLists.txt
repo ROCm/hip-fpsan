@@ -18,12 +18,14 @@
 #   -DFPSAN_BUILD_EXAMPLES=ON|OFF   (default ON)  build the tutorial examples
 #   -DFPSAN_BUILD_BENCHMARKS=ON|OFF (default OFF) build benchmark binaries
 #   -DFPSAN_BUILD_PYTHON=ON|OFF     (default OFF) build Python bindings
-#   -DFPSAN_ENABLE_HIP=ON|OFF       (default: ON when a HIP toolchain is found,
-#                                    else OFF)    compile tests/examples as HIP.
-#       The default flows from CMAKE_HIP_COMPILER, derived from ROCM_PATH
-#       (resolved as -DROCM_PATH= > $ENV{ROCM_PATH} > `rocm-sdk path --root` >
-#       /opt/rocm) or set explicitly; set -DFPSAN_ENABLE_HIP=OFF to force a
-#       pure-C++ build.
+#
+# Tests and examples compile as HIP C++ whenever a HIP compiler is available --
+# there is no separate enable toggle to drift out of sync. CMAKE_HIP_COMPILER is
+# the single source of truth: it is derived from ROCM_PATH (resolved as
+# -DROCM_PATH= > $ENV{ROCM_PATH} > `rocm-sdk path --root` > /opt/rocm), set
+# explicitly with -DCMAKE_HIP_COMPILER=..., or found on PATH by
+# check_language(HIP). For a pure-C++ build on a machine that has a HIP
+# toolchain, force it empty:  -DCMAKE_HIP_COMPILER=
 #
 cmake_minimum_required(VERSION 3.21)
 
@@ -85,27 +87,28 @@ endif()
 if(NOT "${ROCM_PATH}" IN_LIST CMAKE_PREFIX_PATH)
   list(APPEND CMAKE_PREFIX_PATH "${ROCM_PATH}")
 endif()
-# Derive the HIP compiler (ROCm's amdclang++) from ROCM_PATH when the user has
-# not set one explicitly; leave an explicit -DCMAKE_HIP_COMPILER untouched.
-if(NOT CMAKE_HIP_COMPILER AND EXISTS "${ROCM_PATH}/lib/llvm/bin/amdclang++")
+# Derive the HIP compiler (ROCm's amdclang++) from ROCM_PATH only when the user
+# has said nothing about it. An explicit -DCMAKE_HIP_COMPILER=... is respected --
+# including an explicit empty value, which is how you force a pure-C++ build on a
+# box that does have a HIP toolchain (it suppresses both this derivation and the
+# check_language probe below, so nothing resurrects it).
+if(NOT DEFINED CMAKE_HIP_COMPILER AND EXISTS "${ROCM_PATH}/lib/llvm/bin/amdclang++")
   set(CMAKE_HIP_COMPILER "${ROCM_PATH}/lib/llvm/bin/amdclang++" CACHE FILEPATH "HIP compiler")
   if(NOT CMAKE_HIP_COMPILER_ROCM_ROOT)
     set(CMAKE_HIP_COMPILER_ROCM_ROOT "${ROCM_PATH}" CACHE PATH
         "ROCm root containing lib/cmake/hip-lang")
   endif()
 endif()
-include(CheckLanguage)
-check_language(HIP) # confirms CMAKE_HIP_COMPILER, or finds it on PATH if unset
+# Probe for a HIP compiler unless one was explicitly disabled (defined-but-empty).
+if(NOT DEFINED CMAKE_HIP_COMPILER OR CMAKE_HIP_COMPILER)
+  include(CheckLanguage)
+  check_language(HIP) # confirms CMAKE_HIP_COMPILER, or finds it on PATH if unset
+endif()
 
-# The HIP path is on by default when a HIP compiler is available and forced off
-# otherwise; pass -DFPSAN_ENABLE_HIP=OFF to force a pure-C++ build even where a
-# HIP toolchain exists.
-include(CMakeDependentOption)
-cmake_dependent_option(FPSAN_ENABLE_HIP
-  "Compile the tests and examples as HIP C++ (auto-on when a HIP toolchain is available)"
-  ON "CMAKE_HIP_COMPILER" OFF)
-
-if(FPSAN_ENABLE_HIP)
+# CMAKE_HIP_COMPILER is the single predicate: tests and examples build as HIP
+# whenever a HIP compiler is available, and as pure C++ when it is not. No
+# separate cached enable toggle -- that only adds stale build-dir state.
+if(CMAKE_HIP_COMPILER)
   # Bake the ROCm runtime lib dirs into test/example RPATHs so the binaries find
   # libamdhip64 etc. without LD_LIBRARY_PATH (the dist is not installed
   # system-wide).
