@@ -852,6 +852,23 @@ namespace fpsan
             acc          = acc + cast<AccScalar>(av) * bv;
         }
 
+        template <class AccScalar, class Vec, Semantics S, Conversions C>
+        FPSAN_DEVICE inline void wmma_16x16x128_cast_fragment(Value<Vec, S, C>        v,
+                                                              Value<AccScalar, S, C>* out)
+        {
+            for(unsigned i = 0; i < Value<Vec, S, C>::lanes; ++i)
+                out[i] = cast<AccScalar>(v.get(i));
+        }
+
+        template <int E, class Acc>
+        FPSAN_DEVICE inline void wmma_16x16x128_accumulate_row_casted(
+            const Acc* acast, int m_base, int idx, int k, Acc bv, Acc& acc)
+        {
+            const int m  = m_base + E;
+            const Acc av = wave_shfl(acast[idx], Wmma16x16x128Layout::ab_lane(m, k));
+            acc          = acc + av * bv;
+        }
+
         template <class AVec, class BVec, class CVec, Semantics S, Conversions C>
         FPSAN_DEVICE Value<CVec, S, C>
             wmma_16x16x128_dataflow(Value<AVec, S, C> a, Value<BVec, S, C> b, Value<CVec, S, C> c)
@@ -870,19 +887,42 @@ namespace fpsan
             Acc       acc5   = c.get(5);
             Acc       acc6   = c.get(6);
             Acc       acc7   = c.get(7);
-            for(int k = 0; k < 128; ++k)
+            if constexpr(has_multiplicative_field_casts(S))
             {
-                const int idx = Wmma16x16x128Layout::ab_index(k);
-                const Acc bv
-                    = cast<AccScalar>(wave_shfl(b.get(idx), Wmma16x16x128Layout::ab_lane(n, k)));
-                wmma_16x16x128_accumulate_row<0>(a, m_base, idx, k, bv, acc0);
-                wmma_16x16x128_accumulate_row<1>(a, m_base, idx, k, bv, acc1);
-                wmma_16x16x128_accumulate_row<2>(a, m_base, idx, k, bv, acc2);
-                wmma_16x16x128_accumulate_row<3>(a, m_base, idx, k, bv, acc3);
-                wmma_16x16x128_accumulate_row<4>(a, m_base, idx, k, bv, acc4);
-                wmma_16x16x128_accumulate_row<5>(a, m_base, idx, k, bv, acc5);
-                wmma_16x16x128_accumulate_row<6>(a, m_base, idx, k, bv, acc6);
-                wmma_16x16x128_accumulate_row<7>(a, m_base, idx, k, bv, acc7);
+                Acc acast[Value<AVec, S, C>::lanes];
+                Acc bcast[Value<BVec, S, C>::lanes];
+                wmma_16x16x128_cast_fragment<AccScalar>(a, acast);
+                wmma_16x16x128_cast_fragment<AccScalar>(b, bcast);
+                for(int k = 0; k < 128; ++k)
+                {
+                    const int idx = Wmma16x16x128Layout::ab_index(k);
+                    const Acc bv  = wave_shfl(bcast[idx], Wmma16x16x128Layout::ab_lane(n, k));
+                    wmma_16x16x128_accumulate_row_casted<0>(acast, m_base, idx, k, bv, acc0);
+                    wmma_16x16x128_accumulate_row_casted<1>(acast, m_base, idx, k, bv, acc1);
+                    wmma_16x16x128_accumulate_row_casted<2>(acast, m_base, idx, k, bv, acc2);
+                    wmma_16x16x128_accumulate_row_casted<3>(acast, m_base, idx, k, bv, acc3);
+                    wmma_16x16x128_accumulate_row_casted<4>(acast, m_base, idx, k, bv, acc4);
+                    wmma_16x16x128_accumulate_row_casted<5>(acast, m_base, idx, k, bv, acc5);
+                    wmma_16x16x128_accumulate_row_casted<6>(acast, m_base, idx, k, bv, acc6);
+                    wmma_16x16x128_accumulate_row_casted<7>(acast, m_base, idx, k, bv, acc7);
+                }
+            }
+            else
+            {
+                for(int k = 0; k < 128; ++k)
+                {
+                    const int idx = Wmma16x16x128Layout::ab_index(k);
+                    const Acc bv  = cast<AccScalar>(
+                        wave_shfl(b.get(idx), Wmma16x16x128Layout::ab_lane(n, k)));
+                    wmma_16x16x128_accumulate_row<0>(a, m_base, idx, k, bv, acc0);
+                    wmma_16x16x128_accumulate_row<1>(a, m_base, idx, k, bv, acc1);
+                    wmma_16x16x128_accumulate_row<2>(a, m_base, idx, k, bv, acc2);
+                    wmma_16x16x128_accumulate_row<3>(a, m_base, idx, k, bv, acc3);
+                    wmma_16x16x128_accumulate_row<4>(a, m_base, idx, k, bv, acc4);
+                    wmma_16x16x128_accumulate_row<5>(a, m_base, idx, k, bv, acc5);
+                    wmma_16x16x128_accumulate_row<6>(a, m_base, idx, k, bv, acc6);
+                    wmma_16x16x128_accumulate_row<7>(a, m_base, idx, k, bv, acc7);
+                }
             }
             DFrag d{};
             d.set(0, acc0);
