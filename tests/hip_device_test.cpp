@@ -20,92 +20,81 @@
 #include <cstdint>
 #include <vector>
 
-template <fpsan::Semantics S>
-using FV = fpsan::Value<float, S, fpsan::Conversions::Explicit>;
+template <fpsan::Semantics S> using FV = fpsan::Value<float, S, fpsan::Conversions::Explicit>;
 
 template <fpsan::Semantics S>
-__global__ void fpsan_kernel(const float*   a,
-                             const float*   b,
-                             const float*   c,
-                             std::uint32_t* embed_payload,
-                             std::uint32_t* assoc_ok,
-                             std::uint32_t* exp_hom_ok,
-                             int            n)
-{
-    int i = blockIdx.x * blockDim.x + threadIdx.x;
-    if(i >= n)
-        return;
-    FV<S> A(a[i]), B(b[i]), C(c[i]);
-    embed_payload[i] = A.fpsan_payload();
-    assoc_ok[i]      = ((A + B) + C == A + (B + C)) ? 1u : 0u;
-    exp_hom_ok[i]    = (fpsan::exp(A + B) == fpsan::exp(A) * fpsan::exp(B)) ? 1u : 0u;
+__global__ void fpsan_kernel(const float *a, const float *b, const float *c,
+                             std::uint32_t *embed_payload, std::uint32_t *assoc_ok,
+                             std::uint32_t *exp_hom_ok, int n) {
+  int i = blockIdx.x * blockDim.x + threadIdx.x;
+  if (i >= n)
+    return;
+  FV<S> A(a[i]), B(b[i]), C(c[i]);
+  embed_payload[i] = A.fpsan_payload();
+  assoc_ok[i] = ((A + B) + C == A + (B + C)) ? 1u : 0u;
+  exp_hom_ok[i] = (fpsan::exp(A + B) == fpsan::exp(A) * fpsan::exp(B)) ? 1u : 0u;
 }
 
-TEST(HipDevice, MatchesHostAndPreservesIdentities)
-{
-    int        ndev = 0;
-    hipError_t e    = hipGetDeviceCount(&ndev);
-    if(e != hipSuccess || ndev == 0)
-        GTEST_SKIP() << "no HIP device available";
+TEST(HipDevice, MatchesHostAndPreservesIdentities) {
+  int ndev = 0;
+  hipError_t e = hipGetDeviceCount(&ndev);
+  if (e != hipSuccess || ndev == 0)
+    GTEST_SKIP() << "no HIP device available";
 
-    // Deterministic pseudo-random inputs (see test_random.hpp). The
-    // device-vs-host and identity checks hold for any finite values; quarters
-    // give broad, exactly-representable coverage.
-    const int          n = 64;
-    std::vector<float> a(n), b(n), c(n);
-    std::mt19937       rng = fpsan_test::make_rng();
-    for(int i = 0; i < n; ++i)
-    {
-        a[i] = fpsan_test::pick_quarter<float>(rng, -36, 36); // -9 .. 9
-        b[i] = fpsan_test::pick_quarter<float>(rng, -36, 36);
-        c[i] = fpsan_test::pick_quarter<float>(rng, -36, 36);
+  // Deterministic pseudo-random inputs (see test_random.hpp). The
+  // device-vs-host and identity checks hold for any finite values; quarters
+  // give broad, exactly-representable coverage.
+  const int n = 64;
+  std::vector<float> a(n), b(n), c(n);
+  std::mt19937 rng = fpsan_test::make_rng();
+  for (int i = 0; i < n; ++i) {
+    a[i] = fpsan_test::pick_quarter<float>(rng, -36, 36); // -9 .. 9
+    b[i] = fpsan_test::pick_quarter<float>(rng, -36, 36);
+    c[i] = fpsan_test::pick_quarter<float>(rng, -36, 36);
+  }
+
+  float *da, *db, *dc;
+  std::uint32_t *dembed, *dassoc, *dexp;
+  HIP_CHECK(hipMalloc(&da, n * sizeof(float)));
+  HIP_CHECK(hipMalloc(&db, n * sizeof(float)));
+  HIP_CHECK(hipMalloc(&dc, n * sizeof(float)));
+  HIP_CHECK(hipMalloc(&dembed, n * sizeof(std::uint32_t)));
+  HIP_CHECK(hipMalloc(&dassoc, n * sizeof(std::uint32_t)));
+  HIP_CHECK(hipMalloc(&dexp, n * sizeof(std::uint32_t)));
+  HIP_CHECK(hipMemcpy(da, a.data(), n * sizeof(float), hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemcpy(db, b.data(), n * sizeof(float), hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemcpy(dc, c.data(), n * sizeof(float), hipMemcpyHostToDevice));
+
+  fpsan_test::for_each_fpsan_semantics([&](auto sem) {
+    constexpr fpsan::Semantics S = decltype(sem)::value;
+    fpsan_kernel<S><<<dim3((n + 63) / 64), dim3(64)>>>(da, db, dc, dembed, dassoc, dexp, n);
+    HIP_CHECK(hipGetLastError());
+    HIP_CHECK(hipDeviceSynchronize());
+
+    std::vector<std::uint32_t> embed(n), assoc(n), exph(n);
+    HIP_CHECK(hipMemcpy(embed.data(), dembed, n * sizeof(std::uint32_t), hipMemcpyDeviceToHost));
+    HIP_CHECK(hipMemcpy(assoc.data(), dassoc, n * sizeof(std::uint32_t), hipMemcpyDeviceToHost));
+    HIP_CHECK(hipMemcpy(exph.data(), dexp, n * sizeof(std::uint32_t), hipMemcpyDeviceToHost));
+
+    // exp is a genuine homomorphism in Triton and the two-moduli algebraic
+    // models, but a tag in the Field variants (no exp channel) -- so
+    // only assert it where it is one. embed-matches-host and associativity hold
+    // for every semantics.
+    constexpr bool exp_is_hom =
+        (S == fpsan::Semantics::Triton) ||
+        (fpsan::detail::is_algebraic_semantics(S) && FV<S>::alg_cfg().two_moduli);
+    for (int i = 0; i < n; ++i) {
+      EXPECT_EQ(embed[i], FV<S>(a[i]).fpsan_payload()) << "device embed != host @" << i;
+      EXPECT_EQ(assoc[i], 1u) << "associativity failed on device @" << i;
+      if constexpr (exp_is_hom)
+        EXPECT_EQ(exph[i], 1u) << "exp homomorphism failed on device @" << i;
     }
+  });
 
-    float *        da, *db, *dc;
-    std::uint32_t *dembed, *dassoc, *dexp;
-    HIP_CHECK(hipMalloc(&da, n * sizeof(float)));
-    HIP_CHECK(hipMalloc(&db, n * sizeof(float)));
-    HIP_CHECK(hipMalloc(&dc, n * sizeof(float)));
-    HIP_CHECK(hipMalloc(&dembed, n * sizeof(std::uint32_t)));
-    HIP_CHECK(hipMalloc(&dassoc, n * sizeof(std::uint32_t)));
-    HIP_CHECK(hipMalloc(&dexp, n * sizeof(std::uint32_t)));
-    HIP_CHECK(hipMemcpy(da, a.data(), n * sizeof(float), hipMemcpyHostToDevice));
-    HIP_CHECK(hipMemcpy(db, b.data(), n * sizeof(float), hipMemcpyHostToDevice));
-    HIP_CHECK(hipMemcpy(dc, c.data(), n * sizeof(float), hipMemcpyHostToDevice));
-
-    fpsan_test::for_each_fpsan_semantics([&](auto sem) {
-        constexpr fpsan::Semantics S = decltype(sem)::value;
-        fpsan_kernel<S><<<dim3((n + 63) / 64), dim3(64)>>>(da, db, dc, dembed, dassoc, dexp, n);
-        HIP_CHECK(hipGetLastError());
-        HIP_CHECK(hipDeviceSynchronize());
-
-        std::vector<std::uint32_t> embed(n), assoc(n), exph(n);
-        HIP_CHECK(
-            hipMemcpy(embed.data(), dembed, n * sizeof(std::uint32_t), hipMemcpyDeviceToHost));
-        HIP_CHECK(
-            hipMemcpy(assoc.data(), dassoc, n * sizeof(std::uint32_t), hipMemcpyDeviceToHost));
-        HIP_CHECK(hipMemcpy(exph.data(), dexp, n * sizeof(std::uint32_t), hipMemcpyDeviceToHost));
-
-        // exp is a genuine homomorphism in Triton and the two-moduli algebraic
-        // models, but a tag in the Field variants (no exp channel) -- so
-        // only assert it where it is one. embed-matches-host and associativity hold
-        // for every semantics.
-        constexpr bool exp_is_hom
-            = (S == fpsan::Semantics::Triton)
-              || (fpsan::detail::is_algebraic_semantics(S) && FV<S>::alg_cfg().two_moduli);
-        for(int i = 0; i < n; ++i)
-        {
-            EXPECT_EQ(embed[i], FV<S>(a[i]).fpsan_payload()) << "device embed != host @" << i;
-            EXPECT_EQ(assoc[i], 1u) << "associativity failed on device @" << i;
-            if constexpr(exp_is_hom)
-                EXPECT_EQ(exph[i], 1u) << "exp homomorphism failed on device @" << i;
-        }
-    });
-
-    (void)hipFree(da);
-    (void)hipFree(db);
-    (void)hipFree(dc);
-    (void)hipFree(dembed);
-    (void)hipFree(dassoc);
-    (void)hipFree(dexp);
+  (void)hipFree(da);
+  (void)hipFree(db);
+  (void)hipFree(dc);
+  (void)hipFree(dembed);
+  (void)hipFree(dassoc);
+  (void)hipFree(dexp);
 }

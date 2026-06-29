@@ -8,14 +8,14 @@
 # under the HIP configuration.
 
 function(fpsan_add_example name src)
-  add_executable(${name} ${src})
-  if(CMAKE_HIP_COMPILER)
-    set_source_files_properties(${src} PROPERTIES LANGUAGE HIP)
-  endif()
-  target_link_libraries(${name} PRIVATE fpsan::fpsan fpsan_project_warnings)
-  if(FPSAN_BUILD_TESTS)
-    add_test(NAME ${name} COMMAND ${name})
-  endif()
+    add_executable(${name} ${src})
+    if(CMAKE_HIP_COMPILER)
+        set_source_files_properties(${src} PROPERTIES LANGUAGE HIP)
+    endif()
+    target_link_libraries(${name} PRIVATE fpsan::fpsan fpsan_project_warnings)
+    if(FPSAN_BUILD_TESTS)
+        add_test(NAME ${name} COMMAND ${name})
+    endif()
 endfunction()
 
 fpsan_add_example(fpsan_example_authoring authoring_example.cpp)
@@ -27,5 +27,5 @@ fpsan_add_example(fpsan_example_porting porting_example.cpp)
 # error on architectures without a matrix code path. No arch is selected here;
 # that choice lives in the source and follows CMAKE_HIP_ARCHITECTURES.
 if(CMAKE_HIP_COMPILER)
-  fpsan_add_example(fpsan_example_reduction_demo reduction_demo.cpp)
+    fpsan_add_example(fpsan_example_reduction_demo reduction_demo.cpp)
 endif()

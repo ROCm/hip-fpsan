@@ -11,12 +11,9 @@
 
 #include <cstdio>
 
-int main()
-{
-    static_assert(FPSAN_VERSION_MAJOR == 0, "unexpected version");
-    std::printf("fpsan build canary OK (v%d.%d.%d)\n",
-                FPSAN_VERSION_MAJOR,
-                FPSAN_VERSION_MINOR,
-                FPSAN_VERSION_PATCH);
-    return 0;
+int main() {
+  static_assert(FPSAN_VERSION_MAJOR == 0, "unexpected version");
+  std::printf("fpsan build canary OK (v%d.%d.%d)\n", FPSAN_VERSION_MAJOR, FPSAN_VERSION_MINOR,
+              FPSAN_VERSION_PATCH);
+  return 0;
 }

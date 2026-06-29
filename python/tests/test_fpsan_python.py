@@ -14,8 +14,13 @@ def test_factory_accepts_numpy_dtype_objects_if_numpy_is_present():
 
     assert fpsan.value_type("float32", fpsan.Semantics.Triton) is fpsan.Float32Triton
     if np is not None:
-        assert fpsan.value_type(np.float32, fpsan.Semantics.Triton) is fpsan.Float32Triton
-        assert fpsan.value_type(np.dtype("float32"), fpsan.Semantics.Field) is fpsan.Float32Field
+        assert (
+            fpsan.value_type(np.float32, fpsan.Semantics.Triton) is fpsan.Float32Triton
+        )
+        assert (
+            fpsan.value_type(np.dtype("float32"), fpsan.Semantics.Field)
+            is fpsan.Float32Field
+        )
 
 
 def test_triton_and_field_differ_on_value_facts():
