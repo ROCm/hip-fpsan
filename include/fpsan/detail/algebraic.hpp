@@ -360,21 +360,6 @@ namespace fpsan
             }
             return (U)(((wider_t<U>)a * (wider_t<U>)b) % n);
         }
-        /*
-        // u64-typed convenience overload for the cast tower and discrete-log helpers
-        // (alg_cast1, alg_dlog_*), which operate on u64 fields throughout.
-        FPSAN_HOST_DEVICE constexpr u64 alg_mulmod(u64 a, u64 b, u64 n)
-        {
-            // alg_cast1, and some other consumers use u64 even for narrower types
-            if(n <= 0xffffffffull)
-            {
-                a %= n;
-                b %= n;
-                return (a * b) % n;
-            }
-            return alg_mulmod<u64>(a, b, n);
-        }
-        */
 
         template <class ElementType>
         FPSAN_HOST_DEVICE constexpr AlgConfig make_alg_config(AlgVariant v)
@@ -462,19 +447,6 @@ namespace fpsan
             }
             return r;
         }
-        // u64-typed convenience overloads (cast tower / discrete-log helpers).
-        FPSAN_HOST_DEVICE constexpr u64 alg_addmod(u64 a, u64 b, u64 n)
-        {
-            return alg_addmod<u64>(a, b, n);
-        }
-        FPSAN_HOST_DEVICE constexpr u64 alg_submod(u64 a, u64 b, u64 n)
-        {
-            return alg_submod<u64>(a, b, n);
-        }
-        FPSAN_HOST_DEVICE constexpr u64 alg_powmod(u64 b, u64 e, u64 n)
-        {
-            return alg_powmod<u64>(b, e, n);
-        }
         // Returns the inverse, or n (an out-of-range sentinel) if a is a non-unit.
         // Remainders stay in u64 (< n <= ~2^64); the Bezout coefficients are kept in
         // a signed 128-bit type so this is exact for moduli up to ~2^64 -- the old
@@ -503,10 +475,6 @@ namespace fpsan
             if(t < 0)
                 t += (S)n;
             return (U)t;
-        }
-        FPSAN_HOST_DEVICE constexpr u64 alg_inv(u64 a, u64 n)
-        {
-            return alg_inv<u64>(a, n);
         }
 
         // A cheap operation-tagged scramble: the "free generator" for operations
