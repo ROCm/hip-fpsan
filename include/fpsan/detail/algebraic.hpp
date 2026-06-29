@@ -42,6 +42,7 @@
 #include "fpsan/detail/traits.hpp"
 
 #include <cstdint>
+#include <limits>
 
 namespace fpsan
 {
@@ -348,8 +349,18 @@ namespace fpsan
         template <class U>
         FPSAN_HOST_DEVICE constexpr U alg_mulmod(U a, U b, U n)
         {
+            // numeric_limits is fine here for U itself, since U is just (uint8/16/32/64)
+            constexpr U lim = std::numeric_limits<U>::max() >> (sizeof(U) * 4);
+            // Some callers intentionally use a wider-than necessary U-type (eg alg_cast1)
+            if(n <= lim)
+            {
+                a %= n;
+                b %= n;
+                return (a * b) % n;
+            }
             return (U)(((wider_t<U>)a * (wider_t<U>)b) % n);
         }
+        /*
         // u64-typed convenience overload for the cast tower and discrete-log helpers
         // (alg_cast1, alg_dlog_*), which operate on u64 fields throughout.
         FPSAN_HOST_DEVICE constexpr u64 alg_mulmod(u64 a, u64 b, u64 n)
@@ -363,6 +374,7 @@ namespace fpsan
             }
             return alg_mulmod<u64>(a, b, n);
         }
+        */
 
         template <class ElementType>
         FPSAN_HOST_DEVICE constexpr AlgConfig make_alg_config(AlgVariant v)
