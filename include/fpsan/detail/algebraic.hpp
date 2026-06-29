@@ -354,6 +354,13 @@ namespace fpsan
         // (alg_cast1, alg_dlog_*), which operate on u64 fields throughout.
         FPSAN_HOST_DEVICE constexpr u64 alg_mulmod(u64 a, u64 b, u64 n)
         {
+            // alg_cast1, and some other consumers use u64 even for narrower types
+            if(n <= 0xffffffffull)
+            {
+                a %= n;
+                b %= n;
+                return (a * b) % n;
+            }
             return alg_mulmod<u64>(a, b, n);
         }
 
