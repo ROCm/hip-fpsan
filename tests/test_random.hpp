@@ -29,44 +29,35 @@
 #include <cstdint>
 #include <random>
 
-namespace fpsan_test
-{
+namespace fpsan_test {
 
-    // A fresh engine seeded with the standard default (5489). Each test owns its
-    // own engine, so tests are order-independent and individually reproducible.
-    inline std::mt19937 make_rng()
-    {
-        return std::mt19937{};
-    }
+// A fresh engine seeded with the standard default (5489). Each test owns its
+// own engine, so tests are order-independent and individually reproducible.
+inline std::mt19937 make_rng() { return std::mt19937{}; }
 
-    // One draw mapped to the integer range [lo, hi], fully specified. mt19937
-    // yields values in [0, 2^32), so they fit a uint32_t exactly and this modulo is
-    // portable.
-    inline int pick_int(std::mt19937& rng, int lo, int hi)
-    {
-        const std::uint32_t span = static_cast<std::uint32_t>(hi - lo + 1);
-        return lo + static_cast<int>(static_cast<std::uint32_t>(rng()) % span);
-    }
+// One draw mapped to the integer range [lo, hi], fully specified. mt19937
+// yields values in [0, 2^32), so they fit a uint32_t exactly and this modulo is
+// portable.
+inline int pick_int(std::mt19937 &rng, int lo, int hi) {
+  const std::uint32_t span = static_cast<std::uint32_t>(hi - lo + 1);
+  return lo + static_cast<int>(static_cast<std::uint32_t>(rng()) % span);
+}
 
-    // A small exact-integer value in [lo, hi] as type T. Integers are representable
-    // exactly in every float type we test, so products and sums of them stay exact
-    // (needed where a test compares bit-for-bit against hardware or native ops).
-    // Routed via float so it works for types whose only converting constructor is
-    // from float (e.g. fpsan::fp8_e4m3, fpsan::fp8_e5m2).
-    template <class T>
-    T pick_int_valued(std::mt19937& rng, int lo, int hi)
-    {
-        return static_cast<T>(static_cast<float>(pick_int(rng, lo, hi)));
-    }
+// A small exact-integer value in [lo, hi] as type T. Integers are representable
+// exactly in every float type we test, so products and sums of them stay exact
+// (needed where a test compares bit-for-bit against hardware or native ops).
+// Routed via float so it works for types whose only converting constructor is
+// from float (e.g. fpsan::fp8_e4m3, fpsan::fp8_e5m2).
+template <class T> T pick_int_valued(std::mt19937 &rng, int lo, int hi) {
+  return static_cast<T>(static_cast<float>(pick_int(rng, lo, hi)));
+}
 
-    // A value of the form k/4 for integer k in [lo4, hi4], as type T. Quarters are
-    // exact in binary floating point, so this adds non-integer mantissa coverage
-    // while keeping arithmetic exact.
-    template <class T>
-    T pick_quarter(std::mt19937& rng, int lo4, int hi4)
-    {
-        return static_cast<T>(pick_int(rng, lo4, hi4)) / static_cast<T>(4);
-    }
+// A value of the form k/4 for integer k in [lo4, hi4], as type T. Quarters are
+// exact in binary floating point, so this adds non-integer mantissa coverage
+// while keeping arithmetic exact.
+template <class T> T pick_quarter(std::mt19937 &rng, int lo4, int hi4) {
+  return static_cast<T>(pick_int(rng, lo4, hi4)) / static_cast<T>(4);
+}
 
 } // namespace fpsan_test
 

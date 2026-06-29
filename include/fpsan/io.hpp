@@ -23,32 +23,26 @@
 #include <ios>
 #include <ostream>
 
-namespace fpsan
-{
+namespace fpsan {
 
-    template <class FT, Semantics S, Conversions C>
-    std::ostream& operator<<(std::ostream& os, const Value<FT, S, C>& v)
-    {
-        // Lead with the exact Semantics enum-constant name, then the payload in the
-        // terms meaningful for that flavor.
-        os << semantics_name(S) << "(";
-        if constexpr(S == Semantics::Native)
-        {
-            os << static_cast<double>(v.to_float());
-        }
-        else if constexpr(S == Semantics::Triton)
-        {
-            const std::ios_base::fmtflags save = os.flags();
-            os << "payload=0x" << std::hex << +v.fpsan_payload();
-            os.flags(save);
-        }
-        else // algebraic: the payload is a residue in Z/nZ
-        {
-            os << "payload=" << +v.fpsan_payload() << " mod " << Value<FT, S, C>::alg_cfg().n;
-        }
-        os << ")";
-        return os;
-    }
+template <class FT, Semantics S, Conversions C>
+std::ostream &operator<<(std::ostream &os, const Value<FT, S, C> &v) {
+  // Lead with the exact Semantics enum-constant name, then the payload in the
+  // terms meaningful for that flavor.
+  os << semantics_name(S) << "(";
+  if constexpr (S == Semantics::Native) {
+    os << static_cast<double>(v.to_float());
+  } else if constexpr (S == Semantics::Triton) {
+    const std::ios_base::fmtflags save = os.flags();
+    os << "payload=0x" << std::hex << +v.fpsan_payload();
+    os.flags(save);
+  } else // algebraic: the payload is a residue in Z/nZ
+  {
+    os << "payload=" << +v.fpsan_payload() << " mod " << Value<FT, S, C>::alg_cfg().n;
+  }
+  os << ")";
+  return os;
+}
 
 } // namespace fpsan
 

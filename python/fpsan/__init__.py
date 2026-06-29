@@ -6,7 +6,10 @@
 from ._fpsan import *  # noqa: F401,F403
 
 for _name, _obj in list(globals().items()):
-    if isinstance(_obj, type) and getattr(_obj, "__module__", None) == __name__ + "._fpsan":
+    if (
+        isinstance(_obj, type)
+        and getattr(_obj, "__module__", None) == __name__ + "._fpsan"
+    ):
         _obj.__module__ = __name__
 
 del _name, _obj

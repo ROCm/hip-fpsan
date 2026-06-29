@@ -75,11 +75,11 @@
 #define DEMO_PATH_MFMA 1
 #elif defined(__gfx1250__)
 #define DEMO_PATH_WMMA_K32 1
-#elif defined(__GFX11__) || defined(__gfx1200__) || defined(__gfx1201__) \
-    || !defined(__HIP_DEVICE_COMPILE__)
+#elif defined(__GFX11__) || defined(__gfx1200__) || defined(__gfx1201__) ||                        \
+    !defined(__HIP_DEVICE_COMPILE__)
 #define DEMO_PATH_WMMA 1
 #else
-#error \
+#error                                                                                             \
     "reduction_demo: no matrix code path for this GPU architecture (have: gfx11/gfx12 WMMA K=16, gfx1250 WMMA K=32, gfx94x/gfx950 MFMA)"
 #endif
 
@@ -87,36 +87,32 @@ using fpsan::Conversions;
 using fpsan::Semantics;
 using fpsan::Value;
 
-static constexpr int         N   = 256;
-static constexpr int         NN  = 16;
+static constexpr int N = 256;
+static constexpr int NN = 16;
 static constexpr Conversions kCC = Conversions::Explicit;
 
-#define HIP_CHECK(e)                                                        \
-    do                                                                      \
-    {                                                                       \
-        hipError_t e_ = (e);                                                \
-        if(e_ != hipSuccess)                                                \
-        {                                                                   \
-            std::fprintf(stderr, "HIP error: %s\n", hipGetErrorString(e_)); \
-            std::exit(1);                                                   \
-        }                                                                   \
-    } while(0)
+#define HIP_CHECK(e)                                                                               \
+  do {                                                                                             \
+    hipError_t e_ = (e);                                                                           \
+    if (e_ != hipSuccess) {                                                                        \
+      std::fprintf(stderr, "HIP error: %s\n", hipGetErrorString(e_));                              \
+      std::exit(1);                                                                                \
+    }                                                                                              \
+  } while (0)
 
 // ---------------------------------------------------------------------------
 // (1) CPU naive: sequential ring/float accumulator, left-to-right.
 // ---------------------------------------------------------------------------
-template <Semantics S>
-auto cpu_naive(const float* x)
-{
-    using F = Value<float, S, kCC>;
-    using B = Value<__bf16, S, kCC>;
-    F acc{0.f};
-    for(int i = 0; i < N; ++i)
-        acc = acc + fpsan::cast<float>(B(static_cast<__bf16>(x[i])));
-    if constexpr(S == Semantics::Native)
-        return static_cast<float>(acc);
-    else
-        return acc.fpsan_payload();
+template <Semantics S> auto cpu_naive(const float *x) {
+  using F = Value<float, S, kCC>;
+  using B = Value<__bf16, S, kCC>;
+  F acc{0.f};
+  for (int i = 0; i < N; ++i)
+    acc = acc + fpsan::cast<float>(B(static_cast<__bf16>(x[i])));
+  if constexpr (S == Semantics::Native)
+    return static_cast<float>(acc);
+  else
+    return acc.fpsan_payload();
 }
 
 // ---------------------------------------------------------------------------
@@ -124,24 +120,21 @@ auto cpu_naive(const float* x)
 //     Wave-size agnostic: the per-lane chunk and the butterfly both follow the
 //     launch's wave width.
 // ---------------------------------------------------------------------------
-template <Semantics S, class Out>
-__global__ void k_wfred(const float* x, Out* out)
-{
-    using F        = Value<float, S, kCC>;
-    using B        = Value<__bf16, S, kCC>;
-    const int lane = threadIdx.x;
-    const int per  = N / static_cast<int>(blockDim.x);
-    F         acc{0.f};
-    for(int i = 0; i < per; ++i)
-        acc = acc + fpsan::cast<float>(B(static_cast<__bf16>(x[lane * per + i])));
-    auto sum = fpsan::amdgcn_wave_reduce_fadd_f32<0>(acc);
-    if(lane == 0)
-    {
-        if constexpr(S == Semantics::Native)
-            *out = static_cast<float>(sum);
-        else
-            *out = sum.fpsan_payload();
-    }
+template <Semantics S, class Out> __global__ void k_wfred(const float *x, Out *out) {
+  using F = Value<float, S, kCC>;
+  using B = Value<__bf16, S, kCC>;
+  const int lane = threadIdx.x;
+  const int per = N / static_cast<int>(blockDim.x);
+  F acc{0.f};
+  for (int i = 0; i < per; ++i)
+    acc = acc + fpsan::cast<float>(B(static_cast<__bf16>(x[lane * per + i])));
+  auto sum = fpsan::amdgcn_wave_reduce_fadd_f32<0>(acc);
+  if (lane == 0) {
+    if constexpr (S == Semantics::Native)
+      *out = static_cast<float>(sum);
+    else
+      *out = sum.fpsan_payload();
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -157,14 +150,13 @@ __global__ void k_wfred(const float* x, Out* out)
 // idx, which logical K-index it holds. gfx11 uses 256-bit replicated A/B
 // operands, so the v16 element index is k directly. gfx12 uses the compact v8
 // fragment layout from Wmma16x16x16Layout.
-__device__ inline int wmma_frag_k(int lane, int idx)
-{
+__device__ inline int wmma_frag_k(int lane, int idx) {
 #if defined(__GFX11__)
-    (void)lane;
-    return idx;
+  (void)lane;
+  return idx;
 #else
-    int reg = idx >> 1, half = idx & 1;
-    return half | ((reg & 1) << 1) | ((lane >> 4) << 2) | ((reg >> 1) << 3);
+  int reg = idx >> 1, half = idx & 1;
+  return half | ((reg & 1) << 1) | ((lane >> 4) << 2) | ((reg >> 1) << 3);
 #endif
 }
 #elif defined(DEMO_PATH_WMMA_K32)
@@ -172,231 +164,215 @@ __device__ inline int wmma_frag_k(int lane, int idx)
 // lane and v16 fragment slot idx, which logical K-index (0..31) it holds.
 // Mirrors the forward map half=k&1; reg=((k>>1)&1)+2*((k>>3)&1)+4*((k>>4)&1);
 // idx=2*reg+half; lane bit2 = (k>>2)&1.
-__device__ inline int wmma_frag_k32(int lane, int idx)
-{
-    int half = idx & 1, reg = idx >> 1;
-    return half | ((reg & 1) << 1) | (((lane >> 4) & 1) << 2) | (((reg >> 1) & 1) << 3)
-           | (((reg >> 2) & 1) << 4);
+__device__ inline int wmma_frag_k32(int lane, int idx) {
+  int half = idx & 1, reg = idx >> 1;
+  return half | ((reg & 1) << 1) | (((lane >> 4) & 1) << 2) | (((reg >> 1) & 1) << 3) |
+         (((reg >> 2) & 1) << 4);
 }
 #endif
 
 template <Semantics S, class Out>
-__global__ void k_matrix_column_sums(const float* x, Out* col_out)
-{
-    const int lane = threadIdx.x;
+__global__ void k_matrix_column_sums(const float *x, Out *col_out) {
+  const int lane = threadIdx.x;
 #if defined(DEMO_PATH_MFMA)
-    // CDNA3 / CDNA4: MFMA 16x16x16 bf16 (wave64, 4 bf16/lane). Fill A=ones and
-    // B=inputs by walking the logical (outer, k) indices through the MFMA layout
-    // helper input_loc; A[o][k] and B[k][o] share a fragment slot (M==N).
-    using V4B = Value<fpsan::v4bf_native, S, kCC>;
-    using V4F = Value<fpsan::v4f_native, S, kCC>;
-    fpsan::v4bf_native an{}, bn{};
-    for(int o = 0; o < NN; ++o)
-        for(int k = 0; k < NN; ++k)
-        {
-            auto loc = fpsan::detail::input_loc(NN, NN, 1, o, k, 0, /*data_bits=*/16);
-            if(loc.lane == lane)
-            {
-                const int e = 2 * loc.reg + loc.sub;
-                an[e]       = static_cast<__bf16>(1.0f);
-                bn[e]       = static_cast<__bf16>(x[k * NN + o]);
-            }
-        }
-    V4B  a{an}, b{bn};
-    V4F  c{fpsan::v4f_native{}};
-    auto d = fpsan::amdgcn_mfma_f32_16x16x16bf16_1k(a, b, c);
-#elif defined(DEMO_PATH_WMMA_K32)
-    // gfx1250: WMMA 16x16x32 bf16 (wave32, 16 bf16/lane). gfx1250 has no K=16
-    // WMMA, so we contract over K=32 with A=ones (16x32) and B holding the 16x16
-    // inputs in K-rows 0..15 and zeros in K-rows 16..31. The zero rows add
-    // nothing, so D[m][n] is still the column-n sum -- placed identically to the
-    // K=16 path (lane n, register 0).
-    using V16B = Value<fpsan::v16bf_native, S, kCC>;
-    using V8F  = Value<fpsan::v8f_native, S, kCC>;
-    fpsan::v16bf_native an{}, bn{};
-    for(int idx = 0; idx < 16; ++idx)
-    {
-        int k   = wmma_frag_k32(lane, idx);
-        an[idx] = static_cast<__bf16>(1.0f);
-        bn[idx]
-            = (k < NN) ? static_cast<__bf16>(x[k * NN + (lane & 15)]) : static_cast<__bf16>(0.0f);
+  // CDNA3 / CDNA4: MFMA 16x16x16 bf16 (wave64, 4 bf16/lane). Fill A=ones and
+  // B=inputs by walking the logical (outer, k) indices through the MFMA layout
+  // helper input_loc; A[o][k] and B[k][o] share a fragment slot (M==N).
+  using V4B = Value<fpsan::v4bf_native, S, kCC>;
+  using V4F = Value<fpsan::v4f_native, S, kCC>;
+  fpsan::v4bf_native an{}, bn{};
+  for (int o = 0; o < NN; ++o)
+    for (int k = 0; k < NN; ++k) {
+      auto loc = fpsan::detail::input_loc(NN, NN, 1, o, k, 0, /*data_bits=*/16);
+      if (loc.lane == lane) {
+        const int e = 2 * loc.reg + loc.sub;
+        an[e] = static_cast<__bf16>(1.0f);
+        bn[e] = static_cast<__bf16>(x[k * NN + o]);
+      }
     }
-    V16B a{an}, b{bn};
-    V8F  c{fpsan::v8f_native{}};
-    auto d = fpsan::amdgcn_wmma_f32_16x16x32_bf16(a, b, c);
+  V4B a{an}, b{bn};
+  V4F c{fpsan::v4f_native{}};
+  auto d = fpsan::amdgcn_mfma_f32_16x16x16bf16_1k(a, b, c);
+#elif defined(DEMO_PATH_WMMA_K32)
+  // gfx1250: WMMA 16x16x32 bf16 (wave32, 16 bf16/lane). gfx1250 has no K=16
+  // WMMA, so we contract over K=32 with A=ones (16x32) and B holding the 16x16
+  // inputs in K-rows 0..15 and zeros in K-rows 16..31. The zero rows add
+  // nothing, so D[m][n] is still the column-n sum -- placed identically to the
+  // K=16 path (lane n, register 0).
+  using V16B = Value<fpsan::v16bf_native, S, kCC>;
+  using V8F = Value<fpsan::v8f_native, S, kCC>;
+  fpsan::v16bf_native an{}, bn{};
+  for (int idx = 0; idx < 16; ++idx) {
+    int k = wmma_frag_k32(lane, idx);
+    an[idx] = static_cast<__bf16>(1.0f);
+    bn[idx] = (k < NN) ? static_cast<__bf16>(x[k * NN + (lane & 15)]) : static_cast<__bf16>(0.0f);
+  }
+  V16B a{an}, b{bn};
+  V8F c{fpsan::v8f_native{}};
+  auto d = fpsan::amdgcn_wmma_f32_16x16x32_bf16(a, b, c);
 #else
 #if defined(__GFX11__)
-    // RDNA3 / gfx11: WMMA 16x16x16 bf16 (wave32, 16 bf16/lane). A/B are
-    // replicated across lanes {i, i+16}, and vector element idx is K directly.
-    using V16B = Value<fpsan::v16bf_wmma_native, S, kCC>;
-    using V8F  = Value<fpsan::v8f_native, S, kCC>;
-    fpsan::v16bf_wmma_native an{}, bn{};
-    for(int idx = 0; idx < NN; ++idx)
-    {
-        int k   = wmma_frag_k(lane, idx);
-        an[idx] = static_cast<__bf16>(1.0f);
-        bn[idx] = static_cast<__bf16>(x[k * NN + (lane & 15)]);
-    }
-    V16B a{an}, b{bn};
-    V8F  c{fpsan::v8f_native{}};
-    auto d = fpsan::amdgcn_wmma_f32_16x16x16_bf16_w32(a, b, c);
+  // RDNA3 / gfx11: WMMA 16x16x16 bf16 (wave32, 16 bf16/lane). A/B are
+  // replicated across lanes {i, i+16}, and vector element idx is K directly.
+  using V16B = Value<fpsan::v16bf_wmma_native, S, kCC>;
+  using V8F = Value<fpsan::v8f_native, S, kCC>;
+  fpsan::v16bf_wmma_native an{}, bn{};
+  for (int idx = 0; idx < NN; ++idx) {
+    int k = wmma_frag_k(lane, idx);
+    an[idx] = static_cast<__bf16>(1.0f);
+    bn[idx] = static_cast<__bf16>(x[k * NN + (lane & 15)]);
+  }
+  V16B a{an}, b{bn};
+  V8F c{fpsan::v8f_native{}};
+  auto d = fpsan::amdgcn_wmma_f32_16x16x16_bf16_w32(a, b, c);
 #else
-    // RDNA4 / gfx12: WMMA 16x16x16 bf16 (wave32, 8 bf16/lane).
-    using V8B = Value<fpsan::v8bf_native, S, kCC>;
-    using V8F = Value<fpsan::v8f_native, S, kCC>;
-    fpsan::v8bf_native an{}, bn{};
-    for(int idx = 0; idx < 8; ++idx)
-    {
-        int k   = wmma_frag_k(lane, idx);
-        an[idx] = static_cast<__bf16>(1.0f);
-        bn[idx] = static_cast<__bf16>(x[k * NN + (lane & 15)]);
-    }
-    V8B  a{an}, b{bn};
-    V8F  c{fpsan::v8f_native{}};
-    auto d = fpsan::amdgcn_wmma_f32_16x16x16_bf16_w32(a, b, c);
+  // RDNA4 / gfx12: WMMA 16x16x16 bf16 (wave32, 8 bf16/lane).
+  using V8B = Value<fpsan::v8bf_native, S, kCC>;
+  using V8F = Value<fpsan::v8f_native, S, kCC>;
+  fpsan::v8bf_native an{}, bn{};
+  for (int idx = 0; idx < 8; ++idx) {
+    int k = wmma_frag_k(lane, idx);
+    an[idx] = static_cast<__bf16>(1.0f);
+    bn[idx] = static_cast<__bf16>(x[k * NN + (lane & 15)]);
+  }
+  V8B a{an}, b{bn};
+  V8F c{fpsan::v8f_native{}};
+  auto d = fpsan::amdgcn_wmma_f32_16x16x16_bf16_w32(a, b, c);
 #endif
 #endif
-    // Lane n in 0..15 holds D[0][n] = column-n sum in accumulator register 0.
-    if(lane < NN)
-    {
-        if constexpr(S == Semantics::Native)
-            col_out[lane] = static_cast<float>(d.get(0));
-        else
-            col_out[lane] = d.get(0).fpsan_payload();
-    }
+  // Lane n in 0..15 holds D[0][n] = column-n sum in accumulator register 0.
+  if (lane < NN) {
+    if constexpr (S == Semantics::Native)
+      col_out[lane] = static_cast<float>(d.get(0));
+    else
+      col_out[lane] = d.get(0).fpsan_payload();
+  }
 }
 
 // Final sequential sum of 16 column sums on the host (same shape in both
 // modes -- the matrix path's distinctive accumulator order lives in the matrix
 // instruction itself, not in this host sum-of-columns step).
-template <Semantics S, class In>
-auto host_sum16(const In* cols)
-{
-    using F = Value<float, S, kCC>;
-    F acc{0.f};
-    for(int i = 0; i < NN; ++i)
-    {
-        F v{0.f};
-        if constexpr(S == Semantics::Native)
-            v = F{cols[i]};
-        else
-            v = F::from_fpsan_payload(cols[i]);
-        acc = acc + v;
-    }
-    if constexpr(S == Semantics::Native)
-        return static_cast<float>(acc);
+template <Semantics S, class In> auto host_sum16(const In *cols) {
+  using F = Value<float, S, kCC>;
+  F acc{0.f};
+  for (int i = 0; i < NN; ++i) {
+    F v{0.f};
+    if constexpr (S == Semantics::Native)
+      v = F{cols[i]};
     else
-        return acc.fpsan_payload();
+      v = F::from_fpsan_payload(cols[i]);
+    acc = acc + v;
+  }
+  if constexpr (S == Semantics::Native)
+    return static_cast<float>(acc);
+  else
+    return acc.fpsan_payload();
 }
 
 static constexpr int kLabelW = 34;
-static void          show_float(const char* label, float f)
-{
-    std::uint32_t bits;
-    std::memcpy(&bits, &f, sizeof bits);
-    std::printf("  %-*s %14.1f  (0x%08x)\n", kLabelW, label, f, bits);
+static void show_float(const char *label, float f) {
+  std::uint32_t bits;
+  std::memcpy(&bits, &f, sizeof bits);
+  std::printf("  %-*s %14.1f  (0x%08x)\n", kLabelW, label, f, bits);
 }
-static void show_payload(const char* label, std::uint32_t p)
-{
-    // Blank value column ("%14s" of "") so the hex digits line up under the
-    // Float-mode (0x...) column above; the 3 spaces match the "  (" prefix.
-    std::printf("  %-*s %14s   0x%08x\n", kLabelW, label, "", p);
+static void show_payload(const char *label, std::uint32_t p) {
+  // Blank value column ("%14s" of "") so the hex digits line up under the
+  // Float-mode (0x...) column above; the 3 spaces match the "  (" prefix.
+  std::printf("  %-*s %14s   0x%08x\n", kLabelW, label, "", p);
 }
 
-int main()
-{
-    int ndev = 0;
-    if(hipGetDeviceCount(&ndev) != hipSuccess || ndev == 0)
-    {
-        std::fprintf(stderr, "no HIP device; skipping demo\n");
-        return 0; // skip
-    }
+int main() {
+  int ndev = 0;
+  if (hipGetDeviceCount(&ndev) != hipSuccess || ndev == 0) {
+    std::fprintf(stderr, "no HIP device; skipping demo\n");
+    return 0; // skip
+  }
 
-    hipDeviceProp_t props;
-    HIP_CHECK(hipGetDeviceProperties(&props, 0));
-    const int wave = props.warpSize; // 32 on RDNA (WMMA), 64 on CDNA (MFMA)
+  hipDeviceProp_t props;
+  HIP_CHECK(hipGetDeviceProperties(&props, 0));
+  const int wave = props.warpSize; // 32 on RDNA (WMMA), 64 on CDNA (MFMA)
 
-    // --- Inputs: one large value (2^24) at index 0; 1.0 everywhere else.
-    // Both values are bf16-exact, so the bf16 cast is a no-op for the values
-    // themselves and the cast machinery is exercised without adding noise.
-    std::vector<float> input(N);
-    input[0] = static_cast<float>(1u << 24);
-    for(int i = 1; i < N; ++i)
-        input[i] = 1.0f;
+  // --- Inputs: one large value (2^24) at index 0; 1.0 everywhere else.
+  // Both values are bf16-exact, so the bf16 cast is a no-op for the values
+  // themselves and the cast machinery is exercised without adding noise.
+  std::vector<float> input(N);
+  input[0] = static_cast<float>(1u << 24);
+  for (int i = 1; i < N; ++i)
+    input[i] = 1.0f;
 
-    float* d_in;
-    HIP_CHECK(hipMalloc(&d_in, N * sizeof(float)));
-    HIP_CHECK(hipMemcpy(d_in, input.data(), N * sizeof(float), hipMemcpyHostToDevice));
+  float *d_in;
+  HIP_CHECK(hipMalloc(&d_in, N * sizeof(float)));
+  HIP_CHECK(hipMemcpy(d_in, input.data(), N * sizeof(float), hipMemcpyHostToDevice));
 
-    // --- native mode.
-    const float cpu_f = cpu_naive<Semantics::Native>(input.data());
+  // --- native mode.
+  const float cpu_f = cpu_naive<Semantics::Native>(input.data());
 
-    float* d_wfred_f;
-    HIP_CHECK(hipMalloc(&d_wfred_f, sizeof(float)));
-    k_wfred<Semantics::Native><<<1, wave>>>(d_in, d_wfred_f);
-    HIP_CHECK(hipDeviceSynchronize());
-    float wfred_f = 0;
-    HIP_CHECK(hipMemcpy(&wfred_f, d_wfred_f, sizeof(float), hipMemcpyDeviceToHost));
+  float *d_wfred_f;
+  HIP_CHECK(hipMalloc(&d_wfred_f, sizeof(float)));
+  k_wfred<Semantics::Native><<<1, wave>>>(d_in, d_wfred_f);
+  HIP_CHECK(hipDeviceSynchronize());
+  float wfred_f = 0;
+  HIP_CHECK(hipMemcpy(&wfred_f, d_wfred_f, sizeof(float), hipMemcpyDeviceToHost));
 
-    float* d_cols_f;
-    HIP_CHECK(hipMalloc(&d_cols_f, NN * sizeof(float)));
-    k_matrix_column_sums<Semantics::Native><<<1, wave>>>(d_in, d_cols_f);
-    HIP_CHECK(hipDeviceSynchronize());
-    float cols_f[NN]{};
-    HIP_CHECK(hipMemcpy(cols_f, d_cols_f, NN * sizeof(float), hipMemcpyDeviceToHost));
-    const float wmma_f = host_sum16<Semantics::Native>(cols_f);
+  float *d_cols_f;
+  HIP_CHECK(hipMalloc(&d_cols_f, NN * sizeof(float)));
+  k_matrix_column_sums<Semantics::Native><<<1, wave>>>(d_in, d_cols_f);
+  HIP_CHECK(hipDeviceSynchronize());
+  float cols_f[NN]{};
+  HIP_CHECK(hipMemcpy(cols_f, d_cols_f, NN * sizeof(float), hipMemcpyDeviceToHost));
+  const float wmma_f = host_sum16<Semantics::Native>(cols_f);
 
-    // --- FPSan mode.
-    const std::uint32_t cpu_p = cpu_naive<Semantics::Triton>(input.data());
+  // --- FPSan mode.
+  const std::uint32_t cpu_p = cpu_naive<Semantics::Triton>(input.data());
 
-    std::uint32_t* d_wfred_p;
-    HIP_CHECK(hipMalloc(&d_wfred_p, sizeof(std::uint32_t)));
-    k_wfred<Semantics::Triton><<<1, wave>>>(d_in, d_wfred_p);
-    HIP_CHECK(hipDeviceSynchronize());
-    std::uint32_t wfred_p = 0;
-    HIP_CHECK(hipMemcpy(&wfred_p, d_wfred_p, sizeof(std::uint32_t), hipMemcpyDeviceToHost));
+  std::uint32_t *d_wfred_p;
+  HIP_CHECK(hipMalloc(&d_wfred_p, sizeof(std::uint32_t)));
+  k_wfred<Semantics::Triton><<<1, wave>>>(d_in, d_wfred_p);
+  HIP_CHECK(hipDeviceSynchronize());
+  std::uint32_t wfred_p = 0;
+  HIP_CHECK(hipMemcpy(&wfred_p, d_wfred_p, sizeof(std::uint32_t), hipMemcpyDeviceToHost));
 
-    std::uint32_t* d_cols_p;
-    HIP_CHECK(hipMalloc(&d_cols_p, NN * sizeof(std::uint32_t)));
-    k_matrix_column_sums<Semantics::Triton><<<1, wave>>>(d_in, d_cols_p);
-    HIP_CHECK(hipDeviceSynchronize());
-    std::uint32_t cols_p[NN]{};
-    HIP_CHECK(hipMemcpy(cols_p, d_cols_p, NN * sizeof(std::uint32_t), hipMemcpyDeviceToHost));
-    const std::uint32_t wmma_p = host_sum16<Semantics::Triton>(cols_p);
+  std::uint32_t *d_cols_p;
+  HIP_CHECK(hipMalloc(&d_cols_p, NN * sizeof(std::uint32_t)));
+  k_matrix_column_sums<Semantics::Triton><<<1, wave>>>(d_in, d_cols_p);
+  HIP_CHECK(hipDeviceSynchronize());
+  std::uint32_t cols_p[NN]{};
+  HIP_CHECK(hipMemcpy(cols_p, d_cols_p, NN * sizeof(std::uint32_t), hipMemcpyDeviceToHost));
+  const std::uint32_t wmma_p = host_sum16<Semantics::Triton>(cols_p);
 
-    // --- Report.
-    std::printf("Device %s (warpSize=%d).\n", props.gcnArchName, wave);
-    std::printf("native-mode reductions (sum of 256 bf16-cast values, "
-                "accumulated in f32):\n");
-    show_float("CPU naive  (sequential)", cpu_f);
-    show_float("wfred      (wave butterfly)", wfred_f);
-    show_float("matrix bf16 (col-sums + host sum)", wmma_f);
-    std::printf("\nFPSan-mode reductions (payload of the same sum):\n");
-    show_payload("CPU naive  (sequential)", cpu_p);
-    show_payload("wfred      (wave butterfly)", wfred_p);
-    show_payload("matrix bf16 (col-sums + host sum)", wmma_p);
+  // --- Report.
+  std::printf("Device %s (warpSize=%d).\n", props.gcnArchName, wave);
+  std::printf("native-mode reductions (sum of 256 bf16-cast values, "
+              "accumulated in f32):\n");
+  show_float("CPU naive  (sequential)", cpu_f);
+  show_float("wfred      (wave butterfly)", wfred_f);
+  show_float("matrix bf16 (col-sums + host sum)", wmma_f);
+  std::printf("\nFPSan-mode reductions (payload of the same sum):\n");
+  show_payload("CPU naive  (sequential)", cpu_p);
+  show_payload("wfred      (wave butterfly)", wfred_p);
+  show_payload("matrix bf16 (col-sums + host sum)", wmma_p);
 
-    // --- Invariants.
-    bool float_disagree = !(cpu_f == wfred_f && wfred_f == wmma_f);
-    bool fpsan_agree    = (cpu_p == wfred_p && wfred_p == wmma_p);
-    std::printf("\nnative results %s.\n",
-                float_disagree ? "DISAGREE (expected: non-associative f32 add)"
-                               : "all AGREE (unexpected for this input)");
-    std::printf("FPSan results %s.\n",
-                fpsan_agree ? "all AGREE (expected: payload ring is associative)"
-                            : "DISAGREE (unexpected!)");
+  // --- Invariants.
+  bool float_disagree = !(cpu_f == wfred_f && wfred_f == wmma_f);
+  bool fpsan_agree = (cpu_p == wfred_p && wfred_p == wmma_p);
+  std::printf("\nnative results %s.\n", float_disagree
+                                            ? "DISAGREE (expected: non-associative f32 add)"
+                                            : "all AGREE (unexpected for this input)");
+  std::printf("FPSan results %s.\n", fpsan_agree
+                                         ? "all AGREE (expected: payload ring is associative)"
+                                         : "DISAGREE (unexpected!)");
 
-    (void)hipFree(d_in);
-    (void)hipFree(d_wfred_f);
-    (void)hipFree(d_cols_f);
-    (void)hipFree(d_wfred_p);
-    (void)hipFree(d_cols_p);
+  (void)hipFree(d_in);
+  (void)hipFree(d_wfred_f);
+  (void)hipFree(d_cols_f);
+  (void)hipFree(d_wfred_p);
+  (void)hipFree(d_cols_p);
 
-    if(!float_disagree)
-        return 2;
-    if(!fpsan_agree)
-        return 3;
-    std::printf("\nDemo OK: FPSan certifies the float differences are just the "
-                "expected\nconsequences of non-associativity, not bugs.\n");
-    return 0;
+  if (!float_disagree)
+    return 2;
+  if (!fpsan_agree)
+    return 3;
+  std::printf("\nDemo OK: FPSan certifies the float differences are just the "
+              "expected\nconsequences of non-associativity, not bugs.\n");
+  return 0;
 }
