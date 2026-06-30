@@ -44,6 +44,17 @@ template <class F> void for_each_fpsan_semantics(F &&f) {
   f(std::integral_constant<S, S::PythagoreanRing>{});
 }
 
+// Narrow consumer loop for expensive integration tests whose correctness does
+// not depend on re-running every algebraic flavor. Use this only after a cheap
+// primitive test covers the feature under every default/all-variant semantic.
+// Native remains excluded for the same reason as above: tests drive it as the
+// separate hardware oracle.
+template <class F> void for_triton_field_fpsan_semantics(F &&f) {
+  using S = fpsan::Semantics;
+  f(std::integral_constant<S, S::Triton>{});
+  f(std::integral_constant<S, S::Field>{});
+}
+
 // The exhaustive variant loop keeps the 2-suffixed reroll variants. Use it
 // for tests whose purpose is the algebraic semantics themselves, not merely
 // verifying that a generic wrapper is semantics-agnostic.
@@ -134,6 +145,10 @@ template <class FT, fpsan::Semantics S> constexpr bool flavor_has_cbrt() {
 //   TEST(Foo, BarFpsan) { FPSAN_RUN_FPSAN_SEMANTICS(test_bar, 17); }
 #define FPSAN_RUN_FPSAN_SEMANTICS(fn, ...)                                                         \
   ::fpsan_test::for_each_fpsan_semantics([&](auto sem) { fn<decltype(sem)::value>(__VA_ARGS__); })
+
+#define FPSAN_RUN_TRITON_FIELD_FPSAN_SEMANTICS(fn, ...)                                            \
+  ::fpsan_test::for_triton_field_fpsan_semantics(                                                  \
+      [&](auto sem) { fn<decltype(sem)::value>(__VA_ARGS__); })
 
 #define FPSAN_RUN_ALL_VARIANTS(fn, ...)                                                            \
   ::fpsan_test::for_each_fpsan_semantics_all_variants(                                             \

@@ -328,11 +328,12 @@ template <class Traits, Semantics S> void run_fpsan_matches_scalar_reference() {
   (void)hipFree(dD);
 }
 
-// Run the payload test for every FPSan-family semantics (Triton + all algebraic).
+// Run the payload test for representative FPSan-family semantics (Triton + one
+// algebraic field).
 template <class Traits> void run_fpsan_matches_scalar_reference_all() {
   if (!have_device())
     GTEST_SKIP() << "no HIP device";
-  fpsan_test::for_each_fpsan_semantics(
+  fpsan_test::for_triton_field_fpsan_semantics(
       [](auto sem) { run_fpsan_matches_scalar_reference<Traits, decltype(sem)::value>(); });
 }
 

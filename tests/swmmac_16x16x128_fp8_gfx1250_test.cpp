@@ -292,7 +292,7 @@ template <class Traits, Semantics S> void run_fpsan_matches_scalar_reference() {
   };                                                                                               \
   TEST(NAME, LayoutMatchesHardware) { run_layout_matches_hardware<NAME>(); }                       \
   TEST(NAME, FpsanMatchesScalarReference) {                                                        \
-    fpsan_test::for_each_fpsan_semantics(                                                          \
+    fpsan_test::for_triton_field_fpsan_semantics(                                                  \
         [](auto sem) { run_fpsan_matches_scalar_reference<NAME, decltype(sem)::value>(); });       \
   }
 

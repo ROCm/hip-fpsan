@@ -227,7 +227,7 @@ template <class Traits, Semantics S> void run_fpsan_matches_scalar_reference() {
   };                                                                                               \
   TEST(NAME, LayoutMatchesHardware) { run_layout_matches_hardware<NAME>(); }                       \
   TEST(NAME, FpsanMatchesScalarReference) {                                                        \
-    fpsan_test::for_each_fpsan_semantics(                                                          \
+    fpsan_test::for_triton_field_fpsan_semantics(                                                  \
         [](auto sem) { run_fpsan_matches_scalar_reference<NAME, decltype(sem)::value>(); });       \
   }
 
@@ -247,3 +247,7 @@ FPSAN_WMMA128_TRAITS(WmmaF16Bf8Fp8_128, v64e5m2_native, v64e4m3_native, v8h_nati
                      amdgcn_wmma_f16_16x16x128_bf8_fp8)
 FPSAN_WMMA128_TRAITS(WmmaF16Bf8Bf8_128, v64e5m2_native, v64e5m2_native, v8h_native,
                      amdgcn_wmma_f16_16x16x128_bf8_bf8)
+
+TEST(WmmaF32Fp8Bf8_128, FieldWithMulCastsMatrixPath) {
+  run_fpsan_matches_scalar_reference<WmmaF32Fp8Bf8_128, Semantics::FieldWithMulCasts>();
+}

@@ -398,7 +398,7 @@ static void run_sub_scale(const char *tag) {
 
 template <int AFMT, int BFMT, int ASFMT = 0, int BSFMT = 0>
 static void run_sub_scale_all(const char *tag) {
-  fpsan_test::for_each_fpsan_semantics(
+  fpsan_test::for_triton_field_fpsan_semantics(
       [&](auto sem) { run_sub_scale<decltype(sem)::value, AFMT, BFMT, ASFMT, BSFMT>(tag); });
 }
 
@@ -747,7 +747,7 @@ template <Semantics S, int AFMT, int BFMT> static void run_sub_scale16(const cha
 }
 
 template <int AFMT, int BFMT> static void run_sub_scale16_all(const char *tag) {
-  fpsan_test::for_each_fpsan_semantics(
+  fpsan_test::for_triton_field_fpsan_semantics(
       [&](auto sem) { run_sub_scale16<decltype(sem)::value, AFMT, BFMT>(tag); });
 }
 
@@ -916,7 +916,7 @@ static void run_mixed_scale(const char *tag) {
 
 template <int AFMT, int BFMT, int ASFMT = 0, int BSFMT = 0>
 static void run_mixed_scale_all(const char *tag) {
-  fpsan_test::for_each_fpsan_semantics(
+  fpsan_test::for_triton_field_fpsan_semantics(
       [&](auto sem) { run_mixed_scale<decltype(sem)::value, AFMT, BFMT, ASFMT, BSFMT>(tag); });
 }
 
@@ -1078,7 +1078,7 @@ template <Semantics S, int AFMT, int BFMT> static void run_mixed_scale16(const c
 }
 
 template <int AFMT, int BFMT> static void run_mixed_scale16_all(const char *tag) {
-  fpsan_test::for_each_fpsan_semantics(
+  fpsan_test::for_triton_field_fpsan_semantics(
       [&](auto sem) { run_mixed_scale16<decltype(sem)::value, AFMT, BFMT>(tag); });
 }
 

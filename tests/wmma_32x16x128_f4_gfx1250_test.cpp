@@ -253,7 +253,7 @@ TEST(WmmaF4_32x16x128, WrapperFloatAndFPSan) {
                     << " ref=" << fref[i];
   EXPECT_EQ(nf, 0) << nf << " float mismatches";
 
-  fpsan_test::for_each_fpsan_semantics([&](auto sem) {
+  fpsan_test::for_triton_field_fpsan_semantics([&](auto sem) {
     constexpr Semantics S = decltype(sem)::value;
     std::vector<std::uint32_t> pref(M * N);
     for (int m = 0; m < M; ++m)
@@ -381,7 +381,7 @@ template <int Cmod> static void run_modifier_f4() {
       ADD_FAILURE() << "Cmod=" << Cmod << " float at m=" << i / N << " n=" << i % N;
   EXPECT_EQ(nf, 0) << nf << " float mismatches";
 
-  fpsan_test::for_each_fpsan_semantics([&](auto sem) {
+  fpsan_test::for_triton_field_fpsan_semantics([&](auto sem) {
     constexpr Semantics S = decltype(sem)::value;
     std::vector<std::uint32_t> pref(M * N);
     for (int m = 0; m < M; ++m)
@@ -626,7 +626,7 @@ template <bool SCALE16, int SFMT> static void run_scale(const char *tag) {
     unsigned *dSB = to_dev(SB);
     k_scale_float<SFMT><<<1, 32>>>(dA, dB, dC, dSA, dSB, dDf);
     HIP_CHECK(hipDeviceSynchronize());
-    fpsan_test::for_each_fpsan_semantics([&](auto sem) {
+    fpsan_test::for_triton_field_fpsan_semantics([&](auto sem) {
       constexpr Semantics S = decltype(sem)::value;
       std::vector<std::uint32_t> pref = make_pref(sem);
       std::uint32_t *dDp = nullptr;
@@ -662,7 +662,7 @@ template <bool SCALE16, int SFMT> static void run_scale(const char *tag) {
     unsigned long long *dSB = to_dev(SB);
     k_scale16_float<SFMT><<<1, 32>>>(dA, dB, dC, dSA, dSB, dDf);
     HIP_CHECK(hipDeviceSynchronize());
-    fpsan_test::for_each_fpsan_semantics([&](auto sem) {
+    fpsan_test::for_triton_field_fpsan_semantics([&](auto sem) {
       constexpr Semantics S = decltype(sem)::value;
       std::vector<std::uint32_t> pref = make_pref(sem);
       std::uint32_t *dDp = nullptr;
