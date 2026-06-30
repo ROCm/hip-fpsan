@@ -116,8 +116,8 @@ template <class EncodeIdxFn> SwData make_sw_data(std::uint32_t seed, EncodeIdxFn
 
 template <class T> T *to_dev(const std::vector<T> &h) {
   T *d = nullptr;
-  static_cast<void>(hipMalloc(&d, h.size() * sizeof(T)));
-  static_cast<void>(hipMemcpy(d, h.data(), h.size() * sizeof(T), hipMemcpyHostToDevice));
+  (void)hipMalloc(&d, h.size() * sizeof(T));
+  (void)hipMemcpy(d, h.data(), h.size() * sizeof(T), hipMemcpyHostToDevice);
   return d;
 }
 
@@ -447,7 +447,7 @@ template <class Traits> void run_h_case(std::uint32_t seed) {
   HIP_CHECK(hipMemcpy(got.data(), dD, M * N * sizeof(Out), hipMemcpyDeviceToHost));
   for (int t = 0; t < M * N; ++t)
     EXPECT_EQ(bits_of(got[t]), bits_of(ref[t])) << "Layout at " << t;
-  static_cast<void>(hipFree(dD));
+  (void)hipFree(dD);
 
   fpsan_test::for_each_fpsan_semantics([&](auto sem) {
     constexpr Semantics S = decltype(sem)::value;
@@ -461,15 +461,15 @@ template <class Traits> void run_h_case(std::uint32_t seed) {
     HIP_CHECK(hipMemcpy(got_p.data(), dP, M * N * sizeof(Payload), hipMemcpyDeviceToHost));
     for (int t = 0; t < M * N; ++t)
       EXPECT_EQ(static_cast<std::uint64_t>(got_p[t]), ref_p[t]) << "FPSan at " << t;
-    static_cast<void>(hipFree(dP));
+    (void)hipFree(dP);
   });
 
-  static_cast<void>(hipFree(dA));
-  static_cast<void>(hipFree(dB));
-  static_cast<void>(hipFree(dC));
-  static_cast<void>(hipFree(dp0));
-  static_cast<void>(hipFree(dp1));
-  static_cast<void>(hipFree(dI));
+  (void)hipFree(dA);
+  (void)hipFree(dB);
+  (void)hipFree(dC);
+  (void)hipFree(dp0);
+  (void)hipFree(dp1);
+  (void)hipFree(dI);
 }
 
 template <class Traits> void run_fp8_case(std::uint32_t seed) {
@@ -489,7 +489,7 @@ template <class Traits> void run_fp8_case(std::uint32_t seed) {
   HIP_CHECK(hipMemcpy(got.data(), dD, M * N * sizeof(float), hipMemcpyDeviceToHost));
   for (int t = 0; t < M * N; ++t)
     EXPECT_EQ(bits_of(got[t]), bits_of(ref[t])) << "Layout at " << t;
-  static_cast<void>(hipFree(dD));
+  (void)hipFree(dD);
 
   fpsan_test::for_each_fpsan_semantics([&](auto sem) {
     constexpr Semantics S = decltype(sem)::value;
@@ -503,14 +503,14 @@ template <class Traits> void run_fp8_case(std::uint32_t seed) {
     HIP_CHECK(hipMemcpy(got_p.data(), dP, M * N * sizeof(std::uint32_t), hipMemcpyDeviceToHost));
     for (int t = 0; t < M * N; ++t)
       EXPECT_EQ(got_p[t], ref_p[t]) << "FPSan at " << t;
-    static_cast<void>(hipFree(dP));
+    (void)hipFree(dP);
   });
 
-  static_cast<void>(hipFree(dA));
-  static_cast<void>(hipFree(dB));
-  static_cast<void>(hipFree(dC));
-  static_cast<void>(hipFree(dp0));
-  static_cast<void>(hipFree(dp1));
-  static_cast<void>(hipFree(dI));
+  (void)hipFree(dA);
+  (void)hipFree(dB);
+  (void)hipFree(dC);
+  (void)hipFree(dp0);
+  (void)hipFree(dp1);
+  (void)hipFree(dI);
 }
 } // namespace

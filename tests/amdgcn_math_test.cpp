@@ -199,11 +199,11 @@ AMDGCN_MATH_FMED3_KERNEL(amdgcn_fmed3h, _Float16, __builtin_amdgcn_fmed3h)
         EXPECT_EQ(pay_wrapper[i], pay_direct[i]) << "FPSan lane " << i;                            \
       }                                                                                            \
     });                                                                                            \
-    static_cast<void>(hipFree(dIn));                                                               \
-    static_cast<void>(hipFree(dDirect));                                                           \
-    static_cast<void>(hipFree(dWrapper));                                                          \
-    static_cast<void>(hipFree(dPayDirect));                                                        \
-    static_cast<void>(hipFree(dPayWrapper));                                                       \
+    (void)hipFree(dIn);                                                                            \
+    (void)hipFree(dDirect);                                                                        \
+    (void)hipFree(dWrapper);                                                                       \
+    (void)hipFree(dPayDirect);                                                                     \
+    (void)hipFree(dPayWrapper);                                                                    \
   }
 
 AMDGCN_MATH_UNARY_TEST(amdgcn_rcpf, float, make_positive_inputs)
@@ -251,13 +251,13 @@ AMDGCN_MATH_UNARY_TEST(amdgcn_fractf, float, make_signed_inputs)
         EXPECT_EQ(pay_wrapper[i], pay_direct[i]) << "FPSan lane " << i;                            \
       }                                                                                            \
     });                                                                                            \
-    static_cast<void>(hipFree(dA));                                                                \
-    static_cast<void>(hipFree(dB));                                                                \
-    static_cast<void>(hipFree(dC));                                                                \
-    static_cast<void>(hipFree(dDirect));                                                           \
-    static_cast<void>(hipFree(dWrapper));                                                          \
-    static_cast<void>(hipFree(dPayDirect));                                                        \
-    static_cast<void>(hipFree(dPayWrapper));                                                       \
+    (void)hipFree(dA);                                                                             \
+    (void)hipFree(dB);                                                                             \
+    (void)hipFree(dC);                                                                             \
+    (void)hipFree(dDirect);                                                                        \
+    (void)hipFree(dWrapper);                                                                       \
+    (void)hipFree(dPayDirect);                                                                     \
+    (void)hipFree(dPayWrapper);                                                                    \
   }
 
 #undef AMDGCN_MATH_FMED3_TEST

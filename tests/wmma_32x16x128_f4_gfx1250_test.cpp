@@ -96,8 +96,8 @@ __global__ void k_f4(const std::uint32_t *Apack, const std::uint32_t *Bpack, con
   v16f_native d = __builtin_amdgcn_wmma_f32_32x16x128_f4(a, b, static_cast<short>(0), c);
   for (int r = 0; r < 16; ++r)
     D[(r + 16 * (lane >> 4)) * N + (lane & 15)] = d[r];
-  static_cast<void>(A0);
-  static_cast<void>(B0);
+  (void)A0;
+  (void)B0;
 }
 
 static const float kGrid[] = {0.f,   0.5f, 1.f,   1.5f, 2.f,  3.f,  4.f, 6.f,
@@ -155,10 +155,10 @@ TEST(WmmaF4_32x16x128, LayoutMatchesHardware) {
       ++mism;
     }
   EXPECT_EQ(mism, 0) << mism << " / " << (M * N) << " elements mismatched";
-  static_cast<void>(hipFree(dA));
-  static_cast<void>(hipFree(dB));
-  static_cast<void>(hipFree(dC));
-  static_cast<void>(hipFree(dD));
+  (void)hipFree(dA);
+  (void)hipFree(dB);
+  (void)hipFree(dC);
+  (void)hipFree(dD);
 }
 
 // ===================== wrapper: Float + FPSan =====================
@@ -278,12 +278,12 @@ TEST(WmmaF4_32x16x128, WrapperFloatAndFPSan) {
       if (gotp[i] != pref[i] && np++ < 4)
         ADD_FAILURE() << "payload at " << i << " got=" << gotp[i] << " ref=" << pref[i];
     EXPECT_EQ(np, 0) << np << " payload mismatches";
-    static_cast<void>(hipFree(dDp));
+    (void)hipFree(dDp);
   });
-  static_cast<void>(hipFree(dA));
-  static_cast<void>(hipFree(dB));
-  static_cast<void>(hipFree(dC));
-  static_cast<void>(hipFree(dDf));
+  (void)hipFree(dA);
+  (void)hipFree(dB);
+  (void)hipFree(dC);
+  (void)hipFree(dDf);
 }
 
 // ===================== C-accumulator modifier (gfx1250) =====================
@@ -411,12 +411,12 @@ template <int Cmod> static void run_modifier_f4() {
       if (gotp[i] != pref[i] && np++ < 4)
         ADD_FAILURE() << "Cmod=" << Cmod << " payload at " << i;
     EXPECT_EQ(np, 0) << np << " payload mismatches";
-    static_cast<void>(hipFree(dDp));
+    (void)hipFree(dDp);
   });
-  static_cast<void>(hipFree(dA));
-  static_cast<void>(hipFree(dB));
-  static_cast<void>(hipFree(dC));
-  static_cast<void>(hipFree(dDf));
+  (void)hipFree(dA);
+  (void)hipFree(dB);
+  (void)hipFree(dC);
+  (void)hipFree(dDf);
 }
 
 TEST(WmmaF4_32x16x128, ModifierNegC) { run_modifier_f4<1>(); }
@@ -640,10 +640,10 @@ template <bool SCALE16, int SFMT> static void run_scale(const char *tag) {
         if (gotp[i] != pref[i] && np++ < 4)
           ADD_FAILURE() << tag << " payload at " << i << " got=" << gotp[i] << " ref=" << pref[i];
       EXPECT_EQ(np, 0) << np << " payload mismatches";
-      static_cast<void>(hipFree(dDp));
+      (void)hipFree(dDp);
     });
-    static_cast<void>(hipFree(dSA));
-    static_cast<void>(hipFree(dSB));
+    (void)hipFree(dSA);
+    (void)hipFree(dSB);
   } else {
     std::vector<unsigned long long> SA(32, 0ull), SB(32, 0ull);
     for (int m = 0; m < M; ++m) {
@@ -676,10 +676,10 @@ template <bool SCALE16, int SFMT> static void run_scale(const char *tag) {
         if (gotp[i] != pref[i] && np++ < 4)
           ADD_FAILURE() << tag << " payload at " << i << " got=" << gotp[i] << " ref=" << pref[i];
       EXPECT_EQ(np, 0) << np << " payload mismatches";
-      static_cast<void>(hipFree(dDp));
+      (void)hipFree(dDp);
     });
-    static_cast<void>(hipFree(dSA));
-    static_cast<void>(hipFree(dSB));
+    (void)hipFree(dSA);
+    (void)hipFree(dSB);
   }
   std::vector<float> gotf(M * N);
   HIP_CHECK(hipMemcpy(gotf.data(), dDf, M * N * sizeof(float), hipMemcpyDeviceToHost));
@@ -688,10 +688,10 @@ template <bool SCALE16, int SFMT> static void run_scale(const char *tag) {
       ADD_FAILURE() << tag << " float at m=" << i / N << " n=" << i % N << " got=" << gotf[i]
                     << " ref=" << fref[i];
   EXPECT_EQ(nf, 0) << nf << " float mismatches";
-  static_cast<void>(hipFree(dA));
-  static_cast<void>(hipFree(dB));
-  static_cast<void>(hipFree(dC));
-  static_cast<void>(hipFree(dDf));
+  (void)hipFree(dA);
+  (void)hipFree(dB);
+  (void)hipFree(dC);
+  (void)hipFree(dDf);
 }
 
 TEST(WmmaF4_32x16x128, ScaleFloatAndFPSan) { run_scale<false, 0>("scale"); }
@@ -754,9 +754,9 @@ TEST(WmmaF4_32x16x128, DISABLED_ProbeArowDmap) {
       printf(" %3d", static_cast<int>(draw[lane * 16 + r]));
     printf("\n");
   }
-  static_cast<void>(hipFree(dA));
-  static_cast<void>(hipFree(dB));
-  static_cast<void>(hipFree(dD));
+  (void)hipFree(dA);
+  (void)hipFree(dB);
+  (void)hipFree(dD);
 }
 
 // Probe 2: pin B (lane,slot) and the D-col map. Stage B so column n holds (n+1)
@@ -789,9 +789,9 @@ TEST(WmmaF4_32x16x128, DISABLED_ProbeBcolDmap) {
       printf(" %3d", static_cast<int>(draw[lane * 16 + r]));
     printf("\n");
   }
-  static_cast<void>(hipFree(dA));
-  static_cast<void>(hipFree(dB));
-  static_cast<void>(hipFree(dD));
+  (void)hipFree(dA);
+  (void)hipFree(dB);
+  (void)hipFree(dD);
 }
 
 // Probe 3: true single-nibble one-hot A sweep over a physical lane. For each
@@ -837,7 +837,7 @@ static void onehot_sweep(int srcLane) {
       classSlots.emplace_back();
     }
     classSlots[ci].push_back(s);
-    static_cast<void>(hipFree(dA));
+    (void)hipFree(dA);
   }
   printf("one-hot A lane=%d: %d row-classes\n", srcLane, static_cast<int>(classes.size()));
   for (int c = 0; c < static_cast<int>(classes.size()); ++c) {
@@ -849,8 +849,8 @@ static void onehot_sweep(int srcLane) {
       printf("%d ", s);
     printf("}\n");
   }
-  static_cast<void>(hipFree(dB));
-  static_cast<void>(hipFree(dD));
+  (void)hipFree(dB);
+  (void)hipFree(dD);
 }
 
 TEST(WmmaF4_32x16x128, DISABLED_ProbeOneHotLane0) { onehot_sweep(0); }
@@ -891,14 +891,14 @@ static void kprobe_row0(int srcLane) {
         kk |= 1 << b;
     }
     kof[sa] = kk;
-    static_cast<void>(hipFree(dA));
+    (void)hipFree(dA);
   }
   printf("A-slot -> k (row0, srcLane=%d):\n", srcLane);
   for (int sa = 0; sa < 64; ++sa)
     printf("s=%2d k=%3d%s", sa, kof[sa], (sa % 8 == 7) ? "\n" : "  ");
   for (int b = 0; b < 7; ++b)
-    static_cast<void>(hipFree(dBbit[b]));
-  static_cast<void>(hipFree(dD));
+    (void)hipFree(dBbit[b]);
+  (void)hipFree(dD);
 }
 
 TEST(WmmaF4_32x16x128, DISABLED_ProbeKrow0Lane0) { kprobe_row0(0); }
@@ -964,12 +964,12 @@ static void scale_probe() {
       if (draw[i] == 256.f)
         printf("%d ", (i % 16) + 16 * ((i / 16) >> 4)); // m
     printf("}\n");
-    static_cast<void>(hipFree(dSA));
+    (void)hipFree(dSA);
   }
-  static_cast<void>(hipFree(dA));
-  static_cast<void>(hipFree(dB));
-  static_cast<void>(hipFree(dD));
-  static_cast<void>(hipFree(dSB));
+  (void)hipFree(dA);
+  (void)hipFree(dB);
+  (void)hipFree(dD);
+  (void)hipFree(dSB);
 }
 
 // byte->k probe for the A-scale of row 0. A one-hot decoded at (0,k0); B all
@@ -1004,17 +1004,17 @@ static void scale_byte_probe(int scaleLane) {
       HIP_CHECK(hipMemcpy(&v, dD, sizeof(float), hipMemcpyDeviceToHost));
       if (v == 2.f)
         byte = b;
-      static_cast<void>(hipFree(dSA));
+      (void)hipFree(dSA);
     }
     kbyte[k0] = byte;
-    static_cast<void>(hipFree(dA));
+    (void)hipFree(dA);
   }
   printf("k -> A-scale byte (row0, scaleLane=%d):\n", scaleLane);
   for (int k0 = 0; k0 < K; ++k0)
     printf("k=%3d byte=%d%s", k0, kbyte[k0], (k0 % 8 == 7) ? "\n" : "  ");
-  static_cast<void>(hipFree(dB));
-  static_cast<void>(hipFree(dD));
-  static_cast<void>(hipFree(dSB));
+  (void)hipFree(dB);
+  (void)hipFree(dD);
+  (void)hipFree(dSB);
 }
 
 // Pass 1b: scaleB-lane -> col. B nonzero only in column n0 (decoded 1.0); A all
@@ -1049,12 +1049,12 @@ static void scaleB_probe(int n0) {
     HIP_CHECK(hipMemcpy(draw.data(), dD, 512 * sizeof(float), hipMemcpyDeviceToHost));
     if (draw[idx] != 128.f)
       printf("  lane L=%2d -> D[0][%d]=%g\n", L, n0, draw[idx]);
-    static_cast<void>(hipFree(dSB));
+    (void)hipFree(dSB);
   }
-  static_cast<void>(hipFree(dA));
-  static_cast<void>(hipFree(dB));
-  static_cast<void>(hipFree(dD));
-  static_cast<void>(hipFree(dSA));
+  (void)hipFree(dA);
+  (void)hipFree(dB);
+  (void)hipFree(dD);
+  (void)hipFree(dSA);
 }
 
 TEST(WmmaF4_32x16x128, DISABLED_ProbeScaleLane) { scale_probe(); }

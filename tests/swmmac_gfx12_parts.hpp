@@ -145,8 +145,8 @@ template <class EncodeIdxFn> SwData make_sw_data(std::uint32_t seed, EncodeIdxFn
 
 template <class T> T *to_dev(const std::vector<T> &h) {
   T *d = nullptr;
-  static_cast<void>(hipMalloc(&d, h.size() * sizeof(T)));
-  static_cast<void>(hipMemcpy(d, h.data(), h.size() * sizeof(T), hipMemcpyHostToDevice));
+  (void)hipMalloc(&d, h.size() * sizeof(T));
+  (void)hipMemcpy(d, h.data(), h.size() * sizeof(T), hipMemcpyHostToDevice);
   return d;
 }
 
@@ -397,7 +397,7 @@ void run_fp8_layout_and_fpsan(std::uint32_t seed, WrapFloatFn wf, MakeFpsanFn ma
   HIP_CHECK(hipMemcpy(got.data(), dDf, kSwM * kSwN * sizeof(float), hipMemcpyDeviceToHost));
   for (int t = 0; t < kSwM * kSwN; ++t)
     EXPECT_EQ(bits_of(got[t]), bits_of(ref[t])) << "Layout at " << t;
-  static_cast<void>(hipFree(dDf));
+  (void)hipFree(dDf);
 
   fpsan_test::for_each_fpsan_semantics([&](auto sem) {
     constexpr Semantics S = decltype(sem)::value;
@@ -413,13 +413,13 @@ void run_fp8_layout_and_fpsan(std::uint32_t seed, WrapFloatFn wf, MakeFpsanFn ma
         hipMemcpy(got_p.data(), dDp, kSwM * kSwN * sizeof(std::uint32_t), hipMemcpyDeviceToHost));
     for (int t = 0; t < kSwM * kSwN; ++t)
       EXPECT_EQ(got_p[t], ref_p[t]) << "FPSan at " << t;
-    static_cast<void>(hipFree(dDp));
+    (void)hipFree(dDp);
   });
 
-  static_cast<void>(hipFree(dA));
-  static_cast<void>(hipFree(dB));
-  static_cast<void>(hipFree(dC));
-  static_cast<void>(hipFree(dp0));
-  static_cast<void>(hipFree(dp1));
-  static_cast<void>(hipFree(dI));
+  (void)hipFree(dA);
+  (void)hipFree(dB);
+  (void)hipFree(dC);
+  (void)hipFree(dp0);
+  (void)hipFree(dp1);
+  (void)hipFree(dI);
 }

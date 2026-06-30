@@ -85,8 +85,8 @@ TEST(CvtFp8E5M3, DecodeAllBytes) {
     else
       EXPECT_EQ(got[b], ref) << "byte 0x" << std::hex << b;
   }
-  static_cast<void>(hipFree(dIn));
-  static_cast<void>(hipFree(dO));
+  (void)hipFree(dIn);
+  (void)hipFree(dO);
 }
 
 // Byte-select decode: place a finite E5M3 byte at byte ByteIdx, decode<ByteIdx>.
@@ -110,8 +110,8 @@ template <int ByteIdx> void run_decode_bytesel() {
   for (int b = 0; b < 255; ++b)
     EXPECT_EQ(got[b], narrow_to_f32(static_cast<std::uint32_t>(b), kFp8E5M3))
         << "byteIdx " << ByteIdx << " byte 0x" << std::hex << b;
-  static_cast<void>(hipFree(dIn));
-  static_cast<void>(hipFree(dO));
+  (void)hipFree(dIn);
+  (void)hipFree(dO);
 }
 
 TEST(CvtFp8E5M3, DecodeByteSel) {
@@ -157,7 +157,7 @@ template <bool DstLo> void run_pack() {
       }
       EXPECT_EQ(got, want) << "DstLo=" << DstLo << " ca=0x" << std::hex << ca << " cb=0x" << cb;
     }
-  static_cast<void>(hipFree(dO));
+  (void)hipFree(dO);
 }
 
 TEST(CvtFp8E5M3, PackLowHalf) { run_pack<true>(); }
@@ -187,8 +187,8 @@ TEST(CvtFp8E5M3, PackDecodeRoundTrip) {
   for (int b = 0; b < 255; ++b)
     EXPECT_EQ(got[b], narrow_to_f32(static_cast<std::uint32_t>(b), kFp8E5M3))
         << "round-trip byte 0x" << std::hex << b;
-  static_cast<void>(hipFree(dIn));
-  static_cast<void>(hipFree(dO));
+  (void)hipFree(dIn);
+  (void)hipFree(dO);
 }
 
 // ===========================================================================
@@ -215,7 +215,7 @@ TEST(CvtFp8E5M3, SrPackExact) {
     std::uint32_t want = (static_cast<std::uint32_t>(old) & ~(0xFFu << 16)) | (enc << 16);
     EXPECT_EQ(got, want) << "byte 0x" << std::hex << b;
   }
-  static_cast<void>(hipFree(dO));
+  (void)hipFree(dO);
 }
 
 // ===========================================================================
@@ -248,8 +248,8 @@ TEST(CvtFp8E5M3, FpsanDecodeWiden8) {
       EXPECT_EQ(got[b], static_cast<unsigned>(want)) << "byte 0x" << std::hex << b;
     }
   });
-  static_cast<void>(hipFree(dIn));
-  static_cast<void>(hipFree(dO));
+  (void)hipFree(dIn);
+  (void)hipFree(dO);
 }
 
 template <Semantics S> __global__ void k_e5m3_fpsan_pack(int old, float a, float b, int *out) {
@@ -280,7 +280,7 @@ TEST(CvtFp8E5M3, FpsanPackLow8) {
       EXPECT_EQ(got, want) << "a=" << a << " b=" << b;
     }
   });
-  static_cast<void>(hipFree(dO));
+  (void)hipFree(dO);
 }
 
 #endif // has builtin

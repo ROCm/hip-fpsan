@@ -208,13 +208,13 @@ std::vector<float> make_dot4_acc() {
         EXPECT_EQ(pwrap[i], pdir[i]) << "FPSan lane " << i;                                        \
       }                                                                                            \
     });                                                                                            \
-    static_cast<void>(hipFree(dA));                                                                \
-    static_cast<void>(hipFree(dB));                                                                \
-    static_cast<void>(hipFree(dC));                                                                \
-    static_cast<void>(hipFree(dDir));                                                              \
-    static_cast<void>(hipFree(dWrap));                                                             \
-    static_cast<void>(hipFree(dPdir));                                                             \
-    static_cast<void>(hipFree(dPwrap));                                                            \
+    (void)hipFree(dA);                                                                             \
+    (void)hipFree(dB);                                                                             \
+    (void)hipFree(dC);                                                                             \
+    (void)hipFree(dDir);                                                                           \
+    (void)hipFree(dWrap);                                                                          \
+    (void)hipFree(dPdir);                                                                          \
+    (void)hipFree(dPwrap);                                                                         \
   }
 
 DOT4_TEST(amdgcn_dot4_f32_fp8_fp8)

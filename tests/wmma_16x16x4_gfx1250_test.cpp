@@ -138,11 +138,11 @@ TEST(WmmaF32F32_4, LayoutMatchesHardware) {
   HIP_CHECK(hipMemcpy(ours.data(), dOurs, M * N * sizeof(float), hipMemcpyDeviceToHost));
   for (int i = 0; i < M * N; ++i)
     EXPECT_EQ(bits_of(hw[i]), bits_of(ours[i])) << "mismatch at " << (i / N) << "," << (i % N);
-  static_cast<void>(hipFree(dA));
-  static_cast<void>(hipFree(dB));
-  static_cast<void>(hipFree(dC));
-  static_cast<void>(hipFree(dHw));
-  static_cast<void>(hipFree(dOurs));
+  (void)hipFree(dA);
+  (void)hipFree(dB);
+  (void)hipFree(dC);
+  (void)hipFree(dHw);
+  (void)hipFree(dOurs);
 }
 
 template <Semantics S> void run_fpsan_matches_scalar_reference() {
@@ -172,10 +172,10 @@ template <Semantics S> void run_fpsan_matches_scalar_reference() {
   HIP_CHECK(hipMemcpy(got.data(), dD, M * N * sizeof(std::uint32_t), hipMemcpyDeviceToHost));
   for (int i = 0; i < M * N; ++i)
     EXPECT_EQ(got[i], ref[i]) << "payload mismatch at " << (i / N) << "," << (i % N);
-  static_cast<void>(hipFree(dA));
-  static_cast<void>(hipFree(dB));
-  static_cast<void>(hipFree(dC));
-  static_cast<void>(hipFree(dD));
+  (void)hipFree(dA);
+  (void)hipFree(dB);
+  (void)hipFree(dC);
+  (void)hipFree(dD);
 }
 
 TEST(WmmaF32F32_4, FpsanMatchesScalarReference) {

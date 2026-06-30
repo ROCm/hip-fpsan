@@ -127,8 +127,8 @@ template <class FP8, class DstFT> void run_unpack_all() {
     else
       EXPECT_EQ(got[b], ref) << "byte 0x" << std::hex << b;
   }
-  static_cast<void>(hipFree(dIn));
-  static_cast<void>(hipFree(dO));
+  (void)hipFree(dIn);
+  (void)hipFree(dO);
 }
 
 TEST(CvtScalef32Fp8Vec, UnpackAll_F32_Fp8) { run_unpack_all<fpsan::fp8_e4m3, float>(); }
@@ -225,7 +225,7 @@ template <class FP8, class SrcVEC, class SrcElem> void run_roundtrip() {
     HIP_CHECK(hipMemcpy(got.data(), dO, 2 * LANES * sizeof(float), hipMemcpyDeviceToHost));
     for (int i = 0; i < 2 * LANES; ++i)
       EXPECT_EQ(got[i], in[i]) << "Float round-trip at " << i;
-    static_cast<void>(hipFree(dO));
+    (void)hipFree(dO);
   }
   // FPSan: payload must equal the payload-ring reference. Pack divides, unpack
   // multiplies: cast<float>(cast<FP8>(cast<SrcElem>(x) / scale)) * scale.
@@ -247,9 +247,9 @@ template <class FP8, class SrcVEC, class SrcElem> void run_roundtrip() {
     HIP_CHECK(hipMemcpy(got.data(), dO, 2 * LANES * sizeof(std::uint32_t), hipMemcpyDeviceToHost));
     for (int i = 0; i < 2 * LANES; ++i)
       EXPECT_EQ(got[i], ref[i]) << "FPSan payload at " << i;
-    static_cast<void>(hipFree(dO));
+    (void)hipFree(dO);
   });
-  static_cast<void>(hipFree(dIn));
+  (void)hipFree(dIn);
 }
 
 TEST(CvtScalef32Fp8Vec, RoundTrip_Fp8_F16) {

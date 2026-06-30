@@ -66,9 +66,9 @@ TEST(CvtSrPkF16, FloatExactInputs) {
     EXPECT_EQ(got[2 * i], static_cast<float>(static_cast<_Float16>(a[i]))) << "lane0 i=" << i;
     EXPECT_EQ(got[2 * i + 1], static_cast<float>(static_cast<_Float16>(b[i]))) << "lane1 i=" << i;
   }
-  static_cast<void>(hipFree(dA));
-  static_cast<void>(hipFree(dB));
-  static_cast<void>(hipFree(dO));
+  (void)hipFree(dA);
+  (void)hipFree(dB);
+  (void)hipFree(dO);
 }
 
 // One f32 strictly between two f16 neighbors; each thread uses a distinct seed.
@@ -102,8 +102,8 @@ TEST(CvtSrPkF16, FloatStochasticBracket) {
   }
   EXPECT_TRUE(seen.count(lo) && seen.count(hi))
       << "rounding was not stochastic (got " << seen.size() << " distinct values)";
-  static_cast<void>(hipFree(dS));
-  static_cast<void>(hipFree(dO));
+  (void)hipFree(dS);
+  (void)hipFree(dO);
 }
 
 template <Semantics S> __global__ void k_f16_fpsan(const float *a, const float *b, unsigned *out) {
@@ -131,9 +131,9 @@ template <Semantics S> void run_f16_fpsan_payload_truncate() {
     EXPECT_EQ(got[2 * i], fpsan::cast<_Float16>(VF{a[i]}).fpsan_payload()) << "lane0 i=" << i;
     EXPECT_EQ(got[2 * i + 1], fpsan::cast<_Float16>(VF{b[i]}).fpsan_payload()) << "lane1 i=" << i;
   }
-  static_cast<void>(hipFree(dA));
-  static_cast<void>(hipFree(dB));
-  static_cast<void>(hipFree(dO));
+  (void)hipFree(dA);
+  (void)hipFree(dB);
+  (void)hipFree(dO);
 }
 
 TEST(CvtSrPkF16, FpsanPayloadTruncate) {
@@ -168,9 +168,9 @@ TEST(CvtSrPkBf16, FloatExactInputs) {
     EXPECT_EQ(got[2 * i], static_cast<float>(static_cast<__bf16>(a[i]))) << "lane0 i=" << i;
     EXPECT_EQ(got[2 * i + 1], static_cast<float>(static_cast<__bf16>(b[i]))) << "lane1 i=" << i;
   }
-  static_cast<void>(hipFree(dA));
-  static_cast<void>(hipFree(dB));
-  static_cast<void>(hipFree(dO));
+  (void)hipFree(dA);
+  (void)hipFree(dB);
+  (void)hipFree(dO);
 }
 
 __global__ void k_bf16_sr(float x, const unsigned *seeds, float *out) {
@@ -202,8 +202,8 @@ TEST(CvtSrPkBf16, FloatStochasticBracket) {
     seen.insert(got[i]);
   }
   EXPECT_TRUE(seen.count(lo) && seen.count(hi)) << "rounding was not stochastic";
-  static_cast<void>(hipFree(dS));
-  static_cast<void>(hipFree(dO));
+  (void)hipFree(dS);
+  (void)hipFree(dO);
 }
 
 template <Semantics S> __global__ void k_bf16_fpsan(const float *a, const float *b, unsigned *out) {
@@ -231,9 +231,9 @@ template <Semantics S> void run_bf16_fpsan_payload_truncate() {
     EXPECT_EQ(got[2 * i], fpsan::cast<__bf16>(VF{a[i]}).fpsan_payload()) << "lane0 i=" << i;
     EXPECT_EQ(got[2 * i + 1], fpsan::cast<__bf16>(VF{b[i]}).fpsan_payload()) << "lane1 i=" << i;
   }
-  static_cast<void>(hipFree(dA));
-  static_cast<void>(hipFree(dB));
-  static_cast<void>(hipFree(dO));
+  (void)hipFree(dA);
+  (void)hipFree(dB);
+  (void)hipFree(dO);
 }
 
 TEST(CvtSrPkBf16, FpsanPayloadTruncate) {

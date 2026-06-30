@@ -71,7 +71,7 @@ __global__ void k_loadtr_raw_f16(const std::uint16_t *gmem, std::uint16_t *out) 
   using v8fp16 = __fp16 __attribute__((ext_vector_type(8)));
 #endif
   int lane = threadIdx.x;
-  static_cast<void>(gmem);
+  (void)gmem;
 #if FPSAN_TEST_GLOBAL_LOAD_TR_W64
   vfp16 r{};
 #else
@@ -123,7 +123,7 @@ __global__ void k_loadtr_raw_bf16(const std::uint16_t *gmem, std::uint16_t *out)
   using v8bf = __bf16 __attribute__((ext_vector_type(8)));
 #endif
   int lane = threadIdx.x;
-  static_cast<void>(gmem);
+  (void)gmem;
 #if FPSAN_TEST_GLOBAL_LOAD_TR_W64
   vbf r{};
 #else
@@ -171,7 +171,7 @@ __global__ void k_loadtr_wrap_bf16(const std::uint16_t *gmem, std::uint16_t *out
 // ---- raw builtin reference for 8-bit global_load_tr_b64 --------------------
 __global__ void k_loadtr_raw_b64(const std::uint8_t *gmem, std::uint8_t *out) {
   int lane = threadIdx.x;
-  static_cast<void>(gmem);
+  (void)gmem;
   int r{};
 #ifdef __HIP_DEVICE_COMPILE__
   r = __builtin_amdgcn_global_load_tr_b64_i32(
@@ -215,20 +215,19 @@ std::vector<std::uint16_t> run16(void (*k)(const std::uint16_t *, std::uint16_t 
   const int N = WAVE * SLOTS16;
   std::uint16_t *d_in = nullptr;
   std::uint16_t *d_out = nullptr;
-  static_cast<void>(hipMalloc(&d_in, N * sizeof(std::uint16_t)));
-  static_cast<void>(hipMalloc(&d_out, N * sizeof(std::uint16_t)));
+  (void)hipMalloc(&d_in, N * sizeof(std::uint16_t));
+  (void)hipMalloc(&d_out, N * sizeof(std::uint16_t));
   std::vector<std::uint16_t> h_in(N);
   for (int lane = 0; lane < WAVE; ++lane)
     for (int s = 0; s < SLOTS16; ++s)
       h_in[lane * SLOTS16 + s] = pat16(lane, s);
-  static_cast<void>(hipMemcpy(d_in, h_in.data(), N * sizeof(std::uint16_t), hipMemcpyHostToDevice));
+  (void)hipMemcpy(d_in, h_in.data(), N * sizeof(std::uint16_t), hipMemcpyHostToDevice);
   k<<<1, WAVE>>>(d_in, d_out);
-  static_cast<void>(hipDeviceSynchronize());
+  (void)hipDeviceSynchronize();
   std::vector<std::uint16_t> h_out(N);
-  static_cast<void>(
-      hipMemcpy(h_out.data(), d_out, N * sizeof(std::uint16_t), hipMemcpyDeviceToHost));
-  static_cast<void>(hipFree(d_in));
-  static_cast<void>(hipFree(d_out));
+  (void)hipMemcpy(h_out.data(), d_out, N * sizeof(std::uint16_t), hipMemcpyDeviceToHost);
+  (void)hipFree(d_in);
+  (void)hipFree(d_out);
   return h_out;
 }
 
@@ -237,20 +236,19 @@ std::vector<std::uint8_t> run8(void (*k)(const std::uint8_t *, std::uint8_t *)) 
   const int N = WAVE * SLOTS8;
   std::uint8_t *d_in = nullptr;
   std::uint8_t *d_out = nullptr;
-  static_cast<void>(hipMalloc(&d_in, N * sizeof(std::uint8_t)));
-  static_cast<void>(hipMalloc(&d_out, N * sizeof(std::uint8_t)));
+  (void)hipMalloc(&d_in, N * sizeof(std::uint8_t));
+  (void)hipMalloc(&d_out, N * sizeof(std::uint8_t));
   std::vector<std::uint8_t> h_in(N);
   for (int lane = 0; lane < WAVE; ++lane)
     for (int s = 0; s < SLOTS8; ++s)
       h_in[lane * SLOTS8 + s] = pat8(lane, s);
-  static_cast<void>(hipMemcpy(d_in, h_in.data(), N * sizeof(std::uint8_t), hipMemcpyHostToDevice));
+  (void)hipMemcpy(d_in, h_in.data(), N * sizeof(std::uint8_t), hipMemcpyHostToDevice);
   k<<<1, WAVE>>>(d_in, d_out);
-  static_cast<void>(hipDeviceSynchronize());
+  (void)hipDeviceSynchronize();
   std::vector<std::uint8_t> h_out(N);
-  static_cast<void>(
-      hipMemcpy(h_out.data(), d_out, N * sizeof(std::uint8_t), hipMemcpyDeviceToHost));
-  static_cast<void>(hipFree(d_in));
-  static_cast<void>(hipFree(d_out));
+  (void)hipMemcpy(h_out.data(), d_out, N * sizeof(std::uint8_t), hipMemcpyDeviceToHost);
+  (void)hipFree(d_in);
+  (void)hipFree(d_out);
   return h_out;
 }
 #endif

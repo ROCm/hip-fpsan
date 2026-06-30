@@ -94,7 +94,7 @@ template <class FP8, bool WordSel> void run_cvt_pk() {
     HIP_CHECK(hipMemcpy(got.data(), dO, 2 * LANES * sizeof(float), hipMemcpyDeviceToHost));
     for (int i = 0; i < 2 * LANES; ++i)
       EXPECT_EQ(got[i], in[i]) << "Float round-trip at " << i;
-    static_cast<void>(hipFree(dO));
+    (void)hipFree(dO);
   }
   // FPSan: must equal the direct payload-ring composition
   // cast<float>(cast<fp8>), for every FPSan-family semantics.
@@ -112,9 +112,9 @@ template <class FP8, bool WordSel> void run_cvt_pk() {
     HIP_CHECK(hipMemcpy(got.data(), dO, 2 * LANES * sizeof(std::uint32_t), hipMemcpyDeviceToHost));
     for (int i = 0; i < 2 * LANES; ++i)
       EXPECT_EQ(got[i], ref[i]) << "FPSan payload at " << i;
-    static_cast<void>(hipFree(dO));
+    (void)hipFree(dO);
   });
-  static_cast<void>(hipFree(dIn));
+  (void)hipFree(dIn);
 }
 
 TEST(CvtPkF32, Fp8_Word0) { run_cvt_pk<fpsan::fp8_e4m3, 0>(); }
@@ -156,8 +156,8 @@ TEST(CvtPkF32, PackWritesSameWordInBothModes) {
       EXPECT_EQ(static_cast<unsigned>(hiF[l]) & 0x0000FFFFu, 0u) << "Float hi " << l;
       EXPECT_NE(static_cast<unsigned>(loF[l]) & 0x0000FFFFu, 0u);
     }
-    static_cast<void>(hipFree(dLoF));
-    static_cast<void>(hipFree(dHiF));
+    (void)hipFree(dLoF);
+    (void)hipFree(dHiF);
   }
   // The same word-placement invariant must hold in every FPSan-family semantics.
   fpsan_test::for_each_fpsan_semantics([&](auto sem) {
@@ -175,10 +175,10 @@ TEST(CvtPkF32, PackWritesSameWordInBothModes) {
       EXPECT_EQ(static_cast<unsigned>(hiP[l]) & 0x0000FFFFu, 0u) << "FPSan hi " << l;
       EXPECT_NE(static_cast<unsigned>(loP[l]) & 0x0000FFFFu, 0u);
     }
-    static_cast<void>(hipFree(dLoP));
-    static_cast<void>(hipFree(dHiP));
+    (void)hipFree(dLoP);
+    (void)hipFree(dHiP);
   });
-  static_cast<void>(hipFree(dIn));
+  (void)hipFree(dIn);
 }
 
 // Exercise the device cvt_pk_f32_fp8 / cvt_pk_f32_bf8 unpack over *every* fp8
@@ -214,8 +214,8 @@ template <class FP8> void run_unpack_all_bytes() {
     else
       EXPECT_EQ(got[b], ref) << "byte 0x" << std::hex << b;
   }
-  static_cast<void>(hipFree(dIn));
-  static_cast<void>(hipFree(dO));
+  (void)hipFree(dIn);
+  (void)hipFree(dO);
 }
 
 TEST(CvtPkF32, Fp8UnpackAllBytes) { run_unpack_all_bytes<fpsan::fp8_e4m3>(); }
@@ -286,7 +286,7 @@ template <class FP8> void run_cvt_sr() {
     HIP_CHECK(hipMemcpy(got.data(), dO, LANES * sizeof(float), hipMemcpyDeviceToHost));
     for (int i = 0; i < LANES; ++i)
       EXPECT_EQ(got[i], in[i]) << "sr round-trip " << i;
-    static_cast<void>(hipFree(dO));
+    (void)hipFree(dO);
   }
   fpsan_test::for_each_fpsan_semantics([&](auto sem) {
     constexpr Semantics S = decltype(sem)::value;
@@ -302,9 +302,9 @@ template <class FP8> void run_cvt_sr() {
     HIP_CHECK(hipMemcpy(got.data(), dO, LANES * sizeof(std::uint32_t), hipMemcpyDeviceToHost));
     for (int i = 0; i < LANES; ++i)
       EXPECT_EQ(got[i], ref[i]) << "sr FPSan " << i;
-    static_cast<void>(hipFree(dO));
+    (void)hipFree(dO);
   });
-  static_cast<void>(hipFree(dIn));
+  (void)hipFree(dIn);
 }
 
 TEST(CvtSr, Fp8) { run_cvt_sr<fpsan::fp8_e4m3>(); }
@@ -343,7 +343,7 @@ template <class FP8> void run_cvt_scalef32_unpack() {
     HIP_CHECK(hipMemcpy(got.data(), dO, LANES * sizeof(float), hipMemcpyDeviceToHost));
     for (int i = 0; i < LANES; ++i)
       EXPECT_EQ(got[i], in[i] * scale) << "scalef32 unpack " << i;
-    static_cast<void>(hipFree(dO));
+    (void)hipFree(dO);
   }
   fpsan_test::for_each_fpsan_semantics([&](auto sem) {
     constexpr Semantics S = decltype(sem)::value;
@@ -359,9 +359,9 @@ template <class FP8> void run_cvt_scalef32_unpack() {
     HIP_CHECK(hipMemcpy(got.data(), dO, LANES * sizeof(std::uint32_t), hipMemcpyDeviceToHost));
     for (int i = 0; i < LANES; ++i)
       EXPECT_EQ(got[i], ref[i]) << "scalef32 FPSan " << i;
-    static_cast<void>(hipFree(dO));
+    (void)hipFree(dO);
   });
-  static_cast<void>(hipFree(dIn));
+  (void)hipFree(dIn);
 }
 
 TEST(CvtScalef32F32, Fp8) { run_cvt_scalef32_unpack<fpsan::fp8_e4m3>(); }
@@ -429,7 +429,7 @@ template <class FP8> void run_cvt_scalef32_pack() {
     HIP_CHECK(hipMemcpy(got.data(), dO, LANES * sizeof(float), hipMemcpyDeviceToHost));
     for (int i = 0; i < LANES; ++i)
       EXPECT_EQ(got[i], in[i]) << "scaled pack/unpack round-trip " << i;
-    static_cast<void>(hipFree(dO));
+    (void)hipFree(dO);
   }
   fpsan_test::for_each_fpsan_semantics([&](auto sem) {
     constexpr Semantics S = decltype(sem)::value;
@@ -446,9 +446,9 @@ template <class FP8> void run_cvt_scalef32_pack() {
     HIP_CHECK(hipMemcpy(got.data(), dO, LANES * sizeof(std::uint32_t), hipMemcpyDeviceToHost));
     for (int i = 0; i < LANES; ++i)
       EXPECT_EQ(got[i], ref[i]) << "scaled pack FPSan (divide-by-scale) " << i;
-    static_cast<void>(hipFree(dO));
+    (void)hipFree(dO);
   });
-  static_cast<void>(hipFree(dIn));
+  (void)hipFree(dIn);
 }
 
 TEST(CvtScalef32Pack, Fp8) { run_cvt_scalef32_pack<fpsan::fp8_e4m3>(); }

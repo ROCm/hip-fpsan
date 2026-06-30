@@ -136,7 +136,7 @@ TEST(DropIn, ExplicitModeUsableWithExplicitSyntax) {
     E x(1.0f);         // direct-init OK even though explicit
     E y = x + E(2.0f); // homogeneous op with explicit construction
     if constexpr (!fpsan::detail::is_algebraic_semantics(S))
-      static_cast<void>(static_cast<float>(y));      // explicit cast OK (Native/Triton only)
+      (void)static_cast<float>(y);                   // explicit cast OK (Native/Triton only)
     EXPECT_TRUE(y == x + E(2.0f)) << "S=" << int(S); // deterministic
   });
   // Native is the value-faithful drop-in: the result reads back as 3.0 via

@@ -6,5 +6,5 @@
 int main() {
   fpsan::Value<float, fpsan::Semantics::Native, fpsan::Conversions::Explicit> x =
       1.0f; // copy-init needs implicit ctor
-  static_cast<void>(x);
+  (void)x;
 }

@@ -36,34 +36,34 @@ static constexpr int LANES = 256;
 // Each lane atomic-adds its f32 input into a single shared slot.
 template <Semantics S> __global__ void k_atomic_fadd(Value<float, S, kCC> *slot, const float *in) {
   const int i = blockIdx.x * blockDim.x + threadIdx.x;
-  static_cast<void>(fpsan::amdgcn_atomic_fadd_f32(slot, Value<float, S, kCC>{in[i]}));
+  (void)fpsan::amdgcn_atomic_fadd_f32(slot, Value<float, S, kCC>{in[i]});
 }
 
 template <Semantics S> __global__ void k_atomic_fmin(Value<float, S, kCC> *slot, const float *in) {
   const int i = blockIdx.x * blockDim.x + threadIdx.x;
-  static_cast<void>(fpsan::amdgcn_atomic_fmin_f32(slot, Value<float, S, kCC>{in[i]}));
+  (void)fpsan::amdgcn_atomic_fmin_f32(slot, Value<float, S, kCC>{in[i]});
 }
 
 template <Semantics S> __global__ void k_atomic_fmax(Value<float, S, kCC> *slot, const float *in) {
   const int i = blockIdx.x * blockDim.x + threadIdx.x;
-  static_cast<void>(fpsan::amdgcn_atomic_fmax_f32(slot, Value<float, S, kCC>{in[i]}));
+  (void)fpsan::amdgcn_atomic_fmax_f32(slot, Value<float, S, kCC>{in[i]});
 }
 
 // f64 variants (same atomics, 64-bit payload).
 template <Semantics S>
 __global__ void k_atomic_fadd64(Value<double, S, kCC> *slot, const double *in) {
   const int i = blockIdx.x * blockDim.x + threadIdx.x;
-  static_cast<void>(fpsan::amdgcn_atomic_fadd_f64(slot, Value<double, S, kCC>{in[i]}));
+  (void)fpsan::amdgcn_atomic_fadd_f64(slot, Value<double, S, kCC>{in[i]});
 }
 template <Semantics S>
 __global__ void k_atomic_fmin64(Value<double, S, kCC> *slot, const double *in) {
   const int i = blockIdx.x * blockDim.x + threadIdx.x;
-  static_cast<void>(fpsan::amdgcn_atomic_fmin_f64(slot, Value<double, S, kCC>{in[i]}));
+  (void)fpsan::amdgcn_atomic_fmin_f64(slot, Value<double, S, kCC>{in[i]});
 }
 template <Semantics S>
 __global__ void k_atomic_fmax64(Value<double, S, kCC> *slot, const double *in) {
   const int i = blockIdx.x * blockDim.x + threadIdx.x;
-  static_cast<void>(fpsan::amdgcn_atomic_fmax_f64(slot, Value<double, S, kCC>{in[i]}));
+  (void)fpsan::amdgcn_atomic_fmax_f64(slot, Value<double, S, kCC>{in[i]});
 }
 
 // Packed v2f16 / v2bf16 atomic-add: each lane adds {in[2i], in[2i+1]} into a
@@ -77,7 +77,7 @@ __global__ void k_atomic_pk_f16(Value<v2h_t, S, kCC> *slot, const float *in) {
   Value<v2h_t, S, kCC> v{};
   v.set(0, Value<_Float16, S, kCC>{static_cast<_Float16>(in[2 * i])});
   v.set(1, Value<_Float16, S, kCC>{static_cast<_Float16>(in[2 * i + 1])});
-  static_cast<void>(fpsan::amdgcn_atomic_pk_add_f16(slot, v));
+  (void)fpsan::amdgcn_atomic_pk_add_f16(slot, v);
 }
 template <Semantics S>
 __global__ void k_atomic_pk_bf16(Value<v2bf_t, S, kCC> *slot, const float *in) {
@@ -85,7 +85,7 @@ __global__ void k_atomic_pk_bf16(Value<v2bf_t, S, kCC> *slot, const float *in) {
   Value<v2bf_t, S, kCC> v{};
   v.set(0, Value<__bf16, S, kCC>{static_cast<__bf16>(in[2 * i])});
   v.set(1, Value<__bf16, S, kCC>{static_cast<__bf16>(in[2 * i + 1])});
-  static_cast<void>(fpsan::amdgcn_atomic_pk_add_bf16(slot, v));
+  (void)fpsan::amdgcn_atomic_pk_add_bf16(slot, v);
 }
 
 // ---- helpers ---------------------------------------------------------------
@@ -130,8 +130,8 @@ TEST(Atomic, FaddFloatExact) {
   for (float x : in)
     ref += x;
   EXPECT_EQ(static_cast<float>(got), ref);
-  static_cast<void>(hipFree(dIn));
-  static_cast<void>(hipFree(dSlot));
+  (void)hipFree(dIn);
+  (void)hipFree(dSlot);
 }
 
 TEST(Atomic, FaddFpsanMatchesScalarRingSum) {
@@ -156,9 +156,9 @@ TEST(Atomic, FaddFpsanMatchesScalarRingSum) {
     for (float x : in)
       acc = acc + V{x};
     EXPECT_EQ(got.fpsan_payload(), acc.fpsan_payload());
-    static_cast<void>(hipFree(dSlot));
+    (void)hipFree(dSlot);
   });
-  static_cast<void>(hipFree(dIn));
+  (void)hipFree(dIn);
 }
 
 // ---- atomic_fmin / atomic_fmax: final value = min / max of all lanes -------
@@ -180,8 +180,8 @@ TEST(Atomic, FminFloatMatchesScalarMin) {
   HIP_CHECK(hipMemcpy(&got, dSlot, sizeof(V), hipMemcpyDeviceToHost));
   float ref = *std::min_element(in.begin(), in.end());
   EXPECT_EQ(static_cast<float>(got), ref);
-  static_cast<void>(hipFree(dIn));
-  static_cast<void>(hipFree(dSlot));
+  (void)hipFree(dIn);
+  (void)hipFree(dSlot);
 }
 
 TEST(Atomic, FmaxFloatMatchesScalarMax) {
@@ -201,8 +201,8 @@ TEST(Atomic, FmaxFloatMatchesScalarMax) {
   HIP_CHECK(hipMemcpy(&got, dSlot, sizeof(V), hipMemcpyDeviceToHost));
   float ref = *std::max_element(in.begin(), in.end());
   EXPECT_EQ(static_cast<float>(got), ref);
-  static_cast<void>(hipFree(dIn));
-  static_cast<void>(hipFree(dSlot));
+  (void)hipFree(dIn);
+  (void)hipFree(dSlot);
 }
 
 TEST(Atomic, FminFpsanMatchesScalarPayloadMin) {
@@ -226,9 +226,9 @@ TEST(Atomic, FminFpsanMatchesScalarPayloadMin) {
     for (float x : in)
       acc = fpsan::min(acc, V{x});
     EXPECT_EQ(got.fpsan_payload(), acc.fpsan_payload());
-    static_cast<void>(hipFree(dSlot));
+    (void)hipFree(dSlot);
   });
-  static_cast<void>(hipFree(dIn));
+  (void)hipFree(dIn);
 }
 
 // ---- atomic_fadd returned-old correctness (single thread, no contention) ----
@@ -261,9 +261,9 @@ TEST(Atomic, FaddReturnsOldFloat) {
   EXPECT_EQ(old1, 0.f);
   EXPECT_EQ(old2, 5.f);
   EXPECT_EQ(final, 12.f);
-  static_cast<void>(hipFree(dSlot));
-  static_cast<void>(hipFree(dOld1));
-  static_cast<void>(hipFree(dOld2));
+  (void)hipFree(dSlot);
+  (void)hipFree(dOld1);
+  (void)hipFree(dOld2);
 }
 
 TEST(Atomic, FmaxFpsanMatchesScalarPayloadMax) {
@@ -286,9 +286,9 @@ TEST(Atomic, FmaxFpsanMatchesScalarPayloadMax) {
     for (float x : in)
       acc = fpsan::max(acc, V{x});
     EXPECT_EQ(got.fpsan_payload(), acc.fpsan_payload());
-    static_cast<void>(hipFree(dSlot));
+    (void)hipFree(dSlot);
   });
-  static_cast<void>(hipFree(dIn));
+  (void)hipFree(dIn);
 }
 
 // ===========================================================================
@@ -313,8 +313,8 @@ TEST(Atomic, Fadd64FloatExact) {
   for (double x : in)
     ref += x;
   EXPECT_EQ(static_cast<double>(got), ref);
-  static_cast<void>(hipFree(dIn));
-  static_cast<void>(hipFree(dSlot));
+  (void)hipFree(dIn);
+  (void)hipFree(dSlot);
 }
 
 TEST(Atomic, Fadd64FpsanMatchesScalarRingSum) {
@@ -338,9 +338,9 @@ TEST(Atomic, Fadd64FpsanMatchesScalarRingSum) {
     for (double x : in)
       acc = acc + V{x};
     EXPECT_EQ(got.fpsan_payload(), acc.fpsan_payload());
-    static_cast<void>(hipFree(dSlot));
+    (void)hipFree(dSlot);
   });
-  static_cast<void>(hipFree(dIn));
+  (void)hipFree(dIn);
 }
 
 TEST(Atomic, Fmin64FloatMatchesScalarMin) {
@@ -360,8 +360,8 @@ TEST(Atomic, Fmin64FloatMatchesScalarMin) {
   HIP_CHECK(hipMemcpy(&got, dSlot, sizeof(V), hipMemcpyDeviceToHost));
   double ref = *std::min_element(in.begin(), in.end());
   EXPECT_EQ(static_cast<double>(got), ref);
-  static_cast<void>(hipFree(dIn));
-  static_cast<void>(hipFree(dSlot));
+  (void)hipFree(dIn);
+  (void)hipFree(dSlot);
 }
 
 TEST(Atomic, Fmax64FloatMatchesScalarMax) {
@@ -381,8 +381,8 @@ TEST(Atomic, Fmax64FloatMatchesScalarMax) {
   HIP_CHECK(hipMemcpy(&got, dSlot, sizeof(V), hipMemcpyDeviceToHost));
   double ref = *std::max_element(in.begin(), in.end());
   EXPECT_EQ(static_cast<double>(got), ref);
-  static_cast<void>(hipFree(dIn));
-  static_cast<void>(hipFree(dSlot));
+  (void)hipFree(dIn);
+  (void)hipFree(dSlot);
 }
 
 TEST(Atomic, Fmin64FpsanMatchesScalarPayloadMin) {
@@ -405,9 +405,9 @@ TEST(Atomic, Fmin64FpsanMatchesScalarPayloadMin) {
     for (double x : in)
       acc = fpsan::min(acc, V{x});
     EXPECT_EQ(got.fpsan_payload(), acc.fpsan_payload());
-    static_cast<void>(hipFree(dSlot));
+    (void)hipFree(dSlot);
   });
-  static_cast<void>(hipFree(dIn));
+  (void)hipFree(dIn);
 }
 
 TEST(Atomic, Fmax64FpsanMatchesScalarPayloadMax) {
@@ -430,9 +430,9 @@ TEST(Atomic, Fmax64FpsanMatchesScalarPayloadMax) {
     for (double x : in)
       acc = fpsan::max(acc, V{x});
     EXPECT_EQ(got.fpsan_payload(), acc.fpsan_payload());
-    static_cast<void>(hipFree(dSlot));
+    (void)hipFree(dSlot);
   });
-  static_cast<void>(hipFree(dIn));
+  (void)hipFree(dIn);
 }
 
 // ===========================================================================
@@ -476,8 +476,8 @@ void run_pk_add(void (*k)(Value<VEC, S, kCC> *, const float *)) {
     EXPECT_EQ(got.get(0).fpsan_payload(), acc.get(0).fpsan_payload());
     EXPECT_EQ(got.get(1).fpsan_payload(), acc.get(1).fpsan_payload());
   }
-  static_cast<void>(hipFree(dIn));
-  static_cast<void>(hipFree(dSlot));
+  (void)hipFree(dIn);
+  (void)hipFree(dSlot);
 }
 
 TEST(Atomic, PkAddF16Float) {

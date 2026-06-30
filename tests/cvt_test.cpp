@@ -87,9 +87,9 @@ TEST(Cvt, PkrtzFloatMatchesBuiltin) {
         static_cast<std::uint32_t>(ab) | (static_cast<std::uint32_t>(bb) << 16);
     EXPECT_EQ(got[i], expected) << "lane " << i;
   }
-  static_cast<void>(hipFree(dA));
-  static_cast<void>(hipFree(dB));
-  static_cast<void>(hipFree(dOut));
+  (void)hipFree(dA);
+  (void)hipFree(dB);
+  (void)hipFree(dOut);
 }
 
 TEST(Cvt, PkrtzFpsanMatchesPerLaneCast) {
@@ -125,9 +125,9 @@ TEST(Cvt, PkrtzFpsanMatchesPerLaneCast) {
       EXPECT_EQ(got[i], expected) << "lane " << i;
     }
   });
-  static_cast<void>(hipFree(dA));
-  static_cast<void>(hipFree(dB));
-  static_cast<void>(hipFree(dOut));
+  (void)hipFree(dA);
+  (void)hipFree(dB);
+  (void)hipFree(dOut);
 }
 #endif // FPSAN_TEST_ENABLE_PKRTZ_CVT
 

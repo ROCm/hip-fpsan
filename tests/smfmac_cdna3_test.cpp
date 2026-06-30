@@ -252,11 +252,11 @@ template <class E> static void run_smf_layout(int m, int n, int k) {
   for (std::size_t i = 0; i < got.size(); ++i)
     EXPECT_EQ(bits_of(got[i]), bits_of(ref[i])) << "elem " << i;
 
-  static_cast<void>(hipFree(dA));
-  static_cast<void>(hipFree(dB));
-  static_cast<void>(hipFree(dC));
-  static_cast<void>(hipFree(dI));
-  static_cast<void>(hipFree(dD));
+  (void)hipFree(dA);
+  (void)hipFree(dB);
+  (void)hipFree(dC);
+  (void)hipFree(dI);
+  (void)hipFree(dD);
 }
 
 template <class E> static void run_smf_fpsan(int m, int n, int k) {
@@ -304,13 +304,13 @@ template <class E> static void run_smf_fpsan(int m, int n, int k) {
     for (std::size_t i = 0; i < got.size(); ++i)
       EXPECT_EQ(got[i], ref[i]) << "elem " << i;
 
-    static_cast<void>(hipFree(dD));
+    (void)hipFree(dD);
   });
 
-  static_cast<void>(hipFree(dA));
-  static_cast<void>(hipFree(dB));
-  static_cast<void>(hipFree(dC));
-  static_cast<void>(hipFree(dI));
+  (void)hipFree(dA);
+  (void)hipFree(dB);
+  (void)hipFree(dC);
+  (void)hipFree(dI);
 }
 
 template <class AE, class BE, Semantics S, class Out>
@@ -507,14 +507,14 @@ template <class AE, class BE> static void run_smf_fp8(int m, int k) {
     for (std::size_t i = 0; i < gotp.size(); ++i)
       EXPECT_EQ(gotp[i], refp[i]) << "fpsan elem " << i;
 
-    static_cast<void>(hipFree(dDp));
+    (void)hipFree(dDp);
   });
 
-  static_cast<void>(hipFree(dA));
-  static_cast<void>(hipFree(dB));
-  static_cast<void>(hipFree(dC));
-  static_cast<void>(hipFree(dI));
-  static_cast<void>(hipFree(dDf));
+  (void)hipFree(dA);
+  (void)hipFree(dB);
+  (void)hipFree(dC);
+  (void)hipFree(dI);
+  (void)hipFree(dDf);
 }
 
 TEST(SmfmacF16_16x16x32, LayoutMatchesHardware) { run_smf_layout<_Float16>(16, 16, 32); }

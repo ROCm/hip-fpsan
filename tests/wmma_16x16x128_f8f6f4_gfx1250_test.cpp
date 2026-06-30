@@ -215,10 +215,10 @@ template <int AFMT, int BFMT, bool MIXED = false> static void run_layout(const c
     EXPECT_EQ(bits_of(got[i]), bits_of(ref[i]))
         << tag << " mismatch at " << (i / N) << "," << (i % N) << " got=" << got[i]
         << " ref=" << ref[i];
-  static_cast<void>(hipFree(dA));
-  static_cast<void>(hipFree(dB));
-  static_cast<void>(hipFree(dC));
-  static_cast<void>(hipFree(dD));
+  (void)hipFree(dA);
+  (void)hipFree(dB);
+  (void)hipFree(dC);
+  (void)hipFree(dD);
 }
 
 TEST(WmmaF8f6f4_128, Fp8Fp8) { run_layout<0, 0>("fp8_fp8"); }
@@ -327,10 +327,10 @@ static void run_fpsan(const char *tag) {
   HIP_CHECK(hipMemcpy(got.data(), dD, M * N * sizeof(std::uint32_t), hipMemcpyDeviceToHost));
   for (int i = 0; i < M * N; ++i)
     EXPECT_EQ(got[i], ref[i]) << tag << " payload mismatch at " << (i / N) << "," << (i % N);
-  static_cast<void>(hipFree(dA));
-  static_cast<void>(hipFree(dB));
-  static_cast<void>(hipFree(dC));
-  static_cast<void>(hipFree(dD));
+  (void)hipFree(dA);
+  (void)hipFree(dB);
+  (void)hipFree(dC);
+  (void)hipFree(dD);
 }
 
 template <int AFMT, int BFMT, bool MIXED = false> static void run_fpsan_all(const char *tag) {

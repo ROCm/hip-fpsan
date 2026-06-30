@@ -184,12 +184,12 @@ template <Semantics S> __global__ void k_tr6_wrap(std::uint32_t *out) {
 namespace {
 template <class T> std::vector<T> run(void (*k)(T *), int n) {
   T *d = nullptr;
-  static_cast<void>(hipMalloc(&d, n * sizeof(T)));
+  (void)hipMalloc(&d, n * sizeof(T));
   k<<<1, WAVE>>>(d);
-  static_cast<void>(hipDeviceSynchronize());
+  (void)hipDeviceSynchronize();
   std::vector<T> h(n);
-  static_cast<void>(hipMemcpy(h.data(), d, n * sizeof(T), hipMemcpyDeviceToHost));
-  static_cast<void>(hipFree(d));
+  (void)hipMemcpy(h.data(), d, n * sizeof(T), hipMemcpyDeviceToHost);
+  (void)hipFree(d);
   return h;
 }
 } // namespace

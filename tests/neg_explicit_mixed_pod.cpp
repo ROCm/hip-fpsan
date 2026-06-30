@@ -6,5 +6,5 @@
 int main() {
   fpsan::Value<float, fpsan::Semantics::Native, fpsan::Conversions::Explicit> x(1.0f);
   auto y = x + 2.0f; // no implicit conversion, no mixed-POD operator
-  static_cast<void>(y);
+  (void)y;
 }

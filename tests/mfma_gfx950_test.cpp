@@ -210,10 +210,10 @@ TEST(MfmaF64_16x16x4, LayoutMatchesHardware) {
   for (int i = 0; i < F64_M * F64_N; ++i)
     EXPECT_EQ(bits_of(got[i]), bits_of(ref[i]))
         << "layout mismatch at " << (i / F64_N) << "," << (i % F64_N);
-  static_cast<void>(hipFree(dA));
-  static_cast<void>(hipFree(dB));
-  static_cast<void>(hipFree(dC));
-  static_cast<void>(hipFree(dD));
+  (void)hipFree(dA);
+  (void)hipFree(dB);
+  (void)hipFree(dC);
+  (void)hipFree(dD);
 }
 
 TEST(MfmaF64_16x16x4, FpsanMatchesScalarReference) {
@@ -242,11 +242,11 @@ TEST(MfmaF64_16x16x4, FpsanMatchesScalarReference) {
         hipMemcpy(got.data(), dD, F64_M * F64_N * sizeof(std::uint64_t), hipMemcpyDeviceToHost));
     for (int i = 0; i < F64_M * F64_N; ++i)
       EXPECT_EQ(got[i], ref[i]) << "payload mismatch at " << (i / F64_N) << "," << (i % F64_N);
-    static_cast<void>(hipFree(dD));
+    (void)hipFree(dD);
   });
-  static_cast<void>(hipFree(dA));
-  static_cast<void>(hipFree(dB));
-  static_cast<void>(hipFree(dC));
+  (void)hipFree(dA);
+  (void)hipFree(dB);
+  (void)hipFree(dC);
 }
 
 TEST(MfmaF64_16x16x4_NEG5, LayoutMatchesHardware) {
@@ -273,10 +273,10 @@ TEST(MfmaF64_16x16x4_NEG5, LayoutMatchesHardware) {
   for (int i = 0; i < F64_M * F64_N; ++i)
     EXPECT_EQ(bits_of(got[i]), bits_of(ref[i]))
         << "NEG mismatch at " << (i / F64_N) << "," << (i % F64_N);
-  static_cast<void>(hipFree(dA));
-  static_cast<void>(hipFree(dB));
-  static_cast<void>(hipFree(dC));
-  static_cast<void>(hipFree(dD));
+  (void)hipFree(dA);
+  (void)hipFree(dB);
+  (void)hipFree(dC);
+  (void)hipFree(dD);
 }
 
 TEST(MfmaF64_16x16x4_NEG5, FpsanMatchesScalarReference) {
@@ -307,11 +307,11 @@ TEST(MfmaF64_16x16x4_NEG5, FpsanMatchesScalarReference) {
         hipMemcpy(got.data(), dD, F64_M * F64_N * sizeof(std::uint64_t), hipMemcpyDeviceToHost));
     for (int i = 0; i < F64_M * F64_N; ++i)
       EXPECT_EQ(got[i], ref[i]) << "payload mismatch at " << (i / F64_N) << "," << (i % F64_N);
-    static_cast<void>(hipFree(dD));
+    (void)hipFree(dD);
   });
-  static_cast<void>(hipFree(dA));
-  static_cast<void>(hipFree(dB));
-  static_cast<void>(hipFree(dC));
+  (void)hipFree(dA);
+  (void)hipFree(dB);
+  (void)hipFree(dC);
 }
 
 // ---------------------------------------------------------------------------
@@ -338,7 +338,7 @@ std::vector<double> make_f64_4x4x4_vec(int seed) {
   std::vector<double> v(WAVE);
   std::mt19937 rng = fpsan_test::make_rng();
   for (int s = 0; s < seed; ++s)
-    static_cast<void>(rng());
+    (void)rng();
   for (auto &x : v)
     x = fpsan_test::pick_int_valued<double>(rng, -4, 4);
   return v;
@@ -366,10 +366,10 @@ TEST(MfmaF64_4x4x4, LayoutMatchesHardware) {
   HIP_CHECK(hipMemcpy(got.data(), dD, WAVE * sizeof(double), hipMemcpyDeviceToHost));
   for (int L = 0; L < WAVE; ++L)
     EXPECT_EQ(bits_of(got[L]), bits_of(ref[L])) << "lane " << L;
-  static_cast<void>(hipFree(dA));
-  static_cast<void>(hipFree(dB));
-  static_cast<void>(hipFree(dC));
-  static_cast<void>(hipFree(dD));
+  (void)hipFree(dA);
+  (void)hipFree(dB);
+  (void)hipFree(dC);
+  (void)hipFree(dD);
 }
 
 TEST(MfmaF64_4x4x4, FpsanMatchesScalarReference) {
@@ -397,11 +397,11 @@ TEST(MfmaF64_4x4x4, FpsanMatchesScalarReference) {
     HIP_CHECK(hipMemcpy(got.data(), dD, WAVE * sizeof(std::uint64_t), hipMemcpyDeviceToHost));
     for (int L = 0; L < WAVE; ++L)
       EXPECT_EQ(got[L], ref[L]) << "lane " << L;
-    static_cast<void>(hipFree(dD));
+    (void)hipFree(dD);
   });
-  static_cast<void>(hipFree(dA));
-  static_cast<void>(hipFree(dB));
-  static_cast<void>(hipFree(dC));
+  (void)hipFree(dA);
+  (void)hipFree(dB);
+  (void)hipFree(dC);
 }
 
 TEST(MfmaF64_4x4x4_NEG5, LayoutMatchesHardware) {
@@ -428,10 +428,10 @@ TEST(MfmaF64_4x4x4_NEG5, LayoutMatchesHardware) {
   HIP_CHECK(hipMemcpy(got.data(), dD, WAVE * sizeof(double), hipMemcpyDeviceToHost));
   for (int L = 0; L < WAVE; ++L)
     EXPECT_EQ(bits_of(got[L]), bits_of(ref[L])) << "lane " << L;
-  static_cast<void>(hipFree(dA));
-  static_cast<void>(hipFree(dB));
-  static_cast<void>(hipFree(dC));
-  static_cast<void>(hipFree(dD));
+  (void)hipFree(dA);
+  (void)hipFree(dB);
+  (void)hipFree(dC);
+  (void)hipFree(dD);
 }
 
 TEST(MfmaF64_4x4x4_NEG5, FpsanMatchesScalarReference) {
@@ -462,11 +462,11 @@ TEST(MfmaF64_4x4x4_NEG5, FpsanMatchesScalarReference) {
     HIP_CHECK(hipMemcpy(got.data(), dD, WAVE * sizeof(std::uint64_t), hipMemcpyDeviceToHost));
     for (int L = 0; L < WAVE; ++L)
       EXPECT_EQ(got[L], ref[L]) << "lane " << L;
-    static_cast<void>(hipFree(dD));
+    (void)hipFree(dD);
   });
-  static_cast<void>(hipFree(dA));
-  static_cast<void>(hipFree(dB));
-  static_cast<void>(hipFree(dC));
+  (void)hipFree(dA);
+  (void)hipFree(dB);
+  (void)hipFree(dC);
 }
 
 // ---------------------------------------------------------------------------
@@ -624,10 +624,10 @@ template <class T> void run_legf32_layout() {
   HIP_CHECK(hipMemcpy(got.data(), dD, total * sizeof(float), hipMemcpyDeviceToHost));
   for (int t = 0; t < total; ++t)
     EXPECT_EQ(bits_of(got[t]), bits_of(ref[t])) << "elem " << t;
-  static_cast<void>(hipFree(dA));
-  static_cast<void>(hipFree(dB));
-  static_cast<void>(hipFree(dC));
-  static_cast<void>(hipFree(dD));
+  (void)hipFree(dA);
+  (void)hipFree(dB);
+  (void)hipFree(dC);
+  (void)hipFree(dD);
 }
 
 template <class T> void run_legf32_fpsan() {
@@ -658,11 +658,11 @@ template <class T> void run_legf32_fpsan() {
     HIP_CHECK(hipMemcpy(got.data(), dD, total * sizeof(std::uint32_t), hipMemcpyDeviceToHost));
     for (int t = 0; t < total; ++t)
       EXPECT_EQ(got[t], ref[t]) << "elem " << t;
-    static_cast<void>(hipFree(dD));
+    (void)hipFree(dD);
   });
-  static_cast<void>(hipFree(dA));
-  static_cast<void>(hipFree(dB));
-  static_cast<void>(hipFree(dC));
+  (void)hipFree(dA);
+  (void)hipFree(dB);
+  (void)hipFree(dC);
 }
 
 #define LEGF32_TRAITS(Name, M_, N_, K_, B_, CV, WRAP)                                              \
@@ -858,10 +858,10 @@ template <class T> void run_legf16_layout() {
   HIP_CHECK(hipMemcpy(got.data(), dD, total * sizeof(float), hipMemcpyDeviceToHost));
   for (int t = 0; t < total; ++t)
     EXPECT_EQ(bits_of(got[t]), bits_of(ref[t])) << "elem " << t;
-  static_cast<void>(hipFree(dA));
-  static_cast<void>(hipFree(dB));
-  static_cast<void>(hipFree(dC));
-  static_cast<void>(hipFree(dD));
+  (void)hipFree(dA);
+  (void)hipFree(dB);
+  (void)hipFree(dC);
+  (void)hipFree(dD);
 }
 
 template <class T> void run_legf16_fpsan() {
@@ -895,11 +895,11 @@ template <class T> void run_legf16_fpsan() {
     HIP_CHECK(hipMemcpy(got.data(), dD, total * sizeof(std::uint32_t), hipMemcpyDeviceToHost));
     for (int t = 0; t < total; ++t)
       EXPECT_EQ(got[t], ref[t]) << "elem " << t;
-    static_cast<void>(hipFree(dD));
+    (void)hipFree(dD);
   });
-  static_cast<void>(hipFree(dA));
-  static_cast<void>(hipFree(dB));
-  static_cast<void>(hipFree(dC));
+  (void)hipFree(dA);
+  (void)hipFree(dB);
+  (void)hipFree(dC);
 }
 
 #define LEGF16_TRAITS(Name, M_, N_, K_, B_, AV, AE, CV, WRAP)                                      \

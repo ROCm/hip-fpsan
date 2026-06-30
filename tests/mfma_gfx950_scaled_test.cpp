@@ -50,10 +50,10 @@ TEST(ScaledMfma, F8F6F4_16x16x128_FloatLaunches) {
   k_scale_16x16x128<Semantics::Native><<<1, WAVE>>>(dA, dB, dC, dD, 0x7F, 0x7F);
   HIP_CHECK(hipDeviceSynchronize());
   HIP_CHECK(hipGetLastError());
-  static_cast<void>(hipFree(dA));
-  static_cast<void>(hipFree(dB));
-  static_cast<void>(hipFree(dC));
-  static_cast<void>(hipFree(dD));
+  (void)hipFree(dA);
+  (void)hipFree(dB);
+  (void)hipFree(dC);
+  (void)hipFree(dD);
 }
 
 TEST(ScaledMfma, F8F6F4_32x32x64_FloatLaunches) {
@@ -72,10 +72,10 @@ TEST(ScaledMfma, F8F6F4_32x32x64_FloatLaunches) {
   k_scale_32x32x64<Semantics::Native><<<1, WAVE>>>(dA, dB, dC, dD, 0x7F, 0x7F);
   HIP_CHECK(hipDeviceSynchronize());
   HIP_CHECK(hipGetLastError());
-  static_cast<void>(hipFree(dA));
-  static_cast<void>(hipFree(dB));
-  static_cast<void>(hipFree(dC));
-  static_cast<void>(hipFree(dD));
+  (void)hipFree(dA);
+  (void)hipFree(dB);
+  (void)hipFree(dC);
+  (void)hipFree(dD);
 }
 
 // ---------------------------------------------------------------------------
@@ -172,10 +172,10 @@ template <class AElem, class BElem, int CBSZ, int BLGP> void run_scale16_layout(
   HIP_CHECK(hipMemcpy(got.data(), dD, SM * SN * sizeof(float), hipMemcpyDeviceToHost));
   for (int i = 0; i < SM * SN; ++i)
     EXPECT_EQ(bits_of(got[i]), bits_of(ref[i])) << "at " << i;
-  static_cast<void>(hipFree(dA));
-  static_cast<void>(hipFree(dB));
-  static_cast<void>(hipFree(dC));
-  static_cast<void>(hipFree(dD));
+  (void)hipFree(dA);
+  (void)hipFree(dB);
+  (void)hipFree(dC);
+  (void)hipFree(dD);
 }
 
 template <class AElem, class BElem, int CBSZ, int BLGP> void run_scale16_fpsan() {
@@ -209,11 +209,11 @@ template <class AElem, class BElem, int CBSZ, int BLGP> void run_scale16_fpsan()
     HIP_CHECK(hipMemcpy(got.data(), dD, SM * SN * sizeof(std::uint32_t), hipMemcpyDeviceToHost));
     for (int i = 0; i < SM * SN; ++i)
       EXPECT_EQ(got[i], ref[i]) << "at " << i;
-    static_cast<void>(hipFree(dD));
+    (void)hipFree(dD);
   });
-  static_cast<void>(hipFree(dA));
-  static_cast<void>(hipFree(dB));
-  static_cast<void>(hipFree(dC));
+  (void)hipFree(dA);
+  (void)hipFree(dB);
+  (void)hipFree(dC);
 }
 
 using fpsan::fp8_e4m3;
@@ -325,10 +325,10 @@ template <class AElem, class BElem, int CBSZ, int BLGP> void run_scale32_layout(
   HIP_CHECK(hipMemcpy(got.data(), dD, S2M * S2N * sizeof(float), hipMemcpyDeviceToHost));
   for (int i = 0; i < S2M * S2N; ++i)
     EXPECT_EQ(bits_of(got[i]), bits_of(ref[i])) << "at " << i;
-  static_cast<void>(hipFree(dA));
-  static_cast<void>(hipFree(dB));
-  static_cast<void>(hipFree(dC));
-  static_cast<void>(hipFree(dD));
+  (void)hipFree(dA);
+  (void)hipFree(dB);
+  (void)hipFree(dC);
+  (void)hipFree(dD);
 }
 
 template <class AElem, class BElem, int CBSZ, int BLGP> void run_scale32_fpsan() {
@@ -361,11 +361,11 @@ template <class AElem, class BElem, int CBSZ, int BLGP> void run_scale32_fpsan()
     HIP_CHECK(hipMemcpy(got.data(), dD, S2M * S2N * sizeof(std::uint32_t), hipMemcpyDeviceToHost));
     for (int i = 0; i < S2M * S2N; ++i)
       EXPECT_EQ(got[i], ref[i]) << "at " << i;
-    static_cast<void>(hipFree(dD));
+    (void)hipFree(dD);
   });
-  static_cast<void>(hipFree(dA));
-  static_cast<void>(hipFree(dB));
-  static_cast<void>(hipFree(dC));
+  (void)hipFree(dA);
+  (void)hipFree(dB);
+  (void)hipFree(dC);
 }
 
 TEST(ScaledMfma32x32x64_E4M3, LayoutMatchesHardware) {
@@ -515,10 +515,10 @@ template <int CBSZ, int BLGP> void run_scale_sub16_layout() {
   HIP_CHECK(hipMemcpy(got.data(), dD, SM * SN * sizeof(float), hipMemcpyDeviceToHost));
   for (int i = 0; i < SM * SN; ++i)
     EXPECT_EQ(bits_of(got[i]), bits_of(ref[i])) << "at " << i;
-  static_cast<void>(hipFree(dA));
-  static_cast<void>(hipFree(dB));
-  static_cast<void>(hipFree(dC));
-  static_cast<void>(hipFree(dD));
+  (void)hipFree(dA);
+  (void)hipFree(dB);
+  (void)hipFree(dC);
+  (void)hipFree(dD);
 }
 
 template <int CBSZ, int BLGP> void run_scale_sub16_fpsan() {
@@ -578,11 +578,11 @@ template <int CBSZ, int BLGP> void run_scale_sub16_fpsan() {
     HIP_CHECK(hipMemcpy(got.data(), dD, SM * SN * sizeof(std::uint32_t), hipMemcpyDeviceToHost));
     for (int i = 0; i < SM * SN; ++i)
       EXPECT_EQ(got[i], ref[i]) << "at " << i;
-    static_cast<void>(hipFree(dD));
+    (void)hipFree(dD);
   });
-  static_cast<void>(hipFree(dA));
-  static_cast<void>(hipFree(dB));
-  static_cast<void>(hipFree(dC));
+  (void)hipFree(dA);
+  (void)hipFree(dB);
+  (void)hipFree(dC);
 }
 
 TEST(ScaledMfma16x16x128_FP6, LayoutMatchesHardware) { run_scale_sub16_layout<2, 2>(); }
@@ -680,10 +680,10 @@ template <int CBSZ, int BLGP> void run_scale_sub32_layout() {
   HIP_CHECK(hipMemcpy(got.data(), dD, S2M * S2N * sizeof(float), hipMemcpyDeviceToHost));
   for (int i = 0; i < S2M * S2N; ++i)
     EXPECT_EQ(bits_of(got[i]), bits_of(ref[i])) << "at " << i;
-  static_cast<void>(hipFree(dA));
-  static_cast<void>(hipFree(dB));
-  static_cast<void>(hipFree(dC));
-  static_cast<void>(hipFree(dD));
+  (void)hipFree(dA);
+  (void)hipFree(dB);
+  (void)hipFree(dC);
+  (void)hipFree(dD);
 }
 
 template <int CBSZ, int BLGP> void run_scale_sub32_fpsan() {
@@ -732,11 +732,11 @@ template <int CBSZ, int BLGP> void run_scale_sub32_fpsan() {
     HIP_CHECK(hipMemcpy(got.data(), dD, S2M * S2N * sizeof(std::uint32_t), hipMemcpyDeviceToHost));
     for (int i = 0; i < S2M * S2N; ++i)
       EXPECT_EQ(got[i], ref[i]) << "at " << i;
-    static_cast<void>(hipFree(dD));
+    (void)hipFree(dD);
   });
-  static_cast<void>(hipFree(dA));
-  static_cast<void>(hipFree(dB));
-  static_cast<void>(hipFree(dC));
+  (void)hipFree(dA);
+  (void)hipFree(dB);
+  (void)hipFree(dC);
 }
 
 TEST(ScaledMfma32x32x64_FP6, LayoutMatchesHardware) { run_scale_sub32_layout<2, 2>(); }
@@ -860,7 +860,7 @@ template <class AElem, class BElem, int CBSZ, int BLGP> void run_scale16_perbloc
     HIP_CHECK(hipMemcpy(got.data(), dD, SM * SN * sizeof(float), hipMemcpyDeviceToHost));
     for (int i = 0; i < SM * SN; ++i)
       EXPECT_EQ(bits_of(got[i]), bits_of(ref[i])) << "Float at " << i;
-    static_cast<void>(hipFree(dD));
+    (void)hipFree(dD);
   }
   // ---- FPSan-family semantics vs payload-ring reference ---------------------
   fpsan_test::for_each_fpsan_semantics([&](auto sem) {
@@ -889,13 +889,13 @@ template <class AElem, class BElem, int CBSZ, int BLGP> void run_scale16_perbloc
     HIP_CHECK(hipMemcpy(got.data(), dD, SM * SN * sizeof(std::uint32_t), hipMemcpyDeviceToHost));
     for (int i = 0; i < SM * SN; ++i)
       EXPECT_EQ(got[i], ref[i]) << "FPSan at " << i;
-    static_cast<void>(hipFree(dD));
+    (void)hipFree(dD);
   });
-  static_cast<void>(hipFree(dA));
-  static_cast<void>(hipFree(dB));
-  static_cast<void>(hipFree(dC));
-  static_cast<void>(hipFree(dSA));
-  static_cast<void>(hipFree(dSB));
+  (void)hipFree(dA);
+  (void)hipFree(dB);
+  (void)hipFree(dC);
+  (void)hipFree(dSA);
+  (void)hipFree(dSB);
 }
 
 TEST(ScaledMfma16x16x128_PerBlockScale, E4M3) { run_scale16_perblock<fp8_e4m3, fp8_e4m3, 0, 0>(); }
@@ -981,7 +981,7 @@ template <class AElem, class BElem, int CBSZ, int BLGP> void run_scale32_perbloc
     HIP_CHECK(hipMemcpy(got.data(), dD, S2M * S2N * sizeof(float), hipMemcpyDeviceToHost));
     for (int i = 0; i < S2M * S2N; ++i)
       EXPECT_EQ(bits_of(got[i]), bits_of(ref[i])) << "Float at " << i;
-    static_cast<void>(hipFree(dD));
+    (void)hipFree(dD);
   }
   fpsan_test::for_each_fpsan_semantics([&](auto sem) {
     constexpr Semantics S = decltype(sem)::value;
@@ -1009,13 +1009,13 @@ template <class AElem, class BElem, int CBSZ, int BLGP> void run_scale32_perbloc
     HIP_CHECK(hipMemcpy(got.data(), dD, S2M * S2N * sizeof(std::uint32_t), hipMemcpyDeviceToHost));
     for (int i = 0; i < S2M * S2N; ++i)
       EXPECT_EQ(got[i], ref[i]) << "FPSan at " << i;
-    static_cast<void>(hipFree(dD));
+    (void)hipFree(dD);
   });
-  static_cast<void>(hipFree(dA));
-  static_cast<void>(hipFree(dB));
-  static_cast<void>(hipFree(dC));
-  static_cast<void>(hipFree(dSA));
-  static_cast<void>(hipFree(dSB));
+  (void)hipFree(dA);
+  (void)hipFree(dB);
+  (void)hipFree(dC);
+  (void)hipFree(dSA);
+  (void)hipFree(dSB);
 }
 
 TEST(ScaledMfma32x32x64_PerBlockScale, E4M3) { run_scale32_perblock<fp8_e4m3, fp8_e4m3, 0, 0>(); }
@@ -1111,13 +1111,13 @@ template <int CBSZ, int BLGP> void run_scale_sub16_perblock_fpsan() {
     HIP_CHECK(hipMemcpy(got.data(), dD, SM * SN * sizeof(std::uint32_t), hipMemcpyDeviceToHost));
     for (int i = 0; i < SM * SN; ++i)
       EXPECT_EQ(got[i], ref[i]) << "at " << i;
-    static_cast<void>(hipFree(dD));
+    (void)hipFree(dD);
   });
-  static_cast<void>(hipFree(dA));
-  static_cast<void>(hipFree(dB));
-  static_cast<void>(hipFree(dC));
-  static_cast<void>(hipFree(dSA));
-  static_cast<void>(hipFree(dSB));
+  (void)hipFree(dA);
+  (void)hipFree(dB);
+  (void)hipFree(dC);
+  (void)hipFree(dSA);
+  (void)hipFree(dSB);
 }
 
 TEST(ScaledMfma16x16x128_PerBlockScale, FP4Sub) { run_scale_sub16_perblock_fpsan<4, 4>(); }
@@ -1282,10 +1282,10 @@ template <bool AIsSub, class Fp8Elem, int CBSZ, int BLGP> void run_scale16_mixed
   HIP_CHECK(hipMemcpy(got.data(), dD, SM * SN * sizeof(float), hipMemcpyDeviceToHost));
   for (int i = 0; i < SM * SN; ++i)
     EXPECT_EQ(bits_of(got[i]), bits_of(ref[i])) << "at " << i;
-  static_cast<void>(hipFree(dF));
-  static_cast<void>(hipFree(dC));
-  static_cast<void>(hipFree(dD));
-  static_cast<void>(hipFree(dSub));
+  (void)hipFree(dF);
+  (void)hipFree(dC);
+  (void)hipFree(dD);
+  (void)hipFree(dSub);
 }
 
 TEST(ScaledMfma16x16x128_Mixed8xSub, FP8xFP4_Layout) { run_scale16_mixed<false, fp8_e4m3, 0, 4>(); }
@@ -1365,11 +1365,11 @@ template <bool AIsSub, class Fp8Elem, int CBSZ, int BLGP> void run_scale16_mixed
     HIP_CHECK(hipMemcpy(got.data(), dD, SM * SN * sizeof(std::uint32_t), hipMemcpyDeviceToHost));
     for (int i = 0; i < SM * SN; ++i)
       EXPECT_EQ(got[i], ref[i]) << "at " << i;
-    static_cast<void>(hipFree(dD));
+    (void)hipFree(dD);
   });
-  static_cast<void>(hipFree(dF));
-  static_cast<void>(hipFree(dC));
-  static_cast<void>(hipFree(dSub));
+  (void)hipFree(dF);
+  (void)hipFree(dC);
+  (void)hipFree(dSub);
 }
 
 TEST(ScaledMfma16x16x128_Mixed8xSub, FP8xFP4_Fpsan) {
@@ -1521,10 +1521,10 @@ template <bool AIsSub, class Fp8Elem, int CBSZ, int BLGP> void run_scale32_mixed
   HIP_CHECK(hipMemcpy(got.data(), dD, S2M * S2N * sizeof(float), hipMemcpyDeviceToHost));
   for (int i = 0; i < S2M * S2N; ++i)
     EXPECT_EQ(bits_of(got[i]), bits_of(ref[i])) << "at " << i;
-  static_cast<void>(hipFree(dF));
-  static_cast<void>(hipFree(dC));
-  static_cast<void>(hipFree(dD));
-  static_cast<void>(hipFree(dSub));
+  (void)hipFree(dF);
+  (void)hipFree(dC);
+  (void)hipFree(dD);
+  (void)hipFree(dSub);
 }
 
 template <bool AIsSub, class Fp8Elem, int CBSZ, int BLGP> void run_scale32_mixed_fpsan() {
@@ -1596,11 +1596,11 @@ template <bool AIsSub, class Fp8Elem, int CBSZ, int BLGP> void run_scale32_mixed
     HIP_CHECK(hipMemcpy(got.data(), dD, S2M * S2N * sizeof(std::uint32_t), hipMemcpyDeviceToHost));
     for (int i = 0; i < S2M * S2N; ++i)
       EXPECT_EQ(got[i], ref[i]) << "at " << i;
-    static_cast<void>(hipFree(dD));
+    (void)hipFree(dD);
   });
-  static_cast<void>(hipFree(dF));
-  static_cast<void>(hipFree(dC));
-  static_cast<void>(hipFree(dSub));
+  (void)hipFree(dF);
+  (void)hipFree(dC);
+  (void)hipFree(dSub);
 }
 
 TEST(ScaledMfma32x32x64_Mixed8xSub, FP8xFP4_Layout) { run_scale32_mixed<false, fp8_e4m3, 0, 4>(); }

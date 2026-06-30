@@ -102,9 +102,9 @@ void float_unpack_all(Kern kern, const fpsan::detail::FpFormat &fmt, const char 
     for (int i = 0; i < 32; ++i)
       EXPECT_EQ(got[i], narrow_to_f32(unsigned(codes[i]), fmt))
           << name << " code " << int(codes[i]);
-    static_cast<void>(hipFree(dIn));
+    (void)hipFree(dIn);
   }
-  static_cast<void>(hipFree(dO));
+  (void)hipFree(dO);
 }
 
 TEST(CvtScalef32Fp6Wrap, FloatUnpackFp6AllCodes) {
@@ -150,8 +150,8 @@ TEST(CvtScalef32Fp6Wrap, FloatPack2xpk16ExactBits) {
   host_pack6(inter, 32, expect);
   for (int i = 0; i < 6; ++i)
     EXPECT_EQ(got[i], expect[i]) << "word " << i;
-  static_cast<void>(hipFree(dIn));
-  static_cast<void>(hipFree(dO));
+  (void)hipFree(dIn);
+  (void)hipFree(dO);
 }
 
 // ============================ FPSan mode ====================================
@@ -197,10 +197,10 @@ TEST(CvtScalef32Fp6Wrap, FloatPack2xpk16ExactBits) {
           << LABEL << " elem " << i << " code=0x" << std::hex << unsigned(codes[i]);               \
       EXPECT_EQ(got[32 + i], static_cast<unsigned>((want + want).fpsan_payload()))                 \
           << LABEL << " follow-on add elem " << i << " code=0x" << std::hex << unsigned(codes[i]); \
-      static_cast<void>(sizeof(Out));                                                              \
+      (void)sizeof(Out);                                                                           \
     }                                                                                              \
-    static_cast<void>(hipFree(dIn));                                                               \
-    static_cast<void>(hipFree(dO));                                                                \
+    (void)hipFree(dIn);                                                                            \
+    (void)hipFree(dO);                                                                             \
   }                                                                                                \
   TEST(CvtScalef32Fp6Wrap, CASE) { FPSAN_RUN_FPSAN_SEMANTICS(CASE##_run); }
 
@@ -262,8 +262,8 @@ TEST(CvtScalef32Fp6Wrap, FpsanPackDivideInterleave) {
       EXPECT_EQ(host_extract6(got.data(), 2 * k), refLo) << "lo " << k;
       EXPECT_EQ(host_extract6(got.data(), 2 * k + 1), refHi) << "hi " << k;
     }
-    static_cast<void>(hipFree(dIn));
-    static_cast<void>(hipFree(dO));
+    (void)hipFree(dIn);
+    (void)hipFree(dO);
   });
 }
 

@@ -152,7 +152,7 @@ template <Semantics S, class Out> __global__ void k_wfred(const float *x, Out *o
 // fragment layout from Wmma16x16x16Layout.
 __device__ inline int wmma_frag_k(int lane, int idx) {
 #if defined(__GFX11__)
-  static_cast<void>(lane);
+  (void)lane;
   return idx;
 #else
   int reg = idx >> 1, half = idx & 1;
@@ -362,11 +362,11 @@ int main() {
                                          ? "all AGREE (expected: payload ring is associative)"
                                          : "DISAGREE (unexpected!)");
 
-  static_cast<void>(hipFree(d_in));
-  static_cast<void>(hipFree(d_wfred_f));
-  static_cast<void>(hipFree(d_cols_f));
-  static_cast<void>(hipFree(d_wfred_p));
-  static_cast<void>(hipFree(d_cols_p));
+  (void)hipFree(d_in);
+  (void)hipFree(d_wfred_f);
+  (void)hipFree(d_cols_f);
+  (void)hipFree(d_wfred_p);
+  (void)hipFree(d_cols_p);
 
   if (!float_disagree)
     return 2;

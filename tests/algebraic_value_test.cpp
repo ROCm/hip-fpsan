@@ -781,8 +781,8 @@ int main() {
     int o1[4] = {0, 1, 2, 3};
     int o2[4] = {3, 1, 0, 2}; // a different accumulation order
     // compiles & runs identically for Native, Triton, and the algebraic variants:
-    static_cast<void>(mac<F<Semantics::Native>>(A, B, 4, o1));
-    static_cast<void>(mac<F<Semantics::Triton>>(A, B, 4, o1));
+    (void)mac<F<Semantics::Native>>(A, B, 4, o1);
+    (void)mac<F<Semantics::Triton>>(A, B, 4, o1);
     check(mac<Alg>(A, B, 4, o1) == mac<Alg>(A, B, 4, o2),
           "alg: matmul is reassociation-invariant (sanitizer property)");
     check(mac<SG>(A, B, 4, o1) == mac<SG>(A, B, 4, o2),

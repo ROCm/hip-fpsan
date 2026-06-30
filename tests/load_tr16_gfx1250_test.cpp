@@ -53,7 +53,7 @@ __global__ void k_g_raw_f16(const std::uint16_t *gmem, std::uint16_t *out) {
   using v8fp16 = __fp16 __attribute__((ext_vector_type(8)));
   int lane = threadIdx.x;
   v8fp16 r{};
-  static_cast<void>(gmem);
+  (void)gmem;
 #ifdef __HIP_DEVICE_COMPILE__
   r = __builtin_amdgcn_global_load_tr16_b128_v8f16(
       (v8fp16 __attribute__((address_space(1))) *)(&gmem[lane * 8]));
@@ -80,7 +80,7 @@ __global__ void k_g_raw_bf16(const std::uint16_t *gmem, std::uint16_t *out) {
   using v8bf = __bf16 __attribute__((ext_vector_type(8)));
   int lane = threadIdx.x;
   v8bf r{};
-  static_cast<void>(gmem);
+  (void)gmem;
 #ifdef __HIP_DEVICE_COMPILE__
   r = __builtin_amdgcn_global_load_tr16_b128_v8bf16(
       (v8bf __attribute__((address_space(1))) *)(&gmem[lane * 8]));
@@ -178,20 +178,19 @@ std::vector<std::uint16_t> run(void (*k)(const std::uint16_t *, std::uint16_t *)
   const int N = WAVE * 8;
   std::uint16_t *d_in = nullptr;
   std::uint16_t *d_out = nullptr;
-  static_cast<void>(hipMalloc(&d_in, N * sizeof(std::uint16_t)));
-  static_cast<void>(hipMalloc(&d_out, N * sizeof(std::uint16_t)));
+  (void)hipMalloc(&d_in, N * sizeof(std::uint16_t));
+  (void)hipMalloc(&d_out, N * sizeof(std::uint16_t));
   std::vector<std::uint16_t> h_in(N);
   for (int lane = 0; lane < WAVE; ++lane)
     for (int s = 0; s < 8; ++s)
       h_in[lane * 8 + s] = pat16(lane, s);
-  static_cast<void>(hipMemcpy(d_in, h_in.data(), N * sizeof(std::uint16_t), hipMemcpyHostToDevice));
+  (void)hipMemcpy(d_in, h_in.data(), N * sizeof(std::uint16_t), hipMemcpyHostToDevice);
   k<<<1, WAVE>>>(d_in, d_out);
-  static_cast<void>(hipDeviceSynchronize());
+  (void)hipDeviceSynchronize();
   std::vector<std::uint16_t> h_out(N);
-  static_cast<void>(
-      hipMemcpy(h_out.data(), d_out, N * sizeof(std::uint16_t), hipMemcpyDeviceToHost));
-  static_cast<void>(hipFree(d_in));
-  static_cast<void>(hipFree(d_out));
+  (void)hipMemcpy(h_out.data(), d_out, N * sizeof(std::uint16_t), hipMemcpyDeviceToHost);
+  (void)hipFree(d_in);
+  (void)hipFree(d_out);
   return h_out;
 }
 bool have_device() {
@@ -268,7 +267,7 @@ __global__ void k_g_raw_tr8(const std::uint8_t *gmem, std::uint8_t *out) {
   using v2i32 = int __attribute__((ext_vector_type(2)));
   int lane = threadIdx.x;
   v2i32 r{};
-  static_cast<void>(gmem);
+  (void)gmem;
 #ifdef __HIP_DEVICE_COMPILE__
   r = __builtin_amdgcn_global_load_tr8_b64_v2i32(
       (v2i32 __attribute__((address_space(1))) *)(&gmem[lane * 8]));
@@ -348,31 +347,31 @@ template <Semantics S> __global__ void k_d_wrap_tr6(std::uint32_t *out) {
 namespace {
 template <class T> std::vector<T> run_self(void (*k)(T *), int n) {
   T *d = nullptr;
-  static_cast<void>(hipMalloc(&d, n * sizeof(T)));
+  (void)hipMalloc(&d, n * sizeof(T));
   k<<<1, WAVE>>>(d);
-  static_cast<void>(hipDeviceSynchronize());
+  (void)hipDeviceSynchronize();
   std::vector<T> h(n);
-  static_cast<void>(hipMemcpy(h.data(), d, n * sizeof(T), hipMemcpyDeviceToHost));
-  static_cast<void>(hipFree(d));
+  (void)hipMemcpy(h.data(), d, n * sizeof(T), hipMemcpyDeviceToHost);
+  (void)hipFree(d);
   return h;
 }
 std::vector<std::uint8_t> run_g8(void (*k)(const std::uint8_t *, std::uint8_t *)) {
   const int N = WAVE * 8;
   std::uint8_t *d_in = nullptr;
   std::uint8_t *d_out = nullptr;
-  static_cast<void>(hipMalloc(&d_in, N));
-  static_cast<void>(hipMalloc(&d_out, N));
+  (void)hipMalloc(&d_in, N);
+  (void)hipMalloc(&d_out, N);
   std::vector<std::uint8_t> h_in(N);
   for (int lane = 0; lane < WAVE; ++lane)
     for (int s = 0; s < 8; ++s)
       h_in[lane * 8 + s] = static_cast<std::uint8_t>(0x10 + lane + s);
-  static_cast<void>(hipMemcpy(d_in, h_in.data(), N, hipMemcpyHostToDevice));
+  (void)hipMemcpy(d_in, h_in.data(), N, hipMemcpyHostToDevice);
   k<<<1, WAVE>>>(d_in, d_out);
-  static_cast<void>(hipDeviceSynchronize());
+  (void)hipDeviceSynchronize();
   std::vector<std::uint8_t> h_out(N);
-  static_cast<void>(hipMemcpy(h_out.data(), d_out, N, hipMemcpyDeviceToHost));
-  static_cast<void>(hipFree(d_in));
-  static_cast<void>(hipFree(d_out));
+  (void)hipMemcpy(h_out.data(), d_out, N, hipMemcpyDeviceToHost);
+  (void)hipFree(d_in);
+  (void)hipFree(d_out);
   return h_out;
 }
 } // namespace

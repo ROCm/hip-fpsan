@@ -80,7 +80,7 @@ FPSAN_DEVICE Value<v8h_native, S, C>
 amdgcn_global_load_tr_b128_f16(const Value<_Float16, S, C> *gptr) {
   using Bits = typename Value<v8h_native, S, C>::bits_type;
   Bits bits{};
-  static_cast<void>(gptr);
+  (void)gptr;
   FPSAN_GL_DEVICE_ONLY({
     using v8fp16 = __fp16 __attribute__((ext_vector_type(8)));
     auto raw = __builtin_amdgcn_global_load_tr_b128_v8f16((v8fp16 FPSAN_GL_GLOBAL *)(gptr));
@@ -94,7 +94,7 @@ FPSAN_DEVICE Value<v8bf_native, S, C>
 amdgcn_global_load_tr_b128_bf16(const Value<__bf16, S, C> *gptr) {
   using Bits = typename Value<v8bf_native, S, C>::bits_type;
   Bits bits{};
-  static_cast<void>(gptr);
+  (void)gptr;
   FPSAN_GL_DEVICE_ONLY({
     auto raw = __builtin_amdgcn_global_load_tr_b128_v8bf16((v8bf_native FPSAN_GL_GLOBAL *)(gptr));
     bits = __builtin_bit_cast(Bits, raw);
@@ -111,7 +111,7 @@ FPSAN_DEVICE Value<v4h_native, S, C>
 amdgcn_global_load_tr_b128_f16_w64(const Value<_Float16, S, C> *gptr) {
   using Bits = typename Value<v4h_native, S, C>::bits_type;
   Bits bits{};
-  static_cast<void>(gptr);
+  (void)gptr;
   FPSAN_GL_DEVICE_ONLY({
     using v4fp16 = __fp16 __attribute__((ext_vector_type(4)));
     auto raw = __builtin_amdgcn_global_load_tr_b128_v4f16((v4fp16 FPSAN_GL_GLOBAL *)(gptr));
@@ -127,7 +127,7 @@ FPSAN_DEVICE Value<v4bf_native, S, C>
 amdgcn_global_load_tr_b128_bf16_w64(const Value<__bf16, S, C> *gptr) {
   using Bits = typename Value<v4bf_native, S, C>::bits_type;
   Bits bits{};
-  static_cast<void>(gptr);
+  (void)gptr;
   FPSAN_GL_DEVICE_ONLY({
     auto raw = __builtin_amdgcn_global_load_tr_b128_v4bf16((v4bf_native FPSAN_GL_GLOBAL *)(gptr));
     bits = __builtin_bit_cast(Bits, raw);
@@ -144,7 +144,7 @@ amdgcn_global_load_tr_b128_bf16_w64(const Value<__bf16, S, C> *gptr) {
   FPSAN_DEVICE Value<FRAG, S, C> NAME(const Value<detail::vector_element_t<FRAG>, S, C> *gptr) {   \
     using Bits = typename Value<FRAG, S, C>::bits_type;                                            \
     Bits bits{};                                                                                   \
-    static_cast<void>(gptr);                                                                       \
+    (void)gptr;                                                                                    \
     FPSAN_GL_DEVICE_ONLY({                                                                         \
       auto raw = __builtin_amdgcn_global_load_tr_b64_i32((int FPSAN_GL_GLOBAL *)(gptr));           \
       bits = __builtin_bit_cast(Bits, raw);                                                        \
@@ -169,7 +169,7 @@ FPSAN_DEVICE Value<v8h_native, S, C>
 amdgcn_global_load_tr16_b128_f16(const Value<_Float16, S, C> *gptr) {
   using Bits = typename Value<v8h_native, S, C>::bits_type;
   Bits bits{};
-  static_cast<void>(gptr);
+  (void)gptr;
   FPSAN_GL_DEVICE_ONLY({
     using v8fp16 = __fp16 __attribute__((ext_vector_type(8)));
     auto raw = __builtin_amdgcn_global_load_tr16_b128_v8f16((v8fp16 FPSAN_GL_GLOBAL *)(gptr));
@@ -183,7 +183,7 @@ FPSAN_DEVICE Value<v8bf_native, S, C>
 amdgcn_global_load_tr16_b128_bf16(const Value<__bf16, S, C> *gptr) {
   using Bits = typename Value<v8bf_native, S, C>::bits_type;
   Bits bits{};
-  static_cast<void>(gptr);
+  (void)gptr;
   FPSAN_GL_DEVICE_ONLY({
     auto raw = __builtin_amdgcn_global_load_tr16_b128_v8bf16((v8bf_native FPSAN_GL_GLOBAL *)(gptr));
     bits = __builtin_bit_cast(Bits, raw);
@@ -205,7 +205,7 @@ amdgcn_global_load_tr16_b128_bf16(const Value<__bf16, S, C> *gptr) {
   FPSAN_DEVICE Value<FRAG, S, C> NAME(const Value<detail::vector_element_t<FRAG>, S, C> *gptr) {   \
     using Bits = typename Value<FRAG, S, C>::bits_type;                                            \
     Bits bits{};                                                                                   \
-    static_cast<void>(gptr);                                                                       \
+    (void)gptr;                                                                                    \
     FPSAN_GL_DEVICE_ONLY({                                                                         \
       using v2i32 = int __attribute__((ext_vector_type(2)));                                       \
       auto raw = __builtin_amdgcn_global_load_tr8_b64_v2i32((v2i32 FPSAN_GL_GLOBAL *)(gptr));      \

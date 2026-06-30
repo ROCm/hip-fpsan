@@ -71,8 +71,8 @@ TEST(CvtScalef32Fp4Wrap, FloatUnpackAllCodes) {
     EXPECT_EQ(got[2 * c], ref) << "code " << c << " elem0";
     EXPECT_EQ(got[2 * c + 1], ref) << "code " << c << " elem1";
   }
-  static_cast<void>(hipFree(dIn));
-  static_cast<void>(hipFree(dO));
+  (void)hipFree(dIn);
+  (void)hipFree(dO);
 }
 
 // Pack pairs of representable fp4 values through the wrapper (Sel=0, scale=1)
@@ -115,7 +115,7 @@ TEST(CvtScalef32Fp4Wrap, FloatPackExactBitsAndSel) {
   run(std::integral_constant<int, 1>{}, 1);
   run(std::integral_constant<int, 2>{}, 2);
   run(std::integral_constant<int, 3>{}, 3);
-  static_cast<void>(hipFree(dO));
+  (void)hipFree(dO);
 }
 
 // Scale direction through the wrapper: unpack multiplies, pack divides.
@@ -142,8 +142,8 @@ TEST(CvtScalef32Fp4Wrap, FloatScaleDirection) {
   EXPECT_EQ(from_dev(dU, 1)[0], 4.0f); // 1.0 * 4
   // pack 8.0 / 2 = 4.0 -> code 6.
   EXPECT_EQ(from_dev(dP, 1)[0] & 0xF, unsigned(0x6));
-  static_cast<void>(hipFree(dU));
-  static_cast<void>(hipFree(dP));
+  (void)hipFree(dU);
+  (void)hipFree(dP);
 }
 
 // ============================ FPSan mode ====================================
@@ -216,7 +216,7 @@ template <class DstFT, Semantics S, class Launch> void run_fpsan_unpack_canonica
     HIP_CHECK(hipDeviceSynchronize());
     expect_fp4_pair<DstFT, S>(from_dev(dO, 4), pair[0], pair[1], scale);
   }
-  static_cast<void>(hipFree(dO));
+  (void)hipFree(dO);
 }
 
 TEST(CvtScalef32Fp4Wrap, FpsanUnpackF32CanonicalPayload) {
@@ -269,7 +269,7 @@ template <Semantics S> void run_fpsan_fp4_roundtrip() {
       EXPECT_EQ(from_dev(dO, 1)[0], want_lo | (want_hi << 4))
           << "lo=0x" << std::hex << lo << " hi=0x" << hi << std::dec;
     }
-  static_cast<void>(hipFree(dO));
+  (void)hipFree(dO);
 }
 
 TEST(CvtScalef32Fp4Wrap, FpsanFieldWithMulCastsRoundTripAllCodes) {
@@ -323,7 +323,7 @@ TEST(CvtScalef32Fp4Wrap, FpsanPackSelDivideAndPreserve) {
       unsigned mask = 0xFFu << (8 * 2);
       EXPECT_EQ(got, (old & ~mask) | (pair << (8 * 2))) << "non-finite source pack";
     }
-    static_cast<void>(hipFree(dO));
+    (void)hipFree(dO);
   });
 }
 
@@ -365,7 +365,7 @@ TEST(CvtScalef32Fp4Wrap, FpsanSrPackMatchesDeterministic) {
       unsigned nb = fpsan_test::canonical_subbyte_narrow_code<4>(VF{b});
       EXPECT_EQ(got, na | (nb << 4)) << "non-finite source sr pack";
     }
-    static_cast<void>(hipFree(dO));
+    (void)hipFree(dO);
   });
 }
 
@@ -392,7 +392,7 @@ TEST(CvtScalef32Fp4Wrap, FloatF16UnpackAllCodes) {
     EXPECT_EQ(got[0], ref) << "f16 code " << c;
     EXPECT_EQ(got[1], ref) << "f16 code " << c;
   }
-  static_cast<void>(hipFree(dO));
+  (void)hipFree(dO);
 }
 
 #endif // has builtin

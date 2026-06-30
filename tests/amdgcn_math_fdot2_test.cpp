@@ -296,13 +296,13 @@ TEST(AmdgcnMath, fdot2_FloatAndFpsan) {
       EXPECT_EQ(pwrap[i], pdir[i]) << "FPSan lane " << i;
     }
   });
-  static_cast<void>(hipFree(dA));
-  static_cast<void>(hipFree(dB));
-  static_cast<void>(hipFree(dC));
-  static_cast<void>(hipFree(dDir));
-  static_cast<void>(hipFree(dWrap));
-  static_cast<void>(hipFree(dPdir));
-  static_cast<void>(hipFree(dPwrap));
+  (void)hipFree(dA);
+  (void)hipFree(dB);
+  (void)hipFree(dC);
+  (void)hipFree(dDir);
+  (void)hipFree(dWrap);
+  (void)hipFree(dPdir);
+  (void)hipFree(dPwrap);
 }
 #endif
 
@@ -345,13 +345,13 @@ TEST(AmdgcnMath, fdot2_f16_f16_FloatAndFpsan) {
       EXPECT_EQ(pwrap[i], pdir[i]) << "FPSan lane " << i;
     }
   });
-  static_cast<void>(hipFree(dA));
-  static_cast<void>(hipFree(dB));
-  static_cast<void>(hipFree(dC));
-  static_cast<void>(hipFree(dDir));
-  static_cast<void>(hipFree(dWrap));
-  static_cast<void>(hipFree(dPdir));
-  static_cast<void>(hipFree(dPwrap));
+  (void)hipFree(dA);
+  (void)hipFree(dB);
+  (void)hipFree(dC);
+  (void)hipFree(dDir);
+  (void)hipFree(dWrap);
+  (void)hipFree(dPdir);
+  (void)hipFree(dPwrap);
 }
 
 TEST(AmdgcnMath, fdot2_bf16_bf16_FloatAndFpsan) {
@@ -392,13 +392,13 @@ TEST(AmdgcnMath, fdot2_bf16_bf16_FloatAndFpsan) {
       EXPECT_EQ(pwrap[i], pdir[i]) << "FPSan lane " << i;
     }
   });
-  static_cast<void>(hipFree(dA));
-  static_cast<void>(hipFree(dB));
-  static_cast<void>(hipFree(dC));
-  static_cast<void>(hipFree(dDir));
-  static_cast<void>(hipFree(dWrap));
-  static_cast<void>(hipFree(dPdir));
-  static_cast<void>(hipFree(dPwrap));
+  (void)hipFree(dA);
+  (void)hipFree(dB);
+  (void)hipFree(dC);
+  (void)hipFree(dDir);
+  (void)hipFree(dWrap);
+  (void)hipFree(dPdir);
+  (void)hipFree(dPwrap);
 }
 
 TEST(AmdgcnMath, fdot2_f32_bf16_FloatAndFpsan) {
@@ -433,13 +433,13 @@ TEST(AmdgcnMath, fdot2_f32_bf16_FloatAndFpsan) {
       EXPECT_EQ(pwrap[i], pdir[i]) << "FPSan lane " << i;
     }
   });
-  static_cast<void>(hipFree(dA));
-  static_cast<void>(hipFree(dB));
-  static_cast<void>(hipFree(dC));
-  static_cast<void>(hipFree(dDir));
-  static_cast<void>(hipFree(dWrap));
-  static_cast<void>(hipFree(dPdir));
-  static_cast<void>(hipFree(dPwrap));
+  (void)hipFree(dA);
+  (void)hipFree(dB);
+  (void)hipFree(dC);
+  (void)hipFree(dDir);
+  (void)hipFree(dWrap);
+  (void)hipFree(dPdir);
+  (void)hipFree(dPwrap);
 }
 #endif
 

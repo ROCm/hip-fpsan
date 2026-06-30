@@ -76,9 +76,9 @@ TEST(Classify, ClassfFloatAndFpsanAgree) {
       }
     }
   });
-  static_cast<void>(hipFree(dIn));
-  static_cast<void>(hipFree(dBf));
-  static_cast<void>(hipFree(dBp));
+  (void)hipFree(dIn);
+  (void)hipFree(dBf);
+  (void)hipFree(dBp);
 }
 
 template <Semantics S>
@@ -131,8 +131,8 @@ TEST(Classify, FcmpfFloatAndFpsanAgree) {
       EXPECT_EQ(mf, expected);
     }
   });
-  static_cast<void>(hipFree(dA));
-  static_cast<void>(hipFree(dB));
-  static_cast<void>(hipFree(dMf));
-  static_cast<void>(hipFree(dMp));
+  (void)hipFree(dA);
+  (void)hipFree(dB);
+  (void)hipFree(dMf);
+  (void)hipFree(dMp);
 }

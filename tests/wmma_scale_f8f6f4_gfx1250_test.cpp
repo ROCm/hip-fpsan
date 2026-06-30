@@ -167,12 +167,12 @@ TEST(WmmaScaleF8f6f4_128, LayoutMatchesHardware) {
       ++mism;
     }
   EXPECT_EQ(mism, 0) << mism << " / " << (M * N) << " mismatched";
-  static_cast<void>(hipFree(dA));
-  static_cast<void>(hipFree(dB));
-  static_cast<void>(hipFree(dC));
-  static_cast<void>(hipFree(dSA));
-  static_cast<void>(hipFree(dSB));
-  static_cast<void>(hipFree(dD));
+  (void)hipFree(dA);
+  (void)hipFree(dB);
+  (void)hipFree(dC);
+  (void)hipFree(dSA);
+  (void)hipFree(dSB);
+  (void)hipFree(dD);
 }
 
 // ===================== Sub-byte block-scaled wrapper =====================
@@ -387,13 +387,13 @@ static void run_sub_scale(const char *tag) {
   }
   EXPECT_EQ(nf, 0) << nf << " float mismatches";
   EXPECT_EQ(np, 0) << np << " payload mismatches";
-  static_cast<void>(hipFree(dA));
-  static_cast<void>(hipFree(dB));
-  static_cast<void>(hipFree(dC));
-  static_cast<void>(hipFree(dSA));
-  static_cast<void>(hipFree(dSB));
-  static_cast<void>(hipFree(dDf));
-  static_cast<void>(hipFree(dDp));
+  (void)hipFree(dA);
+  (void)hipFree(dB);
+  (void)hipFree(dC);
+  (void)hipFree(dSA);
+  (void)hipFree(dSB);
+  (void)hipFree(dDf);
+  (void)hipFree(dDp);
 }
 
 template <int AFMT, int BFMT, int ASFMT = 0, int BSFMT = 0>
@@ -483,15 +483,15 @@ template <int AFMT> static void run_probe(const char *tag) {
       if (d00 == std::ldexp(1.f, b + 1))
         byte = b;
     kbyte[k0] = byte;
-    static_cast<void>(hipFree(dB1));
+    (void)hipFree(dB1);
   }
   printf("logical k -> A-scale byte (%s):\n", tag);
   for (int k0 = 0; k0 < K; ++k0)
     printf("k=%3d byte=%d%s", k0, kbyte[k0], (k0 % 8 == 7) ? "\n" : "  ");
-  static_cast<void>(hipFree(dA));
-  static_cast<void>(hipFree(dD));
-  static_cast<void>(hipFree(dSA));
-  static_cast<void>(hipFree(dSB));
+  (void)hipFree(dA);
+  (void)hipFree(dD);
+  (void)hipFree(dSA);
+  (void)hipFree(dSB);
 }
 
 TEST(WmmaScaleF8f6f4_128, DISABLED_ProbeScaleLayoutFp4) { run_probe<4>("fp4"); }
@@ -560,15 +560,15 @@ template <int AFMT> static void run_probe16(const char *tag) {
       if (d00 == std::ldexp(1.f, b + 1))
         byte = b;
     kbyte[k0] = byte;
-    static_cast<void>(hipFree(dB1));
+    (void)hipFree(dB1);
   }
   printf("logical k -> A-scale16 byte (%s):\n", tag);
   for (int k0 = 0; k0 < K; ++k0)
     printf("k=%3d byte=%d%s", k0, kbyte[k0], (k0 % 8 == 7) ? "\n" : "  ");
-  static_cast<void>(hipFree(dA));
-  static_cast<void>(hipFree(dD));
-  static_cast<void>(hipFree(dSA));
-  static_cast<void>(hipFree(dSB));
+  (void)hipFree(dA);
+  (void)hipFree(dD);
+  (void)hipFree(dSA);
+  (void)hipFree(dSB);
 }
 
 TEST(WmmaScaleF8f6f4_128, DISABLED_ProbeScale16LayoutFp4) { run_probe16<4>("fp4"); }
@@ -737,13 +737,13 @@ template <Semantics S, int AFMT, int BFMT> static void run_sub_scale16(const cha
   }
   EXPECT_EQ(nf, 0) << nf << " float mismatches";
   EXPECT_EQ(np, 0) << np << " payload mismatches";
-  static_cast<void>(hipFree(dA));
-  static_cast<void>(hipFree(dB));
-  static_cast<void>(hipFree(dC));
-  static_cast<void>(hipFree(dSA));
-  static_cast<void>(hipFree(dSB));
-  static_cast<void>(hipFree(dDf));
-  static_cast<void>(hipFree(dDp));
+  (void)hipFree(dA);
+  (void)hipFree(dB);
+  (void)hipFree(dC);
+  (void)hipFree(dSA);
+  (void)hipFree(dSB);
+  (void)hipFree(dDf);
+  (void)hipFree(dDp);
 }
 
 template <int AFMT, int BFMT> static void run_sub_scale16_all(const char *tag) {
@@ -905,13 +905,13 @@ static void run_mixed_scale(const char *tag) {
   }
   EXPECT_EQ(nf, 0) << nf << " float mismatches";
   EXPECT_EQ(np, 0) << np << " payload mismatches";
-  static_cast<void>(hipFree(dA));
-  static_cast<void>(hipFree(dB));
-  static_cast<void>(hipFree(dC));
-  static_cast<void>(hipFree(dSA));
-  static_cast<void>(hipFree(dSB));
-  static_cast<void>(hipFree(dDf));
-  static_cast<void>(hipFree(dDp));
+  (void)hipFree(dA);
+  (void)hipFree(dB);
+  (void)hipFree(dC);
+  (void)hipFree(dSA);
+  (void)hipFree(dSB);
+  (void)hipFree(dDf);
+  (void)hipFree(dDp);
 }
 
 template <int AFMT, int BFMT, int ASFMT = 0, int BSFMT = 0>
@@ -1068,13 +1068,13 @@ template <Semantics S, int AFMT, int BFMT> static void run_mixed_scale16(const c
   }
   EXPECT_EQ(nf, 0) << nf << " float mismatches";
   EXPECT_EQ(np, 0) << np << " payload mismatches";
-  static_cast<void>(hipFree(dA));
-  static_cast<void>(hipFree(dB));
-  static_cast<void>(hipFree(dC));
-  static_cast<void>(hipFree(dSA));
-  static_cast<void>(hipFree(dSB));
-  static_cast<void>(hipFree(dDf));
-  static_cast<void>(hipFree(dDp));
+  (void)hipFree(dA);
+  (void)hipFree(dB);
+  (void)hipFree(dC);
+  (void)hipFree(dSA);
+  (void)hipFree(dSB);
+  (void)hipFree(dDf);
+  (void)hipFree(dDp);
 }
 
 template <int AFMT, int BFMT> static void run_mixed_scale16_all(const char *tag) {

@@ -120,11 +120,11 @@ __global__ void k_cvt_f32_bf8_pair(const int *packed, float *direct, float *wrap
         EXPECT_EQ(pwrap[i], pdir[i]) << "FPSan lane " << i;                                        \
       }                                                                                            \
     });                                                                                            \
-    static_cast<void>(hipFree(dIn));                                                               \
-    static_cast<void>(hipFree(dDir));                                                              \
-    static_cast<void>(hipFree(dWrap));                                                             \
-    static_cast<void>(hipFree(dPdir));                                                             \
-    static_cast<void>(hipFree(dPwrap));                                                            \
+    (void)hipFree(dIn);                                                                            \
+    (void)hipFree(dDir);                                                                           \
+    (void)hipFree(dWrap);                                                                          \
+    (void)hipFree(dPdir);                                                                          \
+    (void)hipFree(dPwrap);                                                                         \
   }
 
 CVT_F32_FP8_TEST(cvt_f32_fp8, 0)
@@ -224,11 +224,11 @@ __global__ void k_cvt_pk_f32_bf8_pair(const int *packed, float *direct, float *w
       for (int i = 0; i < 2 * kFp8N; ++i)                                                          \
         EXPECT_EQ(pwrap[i], pdir[i]) << fpsan::semantics_name(S) << " lane " << i;                 \
     });                                                                                            \
-    static_cast<void>(hipFree(dIn));                                                               \
-    static_cast<void>(hipFree(dDir));                                                              \
-    static_cast<void>(hipFree(dWrap));                                                             \
-    static_cast<void>(hipFree(dPdir));                                                             \
-    static_cast<void>(hipFree(dPwrap));                                                            \
+    (void)hipFree(dIn);                                                                            \
+    (void)hipFree(dDir);                                                                           \
+    (void)hipFree(dWrap);                                                                          \
+    (void)hipFree(dPdir);                                                                          \
+    (void)hipFree(dPwrap);                                                                         \
   }
 
 // ---- cvt_pk_fp8_f32 / cvt_pk_bf8_f32 (pack) --------------------------------
@@ -316,11 +316,11 @@ __global__ void k_cvt_pk_bf8_fpsan(const float *a, const float *b, const int *ol
     HIP_CHECK(hipMemcpy(wrap.data(), dWrap, kFp8N * sizeof(int), hipMemcpyDeviceToHost));          \
     for (int i = 0; i < kFp8N; ++i)                                                                \
       EXPECT_EQ(wrap[i], dir[i]) << "lane " << i;                                                  \
-    static_cast<void>(hipFree(dA));                                                                \
-    static_cast<void>(hipFree(dB));                                                                \
-    static_cast<void>(hipFree(dOld));                                                              \
-    static_cast<void>(hipFree(dDir));                                                              \
-    static_cast<void>(hipFree(dWrap));                                                             \
+    (void)hipFree(dA);                                                                             \
+    (void)hipFree(dB);                                                                             \
+    (void)hipFree(dOld);                                                                           \
+    (void)hipFree(dDir);                                                                           \
+    (void)hipFree(dWrap);                                                                          \
   }
 
 #define CVT_PK_FP8_FPSAN_TEST(FAMILY, DSTLO)                                                       \
@@ -350,11 +350,11 @@ __global__ void k_cvt_pk_bf8_fpsan(const float *a, const float *b, const int *ol
       for (int i = 0; i < kFp8N; ++i)                                                              \
         EXPECT_EQ(wrap[i], exp[i]) << "lane " << i;                                                \
     });                                                                                            \
-    static_cast<void>(hipFree(dA));                                                                \
-    static_cast<void>(hipFree(dB));                                                                \
-    static_cast<void>(hipFree(dOld));                                                              \
-    static_cast<void>(hipFree(dExp));                                                              \
-    static_cast<void>(hipFree(dWrap));                                                             \
+    (void)hipFree(dA);                                                                             \
+    (void)hipFree(dB);                                                                             \
+    (void)hipFree(dOld);                                                                           \
+    (void)hipFree(dExp);                                                                           \
+    (void)hipFree(dWrap);                                                                          \
   }
 
 // ---- cvt_sr_fp8_f32 / cvt_sr_bf8_f32 (stochastic round + byte splice) -------
@@ -435,11 +435,11 @@ __global__ void k_cvt_sr_bf8_f32_pair(const float *a, const int *old, const int 
       for (int i = 0; i < kFp8N; ++i)                                                              \
         EXPECT_EQ(fwrap[i], exp[i]) << fpsan::semantics_name(S) << " lane " << i;                  \
     });                                                                                            \
-    static_cast<void>(hipFree(dA));                                                                \
-    static_cast<void>(hipFree(dOld));                                                              \
-    static_cast<void>(hipFree(dSeed));                                                             \
-    static_cast<void>(hipFree(dDir));                                                              \
-    static_cast<void>(hipFree(dWrap));                                                             \
-    static_cast<void>(hipFree(dExp));                                                              \
-    static_cast<void>(hipFree(dFwrap));                                                            \
+    (void)hipFree(dA);                                                                             \
+    (void)hipFree(dOld);                                                                           \
+    (void)hipFree(dSeed);                                                                          \
+    (void)hipFree(dDir);                                                                           \
+    (void)hipFree(dWrap);                                                                          \
+    (void)hipFree(dExp);                                                                           \
+    (void)hipFree(dFwrap);                                                                         \
   }

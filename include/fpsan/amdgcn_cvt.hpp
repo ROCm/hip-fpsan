@@ -89,7 +89,7 @@ amdgcn_cvt_sr_pk_f16_f32(Value<float, S, C> a, Value<float, S, C> b, std::uint32
         __builtin_amdgcn_cvt_sr_pk_f16_f32(a.to_float(), b.to_float(), static_cast<int>(seed));
     return Value<v2h_native, S, C>(__builtin_bit_cast(v2h_native, raw));
   } else {
-    static_cast<void>(seed);
+    (void)seed;
     Value<v2h_native, S, C> r{};
     r.set(0, fpsan::cast<_Float16>(a));
     r.set(1, fpsan::cast<_Float16>(b));
@@ -107,7 +107,7 @@ amdgcn_cvt_sr_pk_bf16_f32(Value<float, S, C> a, Value<float, S, C> b, std::uint3
         __builtin_amdgcn_cvt_sr_pk_bf16_f32(a.to_float(), b.to_float(), static_cast<int>(seed));
     return Value<v2bf_native, S, C>(__builtin_bit_cast(v2bf_native, raw));
   } else {
-    static_cast<void>(seed);
+    (void)seed;
     Value<v2bf_native, S, C> r{};
     r.set(0, fpsan::cast<__bf16>(a));
     r.set(1, fpsan::cast<__bf16>(b));
@@ -259,7 +259,7 @@ template <int ByteIdx> FPSAN_DEVICE int splice_fp8_byte(std::uint8_t byte, int o
     if constexpr (S == Semantics::Native)                                                          \
       return BUILTIN(val.to_float(), static_cast<int>(seed), packed_old, ByteIdx);                 \
     else {                                                                                         \
-      static_cast<void>(seed);                                                                     \
+      (void)seed;                                                                                  \
       const auto f8 = fpsan::cast<FP8>(val);                                                       \
       return detail::splice_fp8_byte<ByteIdx>(static_cast<std::uint8_t>(f8.fpsan_payload()),       \
                                               packed_old);                                         \
@@ -351,7 +351,7 @@ FPSAN_DEFINE_CVT_PK_FP8_F16(amdgcn_cvt_pk_bf8_f16, fp8_e5m2, __builtin_amdgcn_cv
     if constexpr (S == Semantics::Native)                                                          \
       return BUILTIN(val.to_float(), static_cast<int>(seed), packed_old, ByteIdx);                 \
     else {                                                                                         \
-      static_cast<void>(seed);                                                                     \
+      (void)seed;                                                                                  \
       const auto f8 = fpsan::cast<FP8>(val);                                                       \
       return detail::splice_fp8_byte<ByteIdx>(static_cast<std::uint8_t>(f8.fpsan_payload()),       \
                                               packed_old);                                         \
@@ -375,7 +375,7 @@ amdgcn_cvt_sr_f16_f32(Value<v2h_native, S, C> old, Value<float, S, C> val, std::
         __builtin_amdgcn_cvt_sr_f16_f32(old.to_float(), val.to_float(), seed, DstLo ? false : true);
     return Value<v2h_native, S, C>(r);
   } else {
-    static_cast<void>(seed);
+    (void)seed;
     auto h = fpsan::cast<_Float16>(val);
     Value<v2h_native, S, C> r = old;
     r.set(DstLo ? 0 : 1, h);
@@ -391,7 +391,7 @@ amdgcn_cvt_sr_bf16_f32(Value<v2bf_native, S, C> old, Value<float, S, C> val, std
                                                      DstLo ? false : true);
     return Value<v2bf_native, S, C>(r);
   } else {
-    static_cast<void>(seed);
+    (void)seed;
     auto h = fpsan::cast<__bf16>(val);
     Value<v2bf_native, S, C> r = old;
     r.set(DstLo ? 0 : 1, h);
@@ -613,7 +613,7 @@ FPSAN_DEFINE_CVT_SCALEF32_PACK_FP8(amdgcn_cvt_scalef32_pk_bf8_bf16, fp8_e5m2, v2
     if constexpr (S == Semantics::Native)                                                          \
       return BUILTIN(old, val.to_float(), seed, scale.to_float(), ByteIdx);                        \
     else {                                                                                         \
-      static_cast<void>(seed);                                                                     \
+      (void)seed;                                                                                  \
       const auto f8 = fpsan::cast<FP8>(fpsan::cast<float>(val) / scale);                           \
       return detail::splice_fp8_byte<ByteIdx>(static_cast<std::uint8_t>(f8.fpsan_payload()), old); \
     }                                                                                              \
@@ -746,7 +746,7 @@ amdgcn_cvt_scalef32_sr_pk_fp4_f32(std::uint32_t old, Value<float, S, C> a, Value
     v2f_native v{a.to_float(), b.to_float()};
     return __builtin_amdgcn_cvt_scalef32_sr_pk_fp4_f32(old, v, seed, scale.to_float(), Sel);
   } else {
-    static_cast<void>(seed);
+    (void)seed;
     return detail::splice_fp4_pair<Sel>(detail::f32_to_fp4_nibble<S, C>(a / scale),
                                         detail::f32_to_fp4_nibble<S, C>(b / scale), old);
   }
@@ -765,7 +765,7 @@ amdgcn_cvt_scalef32_sr_pk_fp4_f32(std::uint32_t old, Value<float, S, C> a, Value
     if constexpr (S == Semantics::Native) {                                                        \
       return BUILTIN(old, v.to_float(), seed, scale.to_float(), Sel);                              \
     } else {                                                                                       \
-      static_cast<void>(seed);                                                                     \
+      (void)seed;                                                                                  \
       return detail::splice_fp4_pair<Sel>(                                                         \
           detail::f32_to_fp4_nibble<S, C>(fpsan::cast<float>(v.get(0)) / scale),                   \
           detail::f32_to_fp4_nibble<S, C>(fpsan::cast<float>(v.get(1)) / scale), old);             \
@@ -912,7 +912,7 @@ FPSAN_DEFINE_CVT_SCALEF32_PK32_PACK(amdgcn_cvt_scalef32_pk32_bf6_bf16, __bf16, v
     if constexpr (S == Semantics::Native) {                                                        \
       return BUILTIN(v.to_float(), seed, scale.to_float());                                        \
     } else {                                                                                       \
-      static_cast<void>(seed);                                                                     \
+      (void)seed;                                                                                  \
       v6u32_native out{};                                                                          \
       for (int i = 0; i < 32; ++i)                                                                 \
         detail::insert6(out, i, detail::f32_to_sub6<S, C>(v.get(i) / scale));                      \
@@ -937,7 +937,7 @@ FPSAN_DEFINE_CVT_SCALEF32_SR_PK32(amdgcn_cvt_scalef32_sr_pk32_bf6_f32,
     if constexpr (S == Semantics::Native) {                                                        \
       return BUILTIN(v.to_float(), seed, scale.to_float());                                        \
     } else {                                                                                       \
-      static_cast<void>(seed);                                                                     \
+      (void)seed;                                                                                  \
       v6u32_native out{};                                                                          \
       for (int i = 0; i < 32; ++i)                                                                 \
         detail::insert6(out, i, detail::f32_to_sub6<S, C>(fpsan::cast<float>(v.get(i)) / scale));  \
@@ -1105,7 +1105,7 @@ FPSAN_DEFINE_CVT_SCALEF32_PK16_FP6(amdgcn_cvt_scalef32_pk16_bf6_bf16, v16bf_nati
     if constexpr (S == Semantics::Native)                                                          \
       return BUILTIN(v.to_float(), seed, scale.to_float());                                        \
     else {                                                                                         \
-      static_cast<void>(seed);                                                                     \
+      (void)seed;                                                                                  \
       std::uint8_t b[8];                                                                           \
       for (int i = 0; i < 8; ++i)                                                                  \
         b[i] = static_cast<std::uint8_t>(                                                          \
@@ -1135,7 +1135,7 @@ FPSAN_DEFINE_CVT_SCALEF32_SR_PK8_FP8(amdgcn_cvt_scalef32_sr_pk8_bf8_bf16, fp8_e5
     if constexpr (S == Semantics::Native)                                                          \
       return BUILTIN(v.to_float(), seed, scale.to_float());                                        \
     else {                                                                                         \
-      static_cast<void>(seed);                                                                     \
+      (void)seed;                                                                                  \
       std::uint8_t n[8];                                                                           \
       for (int i = 0; i < 8; ++i)                                                                  \
         n[i] = static_cast<std::uint8_t>(                                                          \
@@ -1159,7 +1159,7 @@ FPSAN_DEFINE_CVT_SCALEF32_SR_PK8_FP4(amdgcn_cvt_scalef32_sr_pk8_fp4_bf16, v8bf_n
     if constexpr (S == Semantics::Native)                                                          \
       return BUILTIN(v.to_float(), seed, scale.to_float());                                        \
     else {                                                                                         \
-      static_cast<void>(seed);                                                                     \
+      (void)seed;                                                                                  \
       v3u32_native out{};                                                                          \
       for (int i = 0; i < 16; ++i)                                                                 \
         detail::insert6(out, i, detail::f32_to_sub6<S, C>(fpsan::cast<float>(v.get(i)) / scale));  \
@@ -1244,7 +1244,7 @@ FPSAN_DEVICE int amdgcn_cvt_sr_fp8_f32_e5m3(Value<float, S, C> val, int packed_o
     return __builtin_amdgcn_cvt_sr_fp8_f32_e5m3(val.to_float(), static_cast<int>(seed), packed_old,
                                                 ByteIdx);
   else {
-    static_cast<void>(seed);
+    (void)seed;
     return detail::splice_fp8_byte<ByteIdx>(static_cast<std::uint8_t>(val.fpsan_payload()),
                                             packed_old);
   }
@@ -1286,7 +1286,7 @@ FPSAN_DEVICE int amdgcn_cvt_sr_fp8_f32_e5m3(Value<float, S, C> val, int packed_o
     if constexpr (S == Semantics::Native)                                                          \
       return Value<VEC, S, C>(BUILTIN(packed, scale, ScaleSel));                                   \
     else {                                                                                         \
-      static_cast<void>(scale);                                                                    \
+      (void)scale;                                                                                 \
       Value<VEC, S, C> r{};                                                                        \
       for (int i = 0; i < 8; ++i) {                                                                \
         const std::uint32_t byte = (packed[i / 4] >> (8 * (i % 4))) & 0xFFu;                       \
@@ -1316,7 +1316,7 @@ FPSAN_DEFINE_CVT_SCALE_UNPACK_PK8_FP8(amdgcn_cvt_scale_pk8_bf16_bf8, fp8_e5m2, _
     if constexpr (S == Semantics::Native)                                                          \
       return Value<VEC, S, C>(BUILTIN(packed, scale, ScaleSel));                                   \
     else {                                                                                         \
-      static_cast<void>(scale);                                                                    \
+      (void)scale;                                                                                 \
       Value<VEC, S, C> r{};                                                                        \
       for (int i = 0; i < 8; ++i) {                                                                \
         const std::uint32_t nib = (packed >> (4 * i)) & 0xFu;                                      \
@@ -1343,7 +1343,7 @@ FPSAN_DEFINE_CVT_SCALE_UNPACK_PK8_FP4(amdgcn_cvt_scale_pk8_bf16_fp4, __bf16, v8b
     if constexpr (S == Semantics::Native)                                                          \
       return Value<VEC, S, C>(BUILTIN(packed, scale, ScaleSel));                                   \
     else {                                                                                         \
-      static_cast<void>(scale);                                                                    \
+      (void)scale;                                                                                 \
       Value<VEC, S, C> r{};                                                                        \
       for (int i = 0; i < 16; ++i) {                                                               \
         const int p = i * 6, wi = p >> 5, off = p & 31;                                            \

@@ -150,8 +150,8 @@ std::uint32_t canonical_narrow_lane(float x, float scale) {
     CASE##_k<<<1, 1>>>(dIn, dO);                                                                   \
     HIP_CHECK(hipDeviceSynchronize());                                                             \
     check_bytes8(from_dev(dO, 2), in, FMT);                                                        \
-    static_cast<void>(hipFree(dIn));                                                               \
-    static_cast<void>(hipFree(dO));                                                                \
+    (void)hipFree(dIn);                                                                            \
+    (void)hipFree(dO);                                                                             \
   }
 
 PK8_BYTES_GOLDEN(Fp8FromF32, amdgcn_cvt_scalef32_pk8_fp8_f32, kFp8E4M3, float)
@@ -181,8 +181,8 @@ PK8_BYTES_GOLDEN(Bf8FromBf16, amdgcn_cvt_scalef32_pk8_bf8_bf16, kFp8E5M2, __bf16
     CASE##_k<<<1, 1>>>(dIn, dO);                                                                   \
     HIP_CHECK(hipDeviceSynchronize());                                                             \
     check_nibbles8(from_dev(dO, 1), in, kFp4E2M1);                                                 \
-    static_cast<void>(hipFree(dIn));                                                               \
-    static_cast<void>(hipFree(dO));                                                                \
+    (void)hipFree(dIn);                                                                            \
+    (void)hipFree(dO);                                                                             \
   }
 
 PK8_NIB_GOLDEN(Fp4FromF32, amdgcn_cvt_scalef32_pk8_fp4_f32, float)
@@ -213,8 +213,8 @@ PK8_NIB_GOLDEN(Fp4FromBf16, amdgcn_cvt_scalef32_pk8_fp4_bf16, __bf16)
     CASE##_k<<<1, 1>>>(dIn, dO);                                                                   \
     HIP_CHECK(hipDeviceSynchronize());                                                             \
     check_codes16(from_dev(dO, 3), in, FMT);                                                       \
-    static_cast<void>(hipFree(dIn));                                                               \
-    static_cast<void>(hipFree(dO));                                                                \
+    (void)hipFree(dIn);                                                                            \
+    (void)hipFree(dO);                                                                             \
   }
 
 PK16_CODES_GOLDEN(Fp6FromF32, amdgcn_cvt_scalef32_pk16_fp6_f32, kFp6E2M3, float)
@@ -249,8 +249,8 @@ PK16_CODES_GOLDEN(Bf6FromBf16, amdgcn_cvt_scalef32_pk16_bf6_bf16, kBf6E3M2, __bf
     CASE##_srb_k<<<1, 1>>>(dIn, dO);                                                               \
     HIP_CHECK(hipDeviceSynchronize());                                                             \
     check_bytes8(from_dev(dO, 2), in, FMT);                                                        \
-    static_cast<void>(hipFree(dIn));                                                               \
-    static_cast<void>(hipFree(dO));                                                                \
+    (void)hipFree(dIn);                                                                            \
+    (void)hipFree(dO);                                                                             \
   }
 
 SR_PK8_BYTES_GOLDEN(Fp8FromF32, amdgcn_cvt_scalef32_sr_pk8_fp8_f32, kFp8E4M3, float)
@@ -281,8 +281,8 @@ SR_PK8_BYTES_GOLDEN(Bf8FromBf16, amdgcn_cvt_scalef32_sr_pk8_bf8_bf16, kFp8E5M2, 
     CASE##_srn_k<<<1, 1>>>(dIn, dO);                                                               \
     HIP_CHECK(hipDeviceSynchronize());                                                             \
     check_nibbles8(from_dev(dO, 1), in, kFp4E2M1);                                                 \
-    static_cast<void>(hipFree(dIn));                                                               \
-    static_cast<void>(hipFree(dO));                                                                \
+    (void)hipFree(dIn);                                                                            \
+    (void)hipFree(dO);                                                                             \
   }
 
 SR_PK8_NIB_GOLDEN(Fp4FromF32, amdgcn_cvt_scalef32_sr_pk8_fp4_f32, float)
@@ -313,8 +313,8 @@ SR_PK8_NIB_GOLDEN(Fp4FromBf16, amdgcn_cvt_scalef32_sr_pk8_fp4_bf16, __bf16)
     CASE##_sr16_k<<<1, 1>>>(dIn, dO);                                                              \
     HIP_CHECK(hipDeviceSynchronize());                                                             \
     check_codes16(from_dev(dO, 3), in, FMT);                                                       \
-    static_cast<void>(hipFree(dIn));                                                               \
-    static_cast<void>(hipFree(dO));                                                                \
+    (void)hipFree(dIn);                                                                            \
+    (void)hipFree(dO);                                                                             \
   }
 
 SR_PK16_CODES_GOLDEN(Fp6FromF32, amdgcn_cvt_scalef32_sr_pk16_fp6_f32, kFp6E2M3, float)
@@ -350,8 +350,8 @@ TEST(CvtScalef32Pk8, Fp8ScaleDivides) {
   k_pk8_scale<<<1, 1>>>(dIn, 2.0f, dO);
   HIP_CHECK(hipDeviceSynchronize());
   check_bytes8(from_dev(dO, 2), in, kFp8E4M3, /*scale=*/2.0f);
-  static_cast<void>(hipFree(dIn));
-  static_cast<void>(hipFree(dO));
+  (void)hipFree(dIn);
+  (void)hipFree(dO);
 }
 
 // ============================ FPSan mode ====================================
@@ -389,8 +389,8 @@ template <Semantics S> void run_fpsan_pk8_fp8_payload() {
     std::uint32_t have = (got[i / 4] >> (8 * (i % 4))) & 0xFFu;
     EXPECT_EQ(have, want) << "byte " << i;
   }
-  static_cast<void>(hipFree(dIn));
-  static_cast<void>(hipFree(dO));
+  (void)hipFree(dIn);
+  (void)hipFree(dO);
 }
 
 TEST(CvtScalef32Pk8, FpsanFp8Payload) { FPSAN_RUN_FPSAN_SEMANTICS(run_fpsan_pk8_fp8_payload); }
@@ -421,8 +421,8 @@ TEST(CvtScalef32Pk8, FpsanFp8Payload) { FPSAN_RUN_FPSAN_SEMANTICS(run_fpsan_pk8_
       std::uint32_t have = (got >> (4 * i)) & 0xFu;                                                \
       EXPECT_EQ(have, want) << "nibble " << i << " S=" << int(S);                                  \
     }                                                                                              \
-    static_cast<void>(hipFree(dIn));                                                               \
-    static_cast<void>(hipFree(dO));                                                                \
+    (void)hipFree(dIn);                                                                            \
+    (void)hipFree(dO);                                                                             \
   }                                                                                                \
   TEST(SUITE, CASE) { FPSAN_RUN_FPSAN_SEMANTICS(CASE##_run); }
 
@@ -452,8 +452,8 @@ TEST(CvtScalef32Pk8, FpsanFp8Payload) { FPSAN_RUN_FPSAN_SEMANTICS(run_fpsan_pk8_
       std::uint32_t have = (got >> (4 * i)) & 0xFu;                                                \
       EXPECT_EQ(have, want) << "nibble " << i << " S=" << int(S);                                  \
     }                                                                                              \
-    static_cast<void>(hipFree(dIn));                                                               \
-    static_cast<void>(hipFree(dO));                                                                \
+    (void)hipFree(dIn);                                                                            \
+    (void)hipFree(dO);                                                                             \
   }                                                                                                \
   TEST(SUITE, CASE) { FPSAN_RUN_FPSAN_SEMANTICS(CASE##_run); }
 
@@ -501,8 +501,8 @@ FPSAN_DEFINE_SR_PK8_FP4_CANONICAL_TEST(CvtScalef32SrPk8, FpsanSrFp4FromBf16Canon
       std::uint32_t have = host_extract6(got, i);                                                  \
       EXPECT_EQ(have, want) << "code " << i << " S=" << int(S);                                    \
     }                                                                                              \
-    static_cast<void>(hipFree(dIn));                                                               \
-    static_cast<void>(hipFree(dO));                                                                \
+    (void)hipFree(dIn);                                                                            \
+    (void)hipFree(dO);                                                                             \
   }                                                                                                \
   TEST(SUITE, CASE) { FPSAN_RUN_FPSAN_SEMANTICS(CASE##_run); }
 
@@ -535,8 +535,8 @@ FPSAN_DEFINE_SR_PK8_FP4_CANONICAL_TEST(CvtScalef32SrPk8, FpsanSrFp4FromBf16Canon
       std::uint32_t have = host_extract6(got, i);                                                  \
       EXPECT_EQ(have, want) << "code " << i << " S=" << int(S);                                    \
     }                                                                                              \
-    static_cast<void>(hipFree(dIn));                                                               \
-    static_cast<void>(hipFree(dO));                                                                \
+    (void)hipFree(dIn);                                                                            \
+    (void)hipFree(dO);                                                                             \
   }                                                                                                \
   TEST(SUITE, CASE) { FPSAN_RUN_FPSAN_SEMANTICS(CASE##_run); }
 

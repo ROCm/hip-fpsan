@@ -107,8 +107,8 @@ TEST(CvtScalef32Fp4, WidenAllCodes) {
     EXPECT_EQ(got[2 * c], ref) << "fp4 code " << c << " elem0";
     EXPECT_EQ(got[2 * c + 1], ref) << "fp4 code " << c << " elem1";
   }
-  static_cast<void>(hipFree(dIn));
-  static_cast<void>(hipFree(dO));
+  (void)hipFree(dIn);
+  (void)hipFree(dO);
 }
 
 // opsel must select the right nibble pair (0..3 -> nibbles {0,1}..{6,7}).
@@ -131,7 +131,7 @@ TEST(CvtScalef32Fp4, WidenOpselSelectsPair) {
   auto got = from_dev(dO, 4);
   for (int p = 0; p < 4; ++p)
     EXPECT_EQ(got[p], narrow_to_f32(codes[2 * p], kFp4E2M1)) << "opsel " << p;
-  static_cast<void>(hipFree(dO));
+  (void)hipFree(dO);
 }
 
 // Narrow: pk_fp4_f32 packs 2 f32 -> the nibble pair selected by opsel of a u32
@@ -158,7 +158,7 @@ TEST(CvtScalef32Fp4, NarrowExactBits) {
           (f32_to_narrow(a, kFp4E2M1) & 0xF) | ((f32_to_narrow(b, kFp4E2M1) & 0xF) << 4);
       EXPECT_EQ(got & 0xFF, expect) << "a=" << ca << " b=" << cb;
     }
-  static_cast<void>(hipFree(dO));
+  (void)hipFree(dO);
 }
 
 TEST(CvtScalef32Fp4, NarrowOpselPlacesPairAndPreservesOld) {
@@ -187,7 +187,7 @@ TEST(CvtScalef32Fp4, NarrowOpselPlacesPairAndPreservesOld) {
   k_fp4_narrow<3><<<1, 1>>>(old, a, b, dO, 1.0f);
   HIP_CHECK(hipDeviceSynchronize());
   check(3, from_dev(dO, 1)[0]);
-  static_cast<void>(hipFree(dO));
+  (void)hipFree(dO);
 }
 
 // sr_pk_fp4_f32: the PR flags a reversed-operand quirk (src0=random,src1=data).
@@ -215,7 +215,7 @@ TEST(CvtScalef32Fp4, SrPkReversedOperandExact) {
           (f32_to_narrow(a, kFp4E2M1) & 0xF) | ((f32_to_narrow(b, kFp4E2M1) & 0xF) << 4);
       EXPECT_EQ(got & 0xFF, expect) << "a=" << ca << " b=" << cb;
     }
-  static_cast<void>(hipFree(dO));
+  (void)hipFree(dO);
 }
 
 // =====================  FP6 e2m3 / BF6 e3m2  =================================
@@ -259,9 +259,9 @@ void widen_all_codes(Kern kern, const fpsan::detail::FpFormat &fmt, const char *
     for (int i = 0; i < 32; ++i)
       EXPECT_EQ(got[i], narrow_to_f32(unsigned(codes[i]), fmt))
           << name << " code " << int(codes[i]);
-    static_cast<void>(hipFree(dIn));
+    (void)hipFree(dIn);
   }
-  static_cast<void>(hipFree(dO));
+  (void)hipFree(dO);
 }
 
 TEST(CvtScalef32Fp6, WidenAllCodes) { widen_all_codes(k_fp6_widen, kFp6E2M3, "fp6"); }
@@ -303,8 +303,8 @@ TEST(CvtScalef32Fp6, NarrowExactBits) {
   pack6_2xpk16(lo, hi, expect);
   for (int i = 0; i < 6; ++i)
     EXPECT_EQ(got[i], expect[i]) << "fp6 narrow word " << i;
-  static_cast<void>(hipFree(dIn));
-  static_cast<void>(hipFree(dO));
+  (void)hipFree(dIn);
+  (void)hipFree(dO);
 }
 
 // bf6 narrow uses the gfx950 2xpk16 form (two 16-lane groups -> 192 bits).
@@ -340,8 +340,8 @@ TEST(CvtScalef32Bf6, NarrowExactBits) {
   pack6_2xpk16(lo, hi, expect);
   for (int i = 0; i < 6; ++i)
     EXPECT_EQ(got[i], expect[i]) << "bf6 narrow word " << i;
-  static_cast<void>(hipFree(dIn));
-  static_cast<void>(hipFree(dO));
+  (void)hipFree(dIn);
+  (void)hipFree(dO);
 }
 
 // Stochastic-rounding fp6 narrow (sr_pk32_fp6_f32): exact inputs are
@@ -376,8 +376,8 @@ TEST(CvtScalef32Fp6, SrNarrowExactIsSeedInvariant) {
     for (int i = 0; i < 6; ++i)
       EXPECT_EQ(got[i], expect[i]) << "seed " << std::hex << seed << " w " << i;
   }
-  static_cast<void>(hipFree(dIn));
-  static_cast<void>(hipFree(dO));
+  (void)hipFree(dIn);
+  (void)hipFree(dO);
 }
 
 // Round-trip narrow->widen identity. sr_pk32 narrow and pk32 widen share the
@@ -402,9 +402,9 @@ TEST(CvtScalef32Fp6, RoundTripNarrowWiden) {
   auto got = from_dev(dO, 32);
   for (int c = 0; c < 32; ++c)
     EXPECT_EQ(got[c], in[c]) << "fp6 round-trip " << c;
-  static_cast<void>(hipFree(dIn));
-  static_cast<void>(hipFree(dPacked));
-  static_cast<void>(hipFree(dO));
+  (void)hipFree(dIn);
+  (void)hipFree(dPacked);
+  (void)hipFree(dO);
 }
 
 // Scale multiplier: widen with scale=4 yields value*4 (block-scale model).
@@ -425,8 +425,8 @@ TEST(CvtScalef32Fp6, WidenScaleMultiplies) {
   auto got = from_dev(dO, 32);
   for (int c = 0; c < 32; ++c)
     EXPECT_EQ(got[c], narrow_to_f32(unsigned(c), kFp6E2M3) * 4.0f) << "code " << c;
-  static_cast<void>(hipFree(dIn));
-  static_cast<void>(hipFree(dO));
+  (void)hipFree(dIn);
+  (void)hipFree(dO);
 }
 
 #endif // has builtins

@@ -67,8 +67,8 @@ template <class Wrap, class CVec, int LANEREGS> void run_smfmac_zeroA() {
   for (int l = 0; l < WAVE; ++l)
     for (int r = 0; r < LANEREGS; ++r)
       EXPECT_EQ(bits_of(hD[l][r]), bits_of(hC[l][r])) << "lane " << l << " reg " << r;
-  static_cast<void>(hipFree(dC));
-  static_cast<void>(hipFree(dD));
+  (void)hipFree(dC);
+  (void)hipFree(dD);
 }
 
 TEST(Smfmac, F32_16x16x64_F16_ZeroAGivesC) { run_smfmac_zeroA<Smf_16x16x64_f16, v4f_native, 4>(); }
@@ -194,11 +194,11 @@ TEST(SmfmacF16_16x16x64, LayoutMatchesHardware) {
   HIP_CHECK(hipMemcpy(got.data(), dD, QM * QN * sizeof(float), hipMemcpyDeviceToHost));
   for (int t = 0; t < QM * QN; ++t)
     EXPECT_EQ(bits_of(got[t]), bits_of(ref[t])) << "at " << t;
-  static_cast<void>(hipFree(dA));
-  static_cast<void>(hipFree(dB));
-  static_cast<void>(hipFree(dC));
-  static_cast<void>(hipFree(dD));
-  static_cast<void>(hipFree(dI));
+  (void)hipFree(dA);
+  (void)hipFree(dB);
+  (void)hipFree(dC);
+  (void)hipFree(dD);
+  (void)hipFree(dI);
 }
 
 TEST(SmfmacF16_16x16x64, FpsanMatchesScalarReference) { run_smf64_f16_fpsan<0, 0>(); }
@@ -236,12 +236,12 @@ template <int CBSZ, int ABID> void run_smf64_f16_fpsan() {
     HIP_CHECK(hipMemcpy(got.data(), dD, QM * QN * sizeof(std::uint32_t), hipMemcpyDeviceToHost));
     for (int t = 0; t < QM * QN; ++t)
       EXPECT_EQ(got[t], ref[t]) << "at " << t;
-    static_cast<void>(hipFree(dD));
+    (void)hipFree(dD);
   });
-  static_cast<void>(hipFree(dA));
-  static_cast<void>(hipFree(dB));
-  static_cast<void>(hipFree(dC));
-  static_cast<void>(hipFree(dI));
+  (void)hipFree(dA);
+  (void)hipFree(dB);
+  (void)hipFree(dC);
+  (void)hipFree(dI);
 }
 
 TEST(SmfmacF16_16x16x64_Modifiers, CBSZNonzeroUsesFirstIndexSetLayout) {
@@ -270,11 +270,11 @@ TEST(SmfmacF16_16x16x64_Modifiers, CBSZNonzeroUsesFirstIndexSetLayout) {
   HIP_CHECK(hipMemcpy(got.data(), dD, QM * QN * sizeof(float), hipMemcpyDeviceToHost));
   for (int t = 0; t < QM * QN; ++t)
     EXPECT_EQ(bits_of(got[t]), bits_of(ref[t])) << "at " << t;
-  static_cast<void>(hipFree(dA));
-  static_cast<void>(hipFree(dB));
-  static_cast<void>(hipFree(dC));
-  static_cast<void>(hipFree(dD));
-  static_cast<void>(hipFree(dI));
+  (void)hipFree(dA);
+  (void)hipFree(dB);
+  (void)hipFree(dC);
+  (void)hipFree(dD);
+  (void)hipFree(dI);
 }
 
 TEST(SmfmacF16_16x16x64_Modifiers, CBSZNonzeroUsesFirstIndexSetFpsan) {
@@ -398,11 +398,11 @@ TEST(SmfmacF16_32x32x32, LayoutMatchesHardware) {
   HIP_CHECK(hipMemcpy(got.data(), dD, TM * TN * sizeof(float), hipMemcpyDeviceToHost));
   for (int t = 0; t < TM * TN; ++t)
     EXPECT_EQ(bits_of(got[t]), bits_of(ref[t])) << "at " << t;
-  static_cast<void>(hipFree(dA));
-  static_cast<void>(hipFree(dB));
-  static_cast<void>(hipFree(dC));
-  static_cast<void>(hipFree(dD));
-  static_cast<void>(hipFree(dI));
+  (void)hipFree(dA);
+  (void)hipFree(dB);
+  (void)hipFree(dC);
+  (void)hipFree(dD);
+  (void)hipFree(dI);
 }
 
 TEST(SmfmacF16_32x32x32, FpsanMatchesScalarReference) {
@@ -438,12 +438,12 @@ TEST(SmfmacF16_32x32x32, FpsanMatchesScalarReference) {
     HIP_CHECK(hipMemcpy(got.data(), dD, TM * TN * sizeof(std::uint32_t), hipMemcpyDeviceToHost));
     for (int t = 0; t < TM * TN; ++t)
       EXPECT_EQ(got[t], ref[t]) << "at " << t;
-    static_cast<void>(hipFree(dD));
+    (void)hipFree(dD);
   });
-  static_cast<void>(hipFree(dA));
-  static_cast<void>(hipFree(dB));
-  static_cast<void>(hipFree(dC));
-  static_cast<void>(hipFree(dI));
+  (void)hipFree(dA);
+  (void)hipFree(dB);
+  (void)hipFree(dC);
+  (void)hipFree(dI);
 }
 
 // ---------------------------------------------------------------------------
@@ -510,11 +510,11 @@ TEST(SmfmacBf16_16x16x64, LayoutMatchesHardware) {
   HIP_CHECK(hipMemcpy(got.data(), dD, QM * QN * sizeof(float), hipMemcpyDeviceToHost));
   for (int t = 0; t < QM * QN; ++t)
     EXPECT_EQ(bits_of(got[t]), bits_of(ref[t])) << "at " << t;
-  static_cast<void>(hipFree(dA));
-  static_cast<void>(hipFree(dB));
-  static_cast<void>(hipFree(dC));
-  static_cast<void>(hipFree(dD));
-  static_cast<void>(hipFree(dI));
+  (void)hipFree(dA);
+  (void)hipFree(dB);
+  (void)hipFree(dC);
+  (void)hipFree(dD);
+  (void)hipFree(dI);
 }
 
 TEST(SmfmacBf16_16x16x64, FpsanMatchesScalarReference) {
@@ -550,12 +550,12 @@ TEST(SmfmacBf16_16x16x64, FpsanMatchesScalarReference) {
     HIP_CHECK(hipMemcpy(got.data(), dD, QM * QN * sizeof(std::uint32_t), hipMemcpyDeviceToHost));
     for (int t = 0; t < QM * QN; ++t)
       EXPECT_EQ(got[t], ref[t]) << "at " << t;
-    static_cast<void>(hipFree(dD));
+    (void)hipFree(dD);
   });
-  static_cast<void>(hipFree(dA));
-  static_cast<void>(hipFree(dB));
-  static_cast<void>(hipFree(dC));
-  static_cast<void>(hipFree(dI));
+  (void)hipFree(dA);
+  (void)hipFree(dB);
+  (void)hipFree(dC);
+  (void)hipFree(dI);
 }
 
 template <Semantics S, class Out>
@@ -622,11 +622,11 @@ TEST(SmfmacBf16_32x32x32, LayoutMatchesHardware) {
   HIP_CHECK(hipMemcpy(got.data(), dD, TM * TN * sizeof(float), hipMemcpyDeviceToHost));
   for (int t = 0; t < TM * TN; ++t)
     EXPECT_EQ(bits_of(got[t]), bits_of(ref[t])) << "at " << t;
-  static_cast<void>(hipFree(dA));
-  static_cast<void>(hipFree(dB));
-  static_cast<void>(hipFree(dC));
-  static_cast<void>(hipFree(dD));
-  static_cast<void>(hipFree(dI));
+  (void)hipFree(dA);
+  (void)hipFree(dB);
+  (void)hipFree(dC);
+  (void)hipFree(dD);
+  (void)hipFree(dI);
 }
 
 TEST(SmfmacBf16_32x32x32, FpsanMatchesScalarReference) {
@@ -662,12 +662,12 @@ TEST(SmfmacBf16_32x32x32, FpsanMatchesScalarReference) {
     HIP_CHECK(hipMemcpy(got.data(), dD, TM * TN * sizeof(std::uint32_t), hipMemcpyDeviceToHost));
     for (int t = 0; t < TM * TN; ++t)
       EXPECT_EQ(got[t], ref[t]) << "at " << t;
-    static_cast<void>(hipFree(dD));
+    (void)hipFree(dD);
   });
-  static_cast<void>(hipFree(dA));
-  static_cast<void>(hipFree(dB));
-  static_cast<void>(hipFree(dC));
-  static_cast<void>(hipFree(dI));
+  (void)hipFree(dA);
+  (void)hipFree(dB);
+  (void)hipFree(dC);
+  (void)hipFree(dI);
 }
 
 // ===========================================================================
@@ -823,11 +823,11 @@ template <class E> static void cdna3_layout_test(int Mm, int Nn, int Kk) {
   HIP_CHECK(hipMemcpy(got.data(), dD, Mm * Nn * sizeof(float), hipMemcpyDeviceToHost));
   for (int t = 0; t < Mm * Nn; ++t)
     EXPECT_EQ(bits_of(got[t]), bits_of(ref[t])) << "at " << t;
-  static_cast<void>(hipFree(dA));
-  static_cast<void>(hipFree(dB));
-  static_cast<void>(hipFree(dC));
-  static_cast<void>(hipFree(dD));
-  static_cast<void>(hipFree(dI));
+  (void)hipFree(dA);
+  (void)hipFree(dB);
+  (void)hipFree(dC);
+  (void)hipFree(dD);
+  (void)hipFree(dI);
 }
 
 template <class E> static void cdna3_fpsan_test(int Mm, int Nn, int Kk) {
@@ -867,12 +867,12 @@ template <class E> static void cdna3_fpsan_test(int Mm, int Nn, int Kk) {
     HIP_CHECK(hipMemcpy(got.data(), dD, Mm * Nn * sizeof(std::uint32_t), hipMemcpyDeviceToHost));
     for (int t = 0; t < Mm * Nn; ++t)
       EXPECT_EQ(got[t], ref[t]) << "at " << t;
-    static_cast<void>(hipFree(dD));
+    (void)hipFree(dD);
   });
-  static_cast<void>(hipFree(dA));
-  static_cast<void>(hipFree(dB));
-  static_cast<void>(hipFree(dC));
-  static_cast<void>(hipFree(dI));
+  (void)hipFree(dA);
+  (void)hipFree(dB);
+  (void)hipFree(dC);
+  (void)hipFree(dI);
 }
 
 TEST(SmfmacF16_16x16x32, LayoutMatchesHardware) { cdna3_layout_test<_Float16>(HM, HN, HK); }
@@ -1083,13 +1083,13 @@ template <class AE, class BE> static void fp8_smf_test(int Mm, int Kk) {
     HIP_CHECK(hipMemcpy(gotp.data(), dDp, Mm * Nn * sizeof(std::uint32_t), hipMemcpyDeviceToHost));
     for (int t = 0; t < Mm * Nn; ++t)
       EXPECT_EQ(gotp[t], refp[t]) << "fpsan at " << t;
-    static_cast<void>(hipFree(dDp));
+    (void)hipFree(dDp);
   });
-  static_cast<void>(hipFree(dA));
-  static_cast<void>(hipFree(dB));
-  static_cast<void>(hipFree(dC));
-  static_cast<void>(hipFree(dDf));
-  static_cast<void>(hipFree(dI));
+  (void)hipFree(dA);
+  (void)hipFree(dB);
+  (void)hipFree(dC);
+  (void)hipFree(dDf);
+  (void)hipFree(dI);
 }
 
 TEST(SmfmacFp8_16x16x64, FP8_FP8) { fp8_smf_test<fpsan::fp8_e4m3, fpsan::fp8_e4m3>(FW, FK); }
@@ -1303,13 +1303,13 @@ template <class AE, class BE> static void fp8big_smf_test(int Mm, int Kk) {
     HIP_CHECK(hipMemcpy(gotp.data(), dDp, Mm * Nn * sizeof(std::uint32_t), hipMemcpyDeviceToHost));
     for (int t = 0; t < Mm * Nn; ++t)
       EXPECT_EQ(gotp[t], refp[t]) << "fpsan at " << t;
-    static_cast<void>(hipFree(dDp));
+    (void)hipFree(dDp);
   });
-  static_cast<void>(hipFree(dA));
-  static_cast<void>(hipFree(dB));
-  static_cast<void>(hipFree(dC));
-  static_cast<void>(hipFree(dDf));
-  static_cast<void>(hipFree(dI));
+  (void)hipFree(dA);
+  (void)hipFree(dB);
+  (void)hipFree(dC);
+  (void)hipFree(dDf);
+  (void)hipFree(dI);
 }
 
 TEST(SmfmacFp8_16x16x128, FP8_FP8) { fp8big_smf_test<fpsan::fp8_e4m3, fpsan::fp8_e4m3>(GW, GK); }
