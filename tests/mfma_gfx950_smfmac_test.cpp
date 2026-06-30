@@ -208,7 +208,7 @@ template <int CBSZ, int ABID> void run_smf64_f16_fpsan() {
   SmfData m = make_smf_data();
   float *dA = to_dev(m.A), *dB = to_dev(m.B), *dC = to_dev(m.C);
   int *dI = to_dev(m.idxbuf);
-  fpsan_test::for_triton_field_fpsan_semantics([&](auto sem) {
+  fpsan_test::for_matrix_fpsan_semantics([&](auto sem) {
     constexpr Semantics S = decltype(sem)::value;
     using VF = Value<float, S, kCC>;
     using VH = Value<_Float16, S, kCC>;
@@ -406,7 +406,7 @@ TEST(SmfmacF16_32x32x32, FpsanMatchesScalarReference) {
   Smf32Data m = make_smf32_data();
   float *dA = to_dev(m.A), *dB = to_dev(m.B), *dC = to_dev(m.C);
   int *dI = to_dev(m.idxbuf);
-  fpsan_test::for_triton_field_fpsan_semantics([&](auto sem) {
+  fpsan_test::for_matrix_fpsan_semantics([&](auto sem) {
     constexpr Semantics S = decltype(sem)::value;
     using VF = Value<float, S, kCC>;
     using VH = Value<_Float16, S, kCC>;
@@ -514,7 +514,7 @@ TEST(SmfmacBf16_16x16x64, FpsanMatchesScalarReference) {
   SmfData m = make_smf_data();
   float *dA = to_dev(m.A), *dB = to_dev(m.B), *dC = to_dev(m.C);
   int *dI = to_dev(m.idxbuf);
-  fpsan_test::for_triton_field_fpsan_semantics([&](auto sem) {
+  fpsan_test::for_matrix_fpsan_semantics([&](auto sem) {
     constexpr Semantics S = decltype(sem)::value;
     using VF = Value<float, S, kCC>;
     using VB = Value<__bf16, S, kCC>;
@@ -622,7 +622,7 @@ TEST(SmfmacBf16_32x32x32, FpsanMatchesScalarReference) {
   Smf32Data m = make_smf32_data();
   float *dA = to_dev(m.A), *dB = to_dev(m.B), *dC = to_dev(m.C);
   int *dI = to_dev(m.idxbuf);
-  fpsan_test::for_triton_field_fpsan_semantics([&](auto sem) {
+  fpsan_test::for_matrix_fpsan_semantics([&](auto sem) {
     constexpr Semantics S = decltype(sem)::value;
     using VF = Value<float, S, kCC>;
     using VB = Value<__bf16, S, kCC>;
@@ -820,7 +820,7 @@ template <class E> static void cdna3_fpsan_test(int Mm, int Nn, int Kk) {
   SmfCdna3Data m = make_cdna3(Mm, Nn, Kk);
   float *dA = to_dev(m.A), *dB = to_dev(m.B), *dC = to_dev(m.C);
   int *dI = to_dev(m.idxbuf);
-  fpsan_test::for_triton_field_fpsan_semantics([&](auto sem) {
+  fpsan_test::for_matrix_fpsan_semantics([&](auto sem) {
     constexpr Semantics S = decltype(sem)::value;
     using VF = Value<float, S, kCC>;
     using VE = Value<E, S, kCC>;
@@ -1032,7 +1032,7 @@ template <class AE, class BE> static void fp8_smf_test(int Mm, int Kk) {
   HIP_CHECK(hipMemcpy(gotf.data(), dDf, Mm * Nn * sizeof(float), hipMemcpyDeviceToHost));
   for (int t = 0; t < Mm * Nn; ++t)
     EXPECT_EQ(bits_of(gotf[t]), bits_of(ref[t])) << "float at " << t;
-  fpsan_test::for_triton_field_fpsan_semantics([&](auto sem) {
+  fpsan_test::for_matrix_fpsan_semantics([&](auto sem) {
     constexpr Semantics S = decltype(sem)::value;
     using VF = Value<float, S, kCC>;
     using VA = Value<AE, S, kCC>;
@@ -1250,7 +1250,7 @@ template <class AE, class BE> static void fp8big_smf_test(int Mm, int Kk) {
   HIP_CHECK(hipMemcpy(gotf.data(), dDf, Mm * Nn * sizeof(float), hipMemcpyDeviceToHost));
   for (int t = 0; t < Mm * Nn; ++t)
     EXPECT_EQ(bits_of(gotf[t]), bits_of(ref[t])) << "float at " << t;
-  fpsan_test::for_triton_field_fpsan_semantics([&](auto sem) {
+  fpsan_test::for_matrix_fpsan_semantics([&](auto sem) {
     constexpr Semantics S = decltype(sem)::value;
     using VF = Value<float, S, kCC>;
     using VA = Value<AE, S, kCC>;

@@ -272,7 +272,7 @@ template <class E> static void run_smf_fpsan(int m, int n, int k) {
   float *dC = to_dev(data.C);
   int *dI = to_dev(data.idxbuf);
 
-  fpsan_test::for_triton_field_fpsan_semantics([&](auto sem) {
+  fpsan_test::for_matrix_fpsan_semantics([&](auto sem) {
     constexpr Semantics S = decltype(sem)::value;
     using VF = Value<float, S, kCC>;
     using VE = Value<E, S, kCC>;
@@ -470,7 +470,7 @@ template <class AE, class BE> static void run_smf_fp8(int m, int k) {
   for (std::size_t i = 0; i < got.size(); ++i)
     EXPECT_EQ(bits_of(got[i]), bits_of(ref[i])) << "float elem " << i;
 
-  fpsan_test::for_triton_field_fpsan_semantics([&](auto sem) {
+  fpsan_test::for_matrix_fpsan_semantics([&](auto sem) {
     constexpr Semantics S = decltype(sem)::value;
     using VF = Value<float, S, kCC>;
     using VA = Value<AE, S, kCC>;

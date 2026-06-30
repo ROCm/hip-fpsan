@@ -75,7 +75,7 @@ TEST(MfmaF64_4x4x4, FpsanMatchesScalarReference) {
   if (!have_device())
     GTEST_SKIP() << "no HIP device";
   auto d = make_f64_4_inputs();
-  fpsan_test::for_triton_field_fpsan_semantics([&](auto sem) {
+  fpsan_test::for_matrix_fpsan_semantics([&](auto sem) {
     constexpr Semantics S = decltype(sem)::value;
     using VD = Value<double, S, kCC>;
     std::vector<std::uint64_t> ref(F64S_B * F64S_M * F64S_N);
@@ -138,7 +138,7 @@ TEST(MfmaF64_4x4x4_NEG5, FpsanMatchesScalarReference) {
     GTEST_SKIP() << "no HIP device";
   constexpr int NEG = 5;
   auto d = make_f64_4_inputs();
-  fpsan_test::for_triton_field_fpsan_semantics([&](auto sem) {
+  fpsan_test::for_matrix_fpsan_semantics([&](auto sem) {
     constexpr Semantics S = decltype(sem)::value;
     using VD = Value<double, S, kCC>;
     std::vector<std::uint64_t> ref(F64S_B * F64S_M * F64S_N);

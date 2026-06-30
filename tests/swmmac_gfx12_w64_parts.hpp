@@ -449,7 +449,7 @@ template <class Traits> void run_h_case(std::uint32_t seed) {
     EXPECT_EQ(bits_of(got[t]), bits_of(ref[t])) << "Layout at " << t;
   (void)hipFree(dD);
 
-  fpsan_test::for_triton_field_fpsan_semantics([&](auto sem) {
+  fpsan_test::for_matrix_fpsan_semantics([&](auto sem) {
     constexpr Semantics S = decltype(sem)::value;
     std::vector<std::uint64_t> ref_p =
         sw_reference_fpsan_h<typename Traits::AScalar, typename Traits::BScalar, Out, S>(d);
@@ -491,7 +491,7 @@ template <class Traits> void run_fp8_case(std::uint32_t seed) {
     EXPECT_EQ(bits_of(got[t]), bits_of(ref[t])) << "Layout at " << t;
   (void)hipFree(dD);
 
-  fpsan_test::for_triton_field_fpsan_semantics([&](auto sem) {
+  fpsan_test::for_matrix_fpsan_semantics([&](auto sem) {
     constexpr Semantics S = decltype(sem)::value;
     std::vector<std::uint32_t> ref_p =
         sw_reference_fp8_fpsan<typename Traits::AScalar, typename Traits::BScalar, S>(d);

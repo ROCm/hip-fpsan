@@ -18,6 +18,8 @@
 #   -DFPSAN_BUILD_EXAMPLES=ON|OFF   (default ON)  build the tutorial examples
 #   -DFPSAN_BUILD_BENCHMARKS=ON|OFF (default OFF) build benchmark binaries
 #   -DFPSAN_BUILD_PYTHON=ON|OFF     (default OFF) build Python bindings
+#   -DFPSAN_TEST_MATRIX_SEMANTIC_PROFILE=full|representative|triton
+#                                           (default representative)
 #
 # Tests and examples compile as HIP C++ whenever a HIP compiler is available --
 # there is no separate enable toggle to drift out of sync. CMAKE_HIP_COMPILER is
