@@ -848,8 +848,10 @@ __global__ void k_permlane16(Out *out, unsigned sel0, unsigned sel1) {
   const int lane = threadIdx.x;
   Value<float, S, kCC> src{lane_input_float(lane)};
   Value<float, S, kCC> old{-999.f};
-  auto r = CROSS ? fpsan::amdgcn_permlanex16<false, false>(old, src, (int)sel0, (int)sel1)
-                 : fpsan::amdgcn_permlane16<false, false>(old, src, (int)sel0, (int)sel1);
+  auto r = CROSS ? fpsan::amdgcn_permlanex16<false, false>(old, src, static_cast<int>(sel0),
+                                                           static_cast<int>(sel1))
+                 : fpsan::amdgcn_permlane16<false, false>(old, src, static_cast<int>(sel0),
+                                                          static_cast<int>(sel1));
   if constexpr (S == Semantics::Native)
     out[lane] = static_cast<float>(r);
   else

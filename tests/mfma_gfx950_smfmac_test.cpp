@@ -93,12 +93,12 @@ __global__ void k_smf64(const float *Acomp, const float *B, const float *C, cons
   int lane = threadIdx.x, g = lane / 16, nlane = lane % 16;
   v8h an{};
   for (int h = 0; h < 8; ++h)
-    an[h] = (_Float16)Acomp[nlane * QC + (g * 8 + h)];
+    an[h] = static_cast<_Float16>(Acomp[nlane * QC + (g * 8 + h)]);
   v16h bn{};
   for (int vr = 0; vr < 8; ++vr)
     for (int h = 0; h < 2; ++h) {
       int k = (vr < 4) ? (8 * g + 2 * vr + h) : (32 + 8 * g + 2 * (vr - 4) + h);
-      bn[2 * vr + h] = (_Float16)B[k * QN + nlane];
+      bn[2 * vr + h] = static_cast<_Float16>(B[k * QN + nlane]);
     }
   fpsan::v4f_native cn{};
   for (int reg = 0; reg < 4; ++reg) {
@@ -178,10 +178,12 @@ TEST(SmfmacF16_16x16x64, LayoutMatchesHardware) {
     for (int j = 0; j < QN; ++j) {
       double acc = m.C[i * QN + j];
       for (int q = 0; q < 16; ++q) {
-        acc += (double)m.A[i * QC + 2 * q] * (double)m.B[(4 * q + m.p0[i * 16 + q]) * QN + j];
-        acc += (double)m.A[i * QC + 2 * q + 1] * (double)m.B[(4 * q + m.p1[i * 16 + q]) * QN + j];
+        acc += static_cast<double>(m.A[i * QC + 2 * q]) *
+               static_cast<double>(m.B[(4 * q + m.p0[i * 16 + q]) * QN + j]);
+        acc += static_cast<double>(m.A[i * QC + 2 * q + 1]) *
+               static_cast<double>(m.B[(4 * q + m.p1[i * 16 + q]) * QN + j]);
       }
-      ref[i * QN + j] = (float)acc;
+      ref[i * QN + j] = static_cast<float>(acc);
     }
   float *dA = to_dev(m.A), *dB = to_dev(m.B), *dC = to_dev(m.C), *dD;
   int *dI = to_dev(m.idxbuf);
@@ -217,12 +219,12 @@ template <int CBSZ, int ABID> void run_smf64_f16_fpsan() {
       for (int j = 0; j < QN; ++j) {
         VF acc(m.C[i * QN + j]);
         for (int q = 0; q < 16; ++q) {
-          acc =
-              acc + fpsan::cast<float>(VH((_Float16)m.A[i * QC + 2 * q])) *
-                        fpsan::cast<float>(VH((_Float16)m.B[(4 * q + m.p0[i * 16 + q]) * QN + j]));
-          acc =
-              acc + fpsan::cast<float>(VH((_Float16)m.A[i * QC + 2 * q + 1])) *
-                        fpsan::cast<float>(VH((_Float16)m.B[(4 * q + m.p1[i * 16 + q]) * QN + j]));
+          acc = acc + fpsan::cast<float>(VH(static_cast<_Float16>(m.A[i * QC + 2 * q]))) *
+                          fpsan::cast<float>(
+                              VH(static_cast<_Float16>(m.B[(4 * q + m.p0[i * 16 + q]) * QN + j])));
+          acc = acc + fpsan::cast<float>(VH(static_cast<_Float16>(m.A[i * QC + 2 * q + 1]))) *
+                          fpsan::cast<float>(
+                              VH(static_cast<_Float16>(m.B[(4 * q + m.p1[i * 16 + q]) * QN + j])));
         }
         ref[i * QN + j] = acc.fpsan_payload();
       }
@@ -252,10 +254,12 @@ TEST(SmfmacF16_16x16x64_Modifiers, CBSZNonzeroUsesFirstIndexSetLayout) {
     for (int j = 0; j < QN; ++j) {
       double acc = m.C[i * QN + j];
       for (int q = 0; q < 16; ++q) {
-        acc += (double)m.A[i * QC + 2 * q] * (double)m.B[(4 * q + m.p0[i * 16 + q]) * QN + j];
-        acc += (double)m.A[i * QC + 2 * q + 1] * (double)m.B[(4 * q + m.p1[i * 16 + q]) * QN + j];
+        acc += static_cast<double>(m.A[i * QC + 2 * q]) *
+               static_cast<double>(m.B[(4 * q + m.p0[i * 16 + q]) * QN + j]);
+        acc += static_cast<double>(m.A[i * QC + 2 * q + 1]) *
+               static_cast<double>(m.B[(4 * q + m.p1[i * 16 + q]) * QN + j]);
       }
-      ref[i * QN + j] = (float)acc;
+      ref[i * QN + j] = static_cast<float>(acc);
     }
   float *dA = to_dev(m.A), *dB = to_dev(m.B), *dC = to_dev(m.C), *dD;
   int *dI = to_dev(m.idxbuf);
@@ -292,12 +296,12 @@ __global__ void k_smf32(const float *Acomp, const float *B, const float *C, cons
   int lane = threadIdx.x;
   v8h an{};
   for (int h = 0; h < 8; ++h)
-    an[h] = (_Float16)Acomp[(lane % 32) * TC + ((lane / 32) * 8 + h)];
+    an[h] = static_cast<_Float16>(Acomp[(lane % 32) * TC + ((lane / 32) * 8 + h)]);
   v16h bn{};
   int jcol = (lane % 16) + 16 * ((lane / 16) % 2), kgrp = (lane / 16) / 2;
   for (int e = 0; e < 16; ++e) {
     int k = 16 * (e / 8) + 8 * kgrp + 2 * ((e / 2) % 4) + (e % 2);
-    bn[e] = (_Float16)B[k * TN + jcol];
+    bn[e] = static_cast<_Float16>(B[k * TN + jcol]);
   }
   fpsan::v16f_native cn{};
   for (int i = 0; i < TM; ++i)
@@ -378,10 +382,12 @@ TEST(SmfmacF16_32x32x32, LayoutMatchesHardware) {
     for (int j = 0; j < TN; ++j) {
       double acc = m.C[i * TN + j];
       for (int q = 0; q < 8; ++q) {
-        acc += (double)m.A[i * TC + 2 * q] * (double)m.B[(4 * q + m.p0[i * 8 + q]) * TN + j];
-        acc += (double)m.A[i * TC + 2 * q + 1] * (double)m.B[(4 * q + m.p1[i * 8 + q]) * TN + j];
+        acc += static_cast<double>(m.A[i * TC + 2 * q]) *
+               static_cast<double>(m.B[(4 * q + m.p0[i * 8 + q]) * TN + j]);
+        acc += static_cast<double>(m.A[i * TC + 2 * q + 1]) *
+               static_cast<double>(m.B[(4 * q + m.p1[i * 8 + q]) * TN + j]);
       }
-      ref[i * TN + j] = (float)acc;
+      ref[i * TN + j] = static_cast<float>(acc);
     }
   float *dA = to_dev(m.A), *dB = to_dev(m.B), *dC = to_dev(m.C), *dD;
   int *dI = to_dev(m.idxbuf);
@@ -415,10 +421,12 @@ TEST(SmfmacF16_32x32x32, FpsanMatchesScalarReference) {
       for (int j = 0; j < TN; ++j) {
         VF acc(m.C[i * TN + j]);
         for (int q = 0; q < 8; ++q) {
-          acc = acc + fpsan::cast<float>(VH((_Float16)m.A[i * TC + 2 * q])) *
-                          fpsan::cast<float>(VH((_Float16)m.B[(4 * q + m.p0[i * 8 + q]) * TN + j]));
-          acc = acc + fpsan::cast<float>(VH((_Float16)m.A[i * TC + 2 * q + 1])) *
-                          fpsan::cast<float>(VH((_Float16)m.B[(4 * q + m.p1[i * 8 + q]) * TN + j]));
+          acc = acc + fpsan::cast<float>(VH(static_cast<_Float16>(m.A[i * TC + 2 * q]))) *
+                          fpsan::cast<float>(
+                              VH(static_cast<_Float16>(m.B[(4 * q + m.p0[i * 8 + q]) * TN + j])));
+          acc = acc + fpsan::cast<float>(VH(static_cast<_Float16>(m.A[i * TC + 2 * q + 1]))) *
+                          fpsan::cast<float>(
+                              VH(static_cast<_Float16>(m.B[(4 * q + m.p1[i * 8 + q]) * TN + j])));
         }
         ref[i * TN + j] = acc.fpsan_payload();
       }
@@ -453,12 +461,12 @@ __global__ void k_smf64_bf16(const float *Acomp, const float *B, const float *C,
   int lane = threadIdx.x, g = lane / 16, nlane = lane % 16;
   v8bf an{};
   for (int h = 0; h < 8; ++h)
-    an[h] = (__bf16)Acomp[nlane * QC + (g * 8 + h)];
+    an[h] = static_cast<__bf16>(Acomp[nlane * QC + (g * 8 + h)]);
   v16bf bn{};
   for (int vr = 0; vr < 8; ++vr)
     for (int h = 0; h < 2; ++h) {
       int k = (vr < 4) ? (8 * g + 2 * vr + h) : (32 + 8 * g + 2 * (vr - 4) + h);
-      bn[2 * vr + h] = (__bf16)B[k * QN + nlane];
+      bn[2 * vr + h] = static_cast<__bf16>(B[k * QN + nlane]);
     }
   fpsan::v4f_native cn{};
   for (int reg = 0; reg < 4; ++reg)
@@ -486,10 +494,12 @@ TEST(SmfmacBf16_16x16x64, LayoutMatchesHardware) {
     for (int j = 0; j < QN; ++j) {
       double acc = m.C[i * QN + j];
       for (int q = 0; q < 16; ++q) {
-        acc += (double)m.A[i * QC + 2 * q] * (double)m.B[(4 * q + m.p0[i * 16 + q]) * QN + j];
-        acc += (double)m.A[i * QC + 2 * q + 1] * (double)m.B[(4 * q + m.p1[i * 16 + q]) * QN + j];
+        acc += static_cast<double>(m.A[i * QC + 2 * q]) *
+               static_cast<double>(m.B[(4 * q + m.p0[i * 16 + q]) * QN + j]);
+        acc += static_cast<double>(m.A[i * QC + 2 * q + 1]) *
+               static_cast<double>(m.B[(4 * q + m.p1[i * 16 + q]) * QN + j]);
       }
-      ref[i * QN + j] = (float)acc;
+      ref[i * QN + j] = static_cast<float>(acc);
     }
   float *dA = to_dev(m.A), *dB = to_dev(m.B), *dC = to_dev(m.C), *dD;
   int *dI = to_dev(m.idxbuf);
@@ -523,10 +533,12 @@ TEST(SmfmacBf16_16x16x64, FpsanMatchesScalarReference) {
       for (int j = 0; j < QN; ++j) {
         VF acc(m.C[i * QN + j]);
         for (int q = 0; q < 16; ++q) {
-          acc = acc + fpsan::cast<float>(VB((__bf16)m.A[i * QC + 2 * q])) *
-                          fpsan::cast<float>(VB((__bf16)m.B[(4 * q + m.p0[i * 16 + q]) * QN + j]));
-          acc = acc + fpsan::cast<float>(VB((__bf16)m.A[i * QC + 2 * q + 1])) *
-                          fpsan::cast<float>(VB((__bf16)m.B[(4 * q + m.p1[i * 16 + q]) * QN + j]));
+          acc = acc + fpsan::cast<float>(VB(static_cast<__bf16>(m.A[i * QC + 2 * q]))) *
+                          fpsan::cast<float>(
+                              VB(static_cast<__bf16>(m.B[(4 * q + m.p0[i * 16 + q]) * QN + j])));
+          acc = acc + fpsan::cast<float>(VB(static_cast<__bf16>(m.A[i * QC + 2 * q + 1]))) *
+                          fpsan::cast<float>(
+                              VB(static_cast<__bf16>(m.B[(4 * q + m.p1[i * 16 + q]) * QN + j])));
         }
         ref[i * QN + j] = acc.fpsan_payload();
       }
@@ -554,12 +566,12 @@ __global__ void k_smf32_bf16(const float *Acomp, const float *B, const float *C,
   int lane = threadIdx.x;
   v8bf an{};
   for (int h = 0; h < 8; ++h)
-    an[h] = (__bf16)Acomp[(lane % 32) * TC + ((lane / 32) * 8 + h)];
+    an[h] = static_cast<__bf16>(Acomp[(lane % 32) * TC + ((lane / 32) * 8 + h)]);
   v16bf bn{};
   int jcol = (lane % 16) + 16 * ((lane / 16) % 2), kgrp = (lane / 16) / 2;
   for (int e = 0; e < 16; ++e) {
     int k = 16 * (e / 8) + 8 * kgrp + 2 * ((e / 2) % 4) + (e % 2);
-    bn[e] = (__bf16)B[k * TN + jcol];
+    bn[e] = static_cast<__bf16>(B[k * TN + jcol]);
   }
   fpsan::v16f_native cn{};
   for (int i = 0; i < TM; ++i)
@@ -594,10 +606,12 @@ TEST(SmfmacBf16_32x32x32, LayoutMatchesHardware) {
     for (int j = 0; j < TN; ++j) {
       double acc = m.C[i * TN + j];
       for (int q = 0; q < 8; ++q) {
-        acc += (double)m.A[i * TC + 2 * q] * (double)m.B[(4 * q + m.p0[i * 8 + q]) * TN + j];
-        acc += (double)m.A[i * TC + 2 * q + 1] * (double)m.B[(4 * q + m.p1[i * 8 + q]) * TN + j];
+        acc += static_cast<double>(m.A[i * TC + 2 * q]) *
+               static_cast<double>(m.B[(4 * q + m.p0[i * 8 + q]) * TN + j]);
+        acc += static_cast<double>(m.A[i * TC + 2 * q + 1]) *
+               static_cast<double>(m.B[(4 * q + m.p1[i * 8 + q]) * TN + j]);
       }
-      ref[i * TN + j] = (float)acc;
+      ref[i * TN + j] = static_cast<float>(acc);
     }
   float *dA = to_dev(m.A), *dB = to_dev(m.B), *dC = to_dev(m.C), *dD;
   int *dI = to_dev(m.idxbuf);
@@ -631,10 +645,12 @@ TEST(SmfmacBf16_32x32x32, FpsanMatchesScalarReference) {
       for (int j = 0; j < TN; ++j) {
         VF acc(m.C[i * TN + j]);
         for (int q = 0; q < 8; ++q) {
-          acc = acc + fpsan::cast<float>(VB((__bf16)m.A[i * TC + 2 * q])) *
-                          fpsan::cast<float>(VB((__bf16)m.B[(4 * q + m.p0[i * 8 + q]) * TN + j]));
-          acc = acc + fpsan::cast<float>(VB((__bf16)m.A[i * TC + 2 * q + 1])) *
-                          fpsan::cast<float>(VB((__bf16)m.B[(4 * q + m.p1[i * 8 + q]) * TN + j]));
+          acc = acc + fpsan::cast<float>(VB(static_cast<__bf16>(m.A[i * TC + 2 * q]))) *
+                          fpsan::cast<float>(
+                              VB(static_cast<__bf16>(m.B[(4 * q + m.p0[i * 8 + q]) * TN + j])));
+          acc = acc + fpsan::cast<float>(VB(static_cast<__bf16>(m.A[i * TC + 2 * q + 1]))) *
+                          fpsan::cast<float>(
+                              VB(static_cast<__bf16>(m.B[(4 * q + m.p1[i * 8 + q]) * TN + j])));
         }
         ref[i * TN + j] = acc.fpsan_payload();
       }
@@ -670,10 +686,10 @@ __global__ void k_smf1632(const float *A, const float *B, const float *C, const 
   int lane = threadIdx.x, g = lane / 16, nl = lane % 16;
   v4e an{};
   for (int h = 0; h < 4; ++h)
-    an[h] = (E)A[nl * HC + (g * 4 + h)];
+    an[h] = static_cast<E>(A[nl * HC + (g * 4 + h)]);
   v8e bn{};
   for (int e = 0; e < 8; ++e)
-    bn[e] = (E)B[(g * 8 + e) * HN + nl];
+    bn[e] = static_cast<E>(B[(g * 8 + e) * HN + nl]);
   fpsan::v4f_native cn{};
   for (int reg = 0; reg < 4; ++reg)
     cn[reg] = C[(4 * g + reg) * HN + nl];
@@ -702,11 +718,11 @@ __global__ void k_smf3216(const float *A, const float *B, const float *C, const 
   int lane = threadIdx.x;
   v4e an{};
   for (int h = 0; h < 4; ++h)
-    an[h] = (E)A[(lane % 32) * UC + ((lane / 32) * 4 + h)];
+    an[h] = static_cast<E>(A[(lane % 32) * UC + ((lane / 32) * 4 + h)]);
   v8e bn{};
   int jcol = (lane % 16) + 16 * ((lane / 16) % 2), kgrp = (lane / 16) / 2;
   for (int e = 0; e < 8; ++e)
-    bn[e] = (E)B[(8 * kgrp + e) * UN + jcol];
+    bn[e] = static_cast<E>(B[(8 * kgrp + e) * UN + jcol]);
   fpsan::v16f_native cn{};
   for (int i = 0; i < UM; ++i)
     for (int j = 0; j < UN; ++j) {
@@ -788,10 +804,12 @@ template <class E> static void cdna3_layout_test(int Mm, int Nn, int Kk) {
     for (int j = 0; j < Nn; ++j) {
       double acc = m.C[i * Nn + j];
       for (int q = 0; q < G; ++q) {
-        acc += (double)m.A[i * Cc + 2 * q] * (double)m.B[(4 * q + m.p0[i * G + q]) * Nn + j];
-        acc += (double)m.A[i * Cc + 2 * q + 1] * (double)m.B[(4 * q + m.p1[i * G + q]) * Nn + j];
+        acc += static_cast<double>(m.A[i * Cc + 2 * q]) *
+               static_cast<double>(m.B[(4 * q + m.p0[i * G + q]) * Nn + j]);
+        acc += static_cast<double>(m.A[i * Cc + 2 * q + 1]) *
+               static_cast<double>(m.B[(4 * q + m.p1[i * G + q]) * Nn + j]);
       }
-      ref[i * Nn + j] = (float)acc;
+      ref[i * Nn + j] = static_cast<float>(acc);
     }
   float *dA = to_dev(m.A), *dB = to_dev(m.B), *dC = to_dev(m.C), *dD;
   int *dI = to_dev(m.idxbuf);
@@ -829,10 +847,12 @@ template <class E> static void cdna3_fpsan_test(int Mm, int Nn, int Kk) {
       for (int j = 0; j < Nn; ++j) {
         VF acc(m.C[i * Nn + j]);
         for (int q = 0; q < G; ++q) {
-          acc = acc + fpsan::cast<float>(VE((E)m.A[i * Cc + 2 * q])) *
-                          fpsan::cast<float>(VE((E)m.B[(4 * q + m.p0[i * G + q]) * Nn + j]));
-          acc = acc + fpsan::cast<float>(VE((E)m.A[i * Cc + 2 * q + 1])) *
-                          fpsan::cast<float>(VE((E)m.B[(4 * q + m.p1[i * G + q]) * Nn + j]));
+          acc = acc +
+                fpsan::cast<float>(VE(static_cast<E>(m.A[i * Cc + 2 * q]))) *
+                    fpsan::cast<float>(VE(static_cast<E>(m.B[(4 * q + m.p0[i * G + q]) * Nn + j])));
+          acc = acc +
+                fpsan::cast<float>(VE(static_cast<E>(m.A[i * Cc + 2 * q + 1]))) *
+                    fpsan::cast<float>(VE(static_cast<E>(m.B[(4 * q + m.p1[i * G + q]) * Nn + j])));
         }
         ref[i * Nn + j] = acc.fpsan_payload();
       }
@@ -1015,10 +1035,12 @@ template <class AE, class BE> static void fp8_smf_test(int Mm, int Kk) {
       double acc = m.C[i * Nn + j];
       for (int q = 0; q < G; ++q) {
         int k0 = 4 * q + m.p0[i * G + q], k1 = 4 * q + m.p1[i * G + q];
-        acc += (double)(float)AE(m.A[i * Cc + 2 * q]) * (double)(float)BE(m.B[k0 * Nn + j]);
-        acc += (double)(float)AE(m.A[i * Cc + 2 * q + 1]) * (double)(float)BE(m.B[k1 * Nn + j]);
+        acc += static_cast<double>(static_cast<float>(AE(m.A[i * Cc + 2 * q]))) *
+               static_cast<double>(static_cast<float>(BE(m.B[k0 * Nn + j])));
+        acc += static_cast<double>(static_cast<float>(AE(m.A[i * Cc + 2 * q + 1]))) *
+               static_cast<double>(static_cast<float>(BE(m.B[k1 * Nn + j])));
       }
-      ref[i * Nn + j] = (float)acc;
+      ref[i * Nn + j] = static_cast<float>(acc);
     }
   float *dA = to_dev(m.A), *dB = to_dev(m.B), *dC = to_dev(m.C), *dDf;
   int *dI = to_dev(m.idxbuf);
@@ -1233,10 +1255,12 @@ template <class AE, class BE> static void fp8big_smf_test(int Mm, int Kk) {
       double acc = m.C[i * Nn + j];
       for (int q = 0; q < G; ++q) {
         int k0 = 4 * q + m.p0[i * G + q], k1 = 4 * q + m.p1[i * G + q];
-        acc += (double)(float)AE(m.A[i * Cc + 2 * q]) * (double)(float)BE(m.B[k0 * Nn + j]);
-        acc += (double)(float)AE(m.A[i * Cc + 2 * q + 1]) * (double)(float)BE(m.B[k1 * Nn + j]);
+        acc += static_cast<double>(static_cast<float>(AE(m.A[i * Cc + 2 * q]))) *
+               static_cast<double>(static_cast<float>(BE(m.B[k0 * Nn + j])));
+        acc += static_cast<double>(static_cast<float>(AE(m.A[i * Cc + 2 * q + 1]))) *
+               static_cast<double>(static_cast<float>(BE(m.B[k1 * Nn + j])));
       }
-      ref[i * Nn + j] = (float)acc;
+      ref[i * Nn + j] = static_cast<float>(acc);
     }
   float *dA = to_dev(m.A), *dB = to_dev(m.B), *dC = to_dev(m.C), *dDf;
   int *dI = to_dev(m.idxbuf);

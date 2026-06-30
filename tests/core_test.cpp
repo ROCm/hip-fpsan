@@ -147,11 +147,11 @@ TYPED_TEST_P(CoreTyped, ModeFalseMatchesNative) {
     for (FT x : s)
       for (FT y : s) {
         F u(x), v(y);
-        EXPECT_EQ(bits_of((u + v).to_float()), bits_of((FT)(x + y)));
-        EXPECT_EQ(bits_of((u - v).to_float()), bits_of((FT)(x - y)));
-        EXPECT_EQ(bits_of((u * v).to_float()), bits_of((FT)(x * y)));
+        EXPECT_EQ(bits_of((u + v).to_float()), bits_of(static_cast<FT>(x + y)));
+        EXPECT_EQ(bits_of((u - v).to_float()), bits_of(static_cast<FT>(x - y)));
+        EXPECT_EQ(bits_of((u * v).to_float()), bits_of(static_cast<FT>(x * y)));
         if (bits_of(y) != bits_of(FT(0)))
-          EXPECT_EQ(bits_of((u / v).to_float()), bits_of((FT)(x / y)));
+          EXPECT_EQ(bits_of((u / v).to_float()), bits_of(static_cast<FT>(x / y)));
         EXPECT_EQ(u < v, x < y);
         EXPECT_EQ(u == v, x == y);
       }
@@ -228,7 +228,8 @@ TEST(GroundTruth, Float32Samples) {
   for (float x : samples<float>()) {
     uint32_t lib =
         Value<float, fpsan::Semantics::Triton, fpsan::Conversions::Explicit>(x).fpsan_payload();
-    uint32_t gen = fpsan_generic::FPSanFloat::embed(fmt, (uint32_t)bits_of(x)).payload();
+    uint32_t gen =
+        fpsan_generic::FPSanFloat::embed(fmt, static_cast<uint32_t>(bits_of(x))).payload();
     EXPECT_EQ(lib, gen) << "x=" << x;
   }
 }
@@ -241,7 +242,7 @@ TEST(Exhaustive, Float16Bijection) {
   using F = Value<_Float16, fpsan::Semantics::Triton, fpsan::Conversions::Explicit>;
   std::vector<int> hit(1 << 16, 0);
   for (uint32_t b = 0; b < (1u << 16); ++b) {
-    uint16_t bb = (uint16_t)b;
+    uint16_t bb = static_cast<uint16_t>(b);
     _Float16 v;
     std::memcpy(&v, &bb, sizeof v);
     uint16_t p = F(v).fpsan_payload();
@@ -250,7 +251,7 @@ TEST(Exhaustive, Float16Bijection) {
       uint16_t negb = bb ^ 0x8000;
       _Float16 nv;
       std::memcpy(&nv, &negb, sizeof nv);
-      EXPECT_EQ(F(nv).fpsan_payload(), (uint16_t)(-p)) << "x bits 0x" << std::hex << bb;
+      EXPECT_EQ(F(nv).fpsan_payload(), static_cast<uint16_t>(-p)) << "x bits 0x" << std::hex << bb;
     }
   }
   for (int h : hit)

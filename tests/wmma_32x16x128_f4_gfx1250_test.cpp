@@ -111,7 +111,7 @@ TEST(WmmaF4_32x16x128, LayoutMatchesHardware) {
   if (!have_device())
     GTEST_SKIP() << "no HIP device";
   std::mt19937 rng = fpsan_test::make_rng();
-  std::uniform_int_distribution<int> pick(0, (int)(sizeof(kGrid) / sizeof(float)) - 1);
+  std::uniform_int_distribution<int> pick(0, static_cast<int>(sizeof(kGrid) / sizeof(float)) - 1);
   std::vector<float> A(M * K), B(K * N), C(M * N);
   for (auto &x : A)
     x = kGrid[pick(rng)];
@@ -212,7 +212,7 @@ TEST(WmmaF4_32x16x128, WrapperFloatAndFPSan) {
   if (!have_device())
     GTEST_SKIP() << "no HIP device";
   std::mt19937 rng = fpsan_test::make_rng();
-  std::uniform_int_distribution<int> pick(0, (int)(sizeof(kGrid) / sizeof(float)) - 1);
+  std::uniform_int_distribution<int> pick(0, static_cast<int>(sizeof(kGrid) / sizeof(float)) - 1);
   std::vector<float> A(M * K), B(K * N), C(M * N);
   for (auto &x : A)
     x = kGrid[pick(rng)];
@@ -341,7 +341,7 @@ template <int Cmod> static void run_modifier_f4() {
   if (!have_device())
     GTEST_SKIP() << "no HIP device";
   std::mt19937 rng = fpsan_test::make_rng();
-  std::uniform_int_distribution<int> pick(0, (int)(sizeof(kGrid) / sizeof(float)) - 1);
+  std::uniform_int_distribution<int> pick(0, static_cast<int>(sizeof(kGrid) / sizeof(float)) - 1);
   std::vector<float> A(M * K), B(K * N), C(M * N);
   for (auto &x : A)
     x = kGrid[pick(rng)];
@@ -532,7 +532,7 @@ template <bool SCALE16, int SFMT> static void run_scale(const char *tag) {
     GTEST_SKIP() << "no HIP device";
   const int NBY = SCALE16 ? 8 : 4;
   std::mt19937 rng = fpsan_test::make_rng();
-  std::uniform_int_distribution<int> pick(0, (int)(sizeof(kGrid) / sizeof(float)) - 1);
+  std::uniform_int_distribution<int> pick(0, static_cast<int>(sizeof(kGrid) / sizeof(float)) - 1);
   std::vector<float> A(M * K), B(K * N), C(M * N);
   for (auto &x : A)
     x = kGrid[pick(rng)];
@@ -547,9 +547,9 @@ template <bool SCALE16, int SFMT> static void run_scale(const char *tag) {
     const float sv[] = {0.5f, 1.0f, 1.5f, 2.0f, 3.0f, 4.0f};
     std::uniform_int_distribution<int> ps(0, 5);
     for (auto &e : eA)
-      e = (int)(f32_to_narrow(sv[ps(rng)], fpsan::detail::kFp8E4M3) & 0xFF);
+      e = static_cast<int>(f32_to_narrow(sv[ps(rng)], fpsan::detail::kFp8E4M3) & 0xFF);
     for (auto &e : eB)
-      e = (int)(f32_to_narrow(sv[ps(rng)], fpsan::detail::kFp8E4M3) & 0xFF);
+      e = static_cast<int>(f32_to_narrow(sv[ps(rng)], fpsan::detail::kFp8E4M3) & 0xFF);
   } else {
     std::uniform_int_distribution<int> pexp(126, 129); // E8M0 exponent bytes
     for (auto &e : eA)
@@ -649,13 +649,13 @@ template <bool SCALE16, int SFMT> static void run_scale(const char *tag) {
     for (int m = 0; m < M; ++m) {
       unsigned long long w = 0;
       for (int by = 0; by < 8; ++by)
-        w |= (unsigned long long)(eA[m * 8 + by] & 0xFF) << (8 * by);
+        w |= static_cast<unsigned long long>(eA[m * 8 + by] & 0xFF) << (8 * by);
       SA[scale_lane_a(m)] = w;
     }
     for (int n = 0; n < N; ++n) {
       unsigned long long w = 0;
       for (int by = 0; by < 8; ++by)
-        w |= (unsigned long long)(eB[n * 8 + by] & 0xFF) << (8 * by);
+        w |= static_cast<unsigned long long>(eB[n * 8 + by] & 0xFF) << (8 * by);
       SB[n] = w;
     }
     unsigned long long *dSA = to_dev(SA);
@@ -751,7 +751,7 @@ TEST(WmmaF4_32x16x128, DISABLED_ProbeArowDmap) {
   for (int lane = 0; lane < 32; ++lane) {
     printf("lane%2d:", lane);
     for (int r = 0; r < 16; ++r)
-      printf(" %3d", (int)draw[lane * 16 + r]);
+      printf(" %3d", static_cast<int>(draw[lane * 16 + r]));
     printf("\n");
   }
   (void)hipFree(dA);
@@ -786,7 +786,7 @@ TEST(WmmaF4_32x16x128, DISABLED_ProbeBcolDmap) {
   for (int lane = 0; lane < 32; ++lane) {
     printf("lane%2d:", lane);
     for (int r = 0; r < 16; ++r)
-      printf(" %3d", (int)draw[lane * 16 + r]);
+      printf(" %3d", static_cast<int>(draw[lane * 16 + r]));
     printf("\n");
   }
   (void)hipFree(dA);
@@ -826,7 +826,7 @@ static void onehot_sweep(int srcLane) {
       if (draw[i] != 0.f)
         lit.push_back(i);
     int ci = -1;
-    for (int c = 0; c < (int)classes.size(); ++c)
+    for (int c = 0; c < static_cast<int>(classes.size()); ++c)
       if (classes[c] == lit) {
         ci = c;
         break;
@@ -839,8 +839,8 @@ static void onehot_sweep(int srcLane) {
     classSlots[ci].push_back(s);
     (void)hipFree(dA);
   }
-  printf("one-hot A lane=%d: %d row-classes\n", srcLane, (int)classes.size());
-  for (int c = 0; c < (int)classes.size(); ++c) {
+  printf("one-hot A lane=%d: %d row-classes\n", srcLane, static_cast<int>(classes.size()));
+  for (int c = 0; c < static_cast<int>(classes.size()); ++c) {
     printf("  class%2d outs[", c);
     for (int i : classes[c])
       printf("%d(%d.%d) ", i, i / 16, i % 16);

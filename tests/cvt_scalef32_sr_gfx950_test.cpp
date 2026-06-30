@@ -96,7 +96,7 @@ template <> struct F16Fp8<fp8_e5m2> {
 // OCP decode widened to f16, lane1 preserved from old (=222).
 template <class FP8> __global__ void k_a_float_all(const int *src, float *lane0, float *lane1) {
   int l = threadIdx.x;
-  fpsan::v2h_native ov = {(_Float16)111.0f, (_Float16)222.0f};
+  fpsan::v2h_native ov = {static_cast<_Float16>(111.0f), static_cast<_Float16>(222.0f)};
   auto r = F16Fp8<FP8>::template call<0, false, Semantics::Native>(
       Value<fpsan::v2h_native, Semantics::Native, kCC>(ov), src[l],
       Value<float, Semantics::Native, kCC>{1.0f});
@@ -138,7 +138,7 @@ TEST(CvtScalef32Sr, A_FloatUnpackAll_Bf8) { run_a_float_all<fp8_e5m2>(kFp8E5M2, 
 // 4 distinct bytes; for each (Byte, Hi) the chosen half = decode(byte)*scale,
 // the other half is preserved.
 template <class FP8> __global__ void k_a_float_sel(int src, float scale, float *out) {
-  fpsan::v2h_native ov = {(_Float16)111.0f, (_Float16)222.0f};
+  fpsan::v2h_native ov = {static_cast<_Float16>(111.0f), static_cast<_Float16>(222.0f)};
   using VV = Value<fpsan::v2h_native, Semantics::Native, kCC>;
   using VS = Value<float, Semantics::Native, kCC>;
   auto w = [&](int idx, auto r) {

@@ -159,8 +159,9 @@ template <class AElem, class BElem, int CBSZ, int BLGP> void run_scale16_layout(
     for (int j = 0; j < SN; ++j) {
       double dot = 0;
       for (int k = 0; k < SK; ++k)
-        dot += (double)m.A[i * SK + k] * (double)m.B[k * SN + j];
-      ref[i * SN + j] = (float)((double)m.C[i * SN + j] + dot * (double)fa * (double)fb);
+        dot += static_cast<double>(m.A[i * SK + k]) * static_cast<double>(m.B[k * SN + j]);
+      ref[i * SN + j] = static_cast<float>(static_cast<double>(m.C[i * SN + j]) +
+                                           dot * static_cast<double>(fa) * static_cast<double>(fb));
     }
   float *dA = to_dev(m.A), *dB = to_dev(m.B), *dC = to_dev(m.C), *dD;
   HIP_CHECK(hipMalloc(&dD, SM * SN * sizeof(float)));
@@ -310,8 +311,10 @@ template <class AElem, class BElem, int CBSZ, int BLGP> void run_scale32_layout(
     for (int j = 0; j < S2N; ++j) {
       double dot = 0;
       for (int k = 0; k < S2K; ++k)
-        dot += (double)m.A[i * S2K + k] * (double)m.B[k * S2N + j];
-      ref[i * S2N + j] = (float)((double)m.C[i * S2N + j] + dot * (double)fa * (double)fb);
+        dot += static_cast<double>(m.A[i * S2K + k]) * static_cast<double>(m.B[k * S2N + j]);
+      ref[i * S2N + j] =
+          static_cast<float>(static_cast<double>(m.C[i * S2N + j]) +
+                             dot * static_cast<double>(fa) * static_cast<double>(fb));
     }
   float *dA = to_dev(m.A), *dB = to_dev(m.B), *dC = to_dev(m.C), *dD;
   HIP_CHECK(hipMalloc(&dD, S2M * S2N * sizeof(float)));
@@ -424,16 +427,16 @@ float sub_decode(int code, unsigned c) {
 unsigned sub_encode(int code, int val) {
   int n = 1 << sub_width(code);
   for (int c = 0; c < n; ++c)
-    if (sub_decode(code, (unsigned)c) == (float)val)
-      return (unsigned)c;
+    if (sub_decode(code, static_cast<unsigned>(c)) == static_cast<float>(val))
+      return static_cast<unsigned>(c);
   return 0u;
 }
 void set_field(fpsan::v8i32_native &reg, int bitoff, unsigned val, int nb) {
   for (int b = 0; b < nb; ++b) {
     int bo = bitoff + b, w = bo / 32, sh = bo % 32;
-    unsigned u = (unsigned)reg[w];
+    unsigned u = static_cast<unsigned>(reg[w]);
     u = (u & ~(1u << sh)) | (((val >> b) & 1u) << sh);
-    reg[w] = (int)u;
+    reg[w] = static_cast<int>(u);
   }
 }
 } // namespace
@@ -470,9 +473,9 @@ template <int CBSZ, int BLGP> void run_scale_sub16_layout() {
   const float fa = fpsan::detail::e8m0_to_float(129), fb = fpsan::detail::e8m0_to_float(126);
   std::vector<int> Acode(SM * SK), Bcode(SK * SN);
   for (auto &x : Acode)
-    x = (int)sub_encode(CBSZ, fpsan_test::pick_int(rng, -2, 3));
+    x = static_cast<int>(sub_encode(CBSZ, fpsan_test::pick_int(rng, -2, 3)));
   for (auto &x : Bcode)
-    x = (int)sub_encode(BLGP, fpsan_test::pick_int(rng, -2, 3));
+    x = static_cast<int>(sub_encode(BLGP, fpsan_test::pick_int(rng, -2, 3)));
   std::vector<float> Cm(SM * SN);
   for (auto &x : Cm)
     x = fpsan_test::pick_int_valued<float>(rng, -8, 8);
@@ -480,21 +483,22 @@ template <int CBSZ, int BLGP> void run_scale_sub16_layout() {
   for (int i = 0; i < SM; ++i)
     for (int k = 0; k < SK; ++k) {
       int lane = 16 * ((k % 64) / 16) + i, s = (k / 64) * 16 + (k % 16);
-      set_field(A[lane], wa * s, (unsigned)Acode[i * SK + k], wa);
+      set_field(A[lane], wa * s, static_cast<unsigned>(Acode[i * SK + k]), wa);
     }
   for (int k = 0; k < SK; ++k)
     for (int j = 0; j < SN; ++j) {
       int lane = 16 * ((k % 64) / 16) + j, s = (k / 64) * 16 + (k % 16);
-      set_field(B[lane], wb * s, (unsigned)Bcode[k * SN + j], wb);
+      set_field(B[lane], wb * s, static_cast<unsigned>(Bcode[k * SN + j]), wb);
     }
   std::vector<float> ref(SM * SN);
   for (int i = 0; i < SM; ++i)
     for (int j = 0; j < SN; ++j) {
       double dot = 0;
       for (int k = 0; k < SK; ++k)
-        dot += (double)sub_decode(CBSZ, (unsigned)Acode[i * SK + k]) *
-               (double)sub_decode(BLGP, (unsigned)Bcode[k * SN + j]);
-      ref[i * SN + j] = (float)((double)Cm[i * SN + j] + dot * (double)fa * (double)fb);
+        dot += static_cast<double>(sub_decode(CBSZ, static_cast<unsigned>(Acode[i * SK + k]))) *
+               static_cast<double>(sub_decode(BLGP, static_cast<unsigned>(Bcode[k * SN + j])));
+      ref[i * SN + j] = static_cast<float>(static_cast<double>(Cm[i * SN + j]) +
+                                           dot * static_cast<double>(fa) * static_cast<double>(fb));
     }
   fpsan::v8i32_native *dA, *dB;
   float *dC, *dD;
@@ -528,9 +532,9 @@ template <int CBSZ, int BLGP> void run_scale_sub16_fpsan() {
   // not necessarily valid format codes).
   std::vector<int> Ap(SM * SK), Bp(SK * SN);
   for (auto &x : Ap)
-    x = (int)(rng() & ((1u << wa) - 1u));
+    x = static_cast<int>(rng() & ((1u << wa) - 1u));
   for (auto &x : Bp)
-    x = (int)(rng() & ((1u << wb) - 1u));
+    x = static_cast<int>(rng() & ((1u << wb) - 1u));
   std::vector<float> Cm(SM * SN);
   for (auto &x : Cm)
     x = fpsan_test::pick_int_valued<float>(rng, -8, 8);
@@ -538,12 +542,12 @@ template <int CBSZ, int BLGP> void run_scale_sub16_fpsan() {
   for (int i = 0; i < SM; ++i)
     for (int k = 0; k < SK; ++k) {
       int lane = 16 * ((k % 64) / 16) + i, s = (k / 64) * 16 + (k % 16);
-      set_field(A[lane], wa * s, (unsigned)Ap[i * SK + k], wa);
+      set_field(A[lane], wa * s, static_cast<unsigned>(Ap[i * SK + k]), wa);
     }
   for (int k = 0; k < SK; ++k)
     for (int j = 0; j < SN; ++j) {
       int lane = 16 * ((k % 64) / 16) + j, s = (k / 64) * 16 + (k % 16);
-      set_field(B[lane], wb * s, (unsigned)Bp[k * SN + j], wb);
+      set_field(B[lane], wb * s, static_cast<unsigned>(Bp[k * SN + j]), wb);
     }
   fpsan::v8i32_native *dA, *dB;
   float *dC;
@@ -562,8 +566,8 @@ template <int CBSZ, int BLGP> void run_scale_sub16_fpsan() {
       for (int j = 0; j < SN; ++j) {
         VF dot(0.0f);
         for (int k = 0; k < SK; ++k)
-          dot = dot + sub_canonical_value<CBSZ, S>((unsigned)Ap[i * SK + k]) *
-                          sub_canonical_value<BLGP, S>((unsigned)Bp[k * SN + j]);
+          dot = dot + sub_canonical_value<CBSZ, S>(static_cast<unsigned>(Ap[i * SK + k])) *
+                          sub_canonical_value<BLGP, S>(static_cast<unsigned>(Bp[k * SN + j]));
         ref[i * SN + j] = (VF(Cm[i * SN + j]) + dot * vsa * vsb).fpsan_payload();
       }
     std::uint32_t *dD;
@@ -624,12 +628,12 @@ void pack_sub32(std::vector<fpsan::v8i32_native> &A, std::vector<fpsan::v8i32_na
   for (int m = 0; m < S2M; ++m)
     for (int k = 0; k < S2K; ++k) {
       int lane = 16 * (2 * ((k % 32) / 16) + m / 16) + (m % 16), s = (k / 32) * 16 + (k % 16);
-      set_field(A[lane], wa * s, (unsigned)Af[m * S2K + k], wa);
+      set_field(A[lane], wa * s, static_cast<unsigned>(Af[m * S2K + k]), wa);
     }
   for (int k = 0; k < S2K; ++k)
     for (int n = 0; n < S2N; ++n) {
       int lane = 16 * (2 * ((k % 32) / 16) + n / 16) + (n % 16), s = (k / 32) * 16 + (k % 16);
-      set_field(B[lane], wb * s, (unsigned)Bf[k * S2N + n], wb);
+      set_field(B[lane], wb * s, static_cast<unsigned>(Bf[k * S2N + n]), wb);
     }
 }
 
@@ -642,9 +646,9 @@ template <int CBSZ, int BLGP> void run_scale_sub32_layout() {
   const float fa = fpsan::detail::e8m0_to_float(129), fb = fpsan::detail::e8m0_to_float(126);
   std::vector<int> Acode(S2M * S2K), Bcode(S2K * S2N);
   for (auto &x : Acode)
-    x = (int)sub_encode(CBSZ, fpsan_test::pick_int(rng, -2, 3));
+    x = static_cast<int>(sub_encode(CBSZ, fpsan_test::pick_int(rng, -2, 3)));
   for (auto &x : Bcode)
-    x = (int)sub_encode(BLGP, fpsan_test::pick_int(rng, -2, 3));
+    x = static_cast<int>(sub_encode(BLGP, fpsan_test::pick_int(rng, -2, 3)));
   std::vector<float> Cm(S2M * S2N);
   for (auto &x : Cm)
     x = fpsan_test::pick_int_valued<float>(rng, -8, 8);
@@ -655,9 +659,11 @@ template <int CBSZ, int BLGP> void run_scale_sub32_layout() {
     for (int j = 0; j < S2N; ++j) {
       double dot = 0;
       for (int k = 0; k < S2K; ++k)
-        dot += (double)sub_decode(CBSZ, (unsigned)Acode[i * S2K + k]) *
-               (double)sub_decode(BLGP, (unsigned)Bcode[k * S2N + j]);
-      ref[i * S2N + j] = (float)((double)Cm[i * S2N + j] + dot * (double)fa * (double)fb);
+        dot += static_cast<double>(sub_decode(CBSZ, static_cast<unsigned>(Acode[i * S2K + k]))) *
+               static_cast<double>(sub_decode(BLGP, static_cast<unsigned>(Bcode[k * S2N + j])));
+      ref[i * S2N + j] =
+          static_cast<float>(static_cast<double>(Cm[i * S2N + j]) +
+                             dot * static_cast<double>(fa) * static_cast<double>(fb));
     }
   fpsan::v8i32_native *dA, *dB;
   float *dC, *dD;
@@ -689,9 +695,9 @@ template <int CBSZ, int BLGP> void run_scale_sub32_fpsan() {
   const int sa = 128, sb = 130;
   std::vector<int> Ap(S2M * S2K), Bp(S2K * S2N);
   for (auto &x : Ap)
-    x = (int)(rng() & ((1u << wa) - 1u));
+    x = static_cast<int>(rng() & ((1u << wa) - 1u));
   for (auto &x : Bp)
-    x = (int)(rng() & ((1u << wb) - 1u));
+    x = static_cast<int>(rng() & ((1u << wb) - 1u));
   std::vector<float> Cm(S2M * S2N);
   for (auto &x : Cm)
     x = fpsan_test::pick_int_valued<float>(rng, -8, 8);
@@ -714,8 +720,8 @@ template <int CBSZ, int BLGP> void run_scale_sub32_fpsan() {
       for (int j = 0; j < S2N; ++j) {
         VF dot(0.0f);
         for (int k = 0; k < S2K; ++k)
-          dot = dot + sub_canonical_value<CBSZ, S>((unsigned)Ap[i * S2K + k]) *
-                          sub_canonical_value<BLGP, S>((unsigned)Bp[k * S2N + j]);
+          dot = dot + sub_canonical_value<CBSZ, S>(static_cast<unsigned>(Ap[i * S2K + k])) *
+                          sub_canonical_value<BLGP, S>(static_cast<unsigned>(Bp[k * S2N + j]));
         ref[i * S2N + j] = (VF(Cm[i * S2N + j]) + dot * vsa * vsb).fpsan_payload();
       }
     std::uint32_t *dD;
@@ -771,7 +777,7 @@ namespace {
 std::vector<int> rand_exps(std::mt19937 &rng, int n) {
   std::vector<int> e(n);
   for (auto &x : e)
-    x = 124 + (int)(rng() % 7); // 2^-3 .. 2^+3
+    x = 124 + static_cast<int>(rng() % 7); // 2^-3 .. 2^+3
   return e;
 }
 } // namespace
@@ -827,7 +833,7 @@ template <class AElem, class BElem, int CBSZ, int BLGP> void run_scale16_perbloc
   for (int kb = 0; kb < NB; ++kb)
     for (int j = 0; j < SN; ++j)
       SB[16 * kb + j] = eB[j * NB + kb];
-  auto e8 = [](int b) { return fpsan::detail::e8m0_to_float((unsigned)b); };
+  auto e8 = [](int b) { return fpsan::detail::e8m0_to_float(static_cast<unsigned>(b)); };
   float *dA = to_dev(m.A), *dB = to_dev(m.B), *dC = to_dev(m.C);
   int *dSA = to_dev(SA), *dSB = to_dev(SB);
   // ---- Float vs host reference (pins the hardware per-block scale model) ----
@@ -839,10 +845,11 @@ template <class AElem, class BElem, int CBSZ, int BLGP> void run_scale16_perbloc
         for (int kb = 0; kb < NB; ++kb) {
           double blk = 0;
           for (int k = 32 * kb; k < 32 * kb + 32; ++k)
-            blk += (double)m.A[i * SK + k] * (double)m.B[k * SN + j];
-          acc += blk * (double)e8(eA[i * NB + kb]) * (double)e8(eB[j * NB + kb]);
+            blk += static_cast<double>(m.A[i * SK + k]) * static_cast<double>(m.B[k * SN + j]);
+          acc += blk * static_cast<double>(e8(eA[i * NB + kb])) *
+                 static_cast<double>(e8(eB[j * NB + kb]));
         }
-        ref[i * SN + j] = (float)acc;
+        ref[i * SN + j] = static_cast<float>(acc);
       }
     float *dD;
     HIP_CHECK(hipMalloc(&dD, SM * SN * sizeof(float)));
@@ -948,7 +955,7 @@ template <class AElem, class BElem, int CBSZ, int BLGP> void run_scale32_perbloc
   for (int kb = 0; kb < NB; ++kb)
     for (int n = 0; n < S2N; ++n)
       SB[32 * kb + n] = eB[n * NB + kb];
-  auto e8 = [](int b) { return fpsan::detail::e8m0_to_float((unsigned)b); };
+  auto e8 = [](int b) { return fpsan::detail::e8m0_to_float(static_cast<unsigned>(b)); };
   float *dA = to_dev(m.A), *dB = to_dev(m.B), *dC = to_dev(m.C);
   int *dSA = to_dev(SA), *dSB = to_dev(SB);
   {
@@ -959,10 +966,11 @@ template <class AElem, class BElem, int CBSZ, int BLGP> void run_scale32_perbloc
         for (int kb = 0; kb < NB; ++kb) {
           double blk = 0;
           for (int k = 32 * kb; k < 32 * kb + 32; ++k)
-            blk += (double)m.A[i * S2K + k] * (double)m.B[k * S2N + j];
-          acc += blk * (double)e8(eA[i * NB + kb]) * (double)e8(eB[j * NB + kb]);
+            blk += static_cast<double>(m.A[i * S2K + k]) * static_cast<double>(m.B[k * S2N + j]);
+          acc += blk * static_cast<double>(e8(eA[i * NB + kb])) *
+                 static_cast<double>(e8(eB[j * NB + kb]));
         }
-        ref[i * S2N + j] = (float)acc;
+        ref[i * S2N + j] = static_cast<float>(acc);
       }
     float *dD;
     HIP_CHECK(hipMalloc(&dD, S2M * S2N * sizeof(float)));
@@ -1044,9 +1052,9 @@ template <int CBSZ, int BLGP> void run_scale_sub16_perblock_fpsan() {
   std::mt19937 rng = fpsan_test::make_rng();
   std::vector<int> Ap(SM * SK), Bp(SK * SN);
   for (auto &x : Ap)
-    x = (int)(rng() & ((1u << wa) - 1u));
+    x = static_cast<int>(rng() & ((1u << wa) - 1u));
   for (auto &x : Bp)
-    x = (int)(rng() & ((1u << wb) - 1u));
+    x = static_cast<int>(rng() & ((1u << wb) - 1u));
   std::vector<float> Cm(SM * SN);
   for (auto &x : Cm)
     x = fpsan_test::pick_int_valued<float>(rng, -8, 8);
@@ -1062,14 +1070,14 @@ template <int CBSZ, int BLGP> void run_scale_sub16_perblock_fpsan() {
   for (int i = 0; i < SM; ++i)
     for (int k = 0; k < SK; ++k) {
       int lane = 16 * ((k % 64) / 16) + i, s = (k / 64) * 16 + (k % 16);
-      set_field(A[lane], wa * s, (unsigned)Ap[i * SK + k], wa);
+      set_field(A[lane], wa * s, static_cast<unsigned>(Ap[i * SK + k]), wa);
     }
   for (int k = 0; k < SK; ++k)
     for (int j = 0; j < SN; ++j) {
       int lane = 16 * ((k % 64) / 16) + j, s = (k / 64) * 16 + (k % 16);
-      set_field(B[lane], wb * s, (unsigned)Bp[k * SN + j], wb);
+      set_field(B[lane], wb * s, static_cast<unsigned>(Bp[k * SN + j]), wb);
     }
-  auto e8 = [](int b) { return fpsan::detail::e8m0_to_float((unsigned)b); };
+  auto e8 = [](int b) { return fpsan::detail::e8m0_to_float(static_cast<unsigned>(b)); };
   fpsan::v8i32_native *dA, *dB;
   float *dC;
   HIP_CHECK(hipMalloc(&dA, WAVE * sizeof(fpsan::v8i32_native)));
@@ -1089,8 +1097,8 @@ template <int CBSZ, int BLGP> void run_scale_sub16_perblock_fpsan() {
         for (int kb = 0; kb < NB; ++kb) {
           VF blk(0.0f);
           for (int k = 32 * kb; k < 32 * kb + 32; ++k)
-            blk = blk + sub_canonical_value<CBSZ, S>((unsigned)Ap[i * SK + k]) *
-                            sub_canonical_value<BLGP, S>((unsigned)Bp[k * SN + j]);
+            blk = blk + sub_canonical_value<CBSZ, S>(static_cast<unsigned>(Ap[i * SK + k])) *
+                            sub_canonical_value<BLGP, S>(static_cast<unsigned>(Bp[k * SN + j]));
           acc = acc + blk * VF(e8(eA[i * NB + kb])) * VF(e8(eB[j * NB + kb]));
         }
         ref[i * SN + j] = acc.fpsan_payload();
@@ -1221,7 +1229,7 @@ template <bool AIsSub, class Fp8Elem, int CBSZ, int BLGP> void run_scale16_mixed
   for (auto &x : fp8mat)
     x = fpsan_test::pick_int_valued<float>(rng, -3, 3);
   for (auto &x : submat)
-    x = (int)sub_encode(subfmt, fpsan_test::pick_int(rng, -2, 3));
+    x = static_cast<int>(sub_encode(subfmt, fpsan_test::pick_int(rng, -2, 3)));
   // Pack the sub operand in mix-model.
   std::vector<fpsan::v8i32_native> sub(WAVE, fpsan::v8i32_native{});
   if (AIsSub) {
@@ -1229,24 +1237,26 @@ template <bool AIsSub, class Fp8Elem, int CBSZ, int BLGP> void run_scale16_mixed
       for (int k = 0; k < SK; ++k) {
         int lane, slot;
         sub_mix_loc16(k, i, lane, slot);
-        set_field(sub[lane], w * slot, (unsigned)submat[i * SK + k], w);
+        set_field(sub[lane], w * slot, static_cast<unsigned>(submat[i * SK + k]), w);
       }
   } else {
     for (int k = 0; k < SK; ++k)
       for (int j = 0; j < SN; ++j) {
         int lane, slot;
         sub_mix_loc16(k, j, lane, slot);
-        set_field(sub[lane], w * slot, (unsigned)submat[k * SN + j], w);
+        set_field(sub[lane], w * slot, static_cast<unsigned>(submat[k * SN + j]), w);
       }
   }
   // Host reference (small ints exact): D = C + (sum_k A*B) * fa * fb.
   auto Aval = [&](int i, int k) {
-    return AIsSub ? (double)sub_decode(subfmt, (unsigned)submat[i * SK + k])
-                  : (double)fp8mat[i * SK + k];
+    return AIsSub
+               ? static_cast<double>(sub_decode(subfmt, static_cast<unsigned>(submat[i * SK + k])))
+               : static_cast<double>(fp8mat[i * SK + k]);
   };
   auto Bval = [&](int k, int j) {
-    return AIsSub ? (double)fp8mat[k * SN + j]
-                  : (double)sub_decode(subfmt, (unsigned)submat[k * SN + j]);
+    return AIsSub
+               ? static_cast<double>(fp8mat[k * SN + j])
+               : static_cast<double>(sub_decode(subfmt, static_cast<unsigned>(submat[k * SN + j])));
   };
   std::vector<float> ref(SM * SN);
   for (int i = 0; i < SM; ++i)
@@ -1254,7 +1264,7 @@ template <bool AIsSub, class Fp8Elem, int CBSZ, int BLGP> void run_scale16_mixed
       double dot = 0;
       for (int k = 0; k < SK; ++k)
         dot += Aval(i, k) * Bval(k, j);
-      ref[i * SN + j] = (float)((double)Cm[i * SN + j] + dot * fa * fb);
+      ref[i * SN + j] = static_cast<float>(static_cast<double>(Cm[i * SN + j]) + dot * fa * fb);
     }
   float *dF = to_dev(fp8mat), *dC = to_dev(Cm), *dD;
   fpsan::v8i32_native *dSub;
@@ -1299,7 +1309,7 @@ template <bool AIsSub, class Fp8Elem, int CBSZ, int BLGP> void run_scale16_mixed
   for (auto &x : fp8mat)
     x = fpsan_test::pick_int_valued<float>(rng, -3, 3);
   for (auto &x : subpay)
-    x = (int)(rng() & ((1u << w) - 1u));
+    x = static_cast<int>(rng() & ((1u << w) - 1u));
   for (auto &x : Cm)
     x = fpsan_test::pick_int_valued<float>(rng, -6, 6);
   std::vector<fpsan::v8i32_native> sub(WAVE, fpsan::v8i32_native{});
@@ -1308,14 +1318,14 @@ template <bool AIsSub, class Fp8Elem, int CBSZ, int BLGP> void run_scale16_mixed
       for (int k = 0; k < SK; ++k) {
         int lane, slot;
         sub_mix_loc16(k, i, lane, slot);
-        set_field(sub[lane], w * slot, (unsigned)subpay[i * SK + k], w);
+        set_field(sub[lane], w * slot, static_cast<unsigned>(subpay[i * SK + k]), w);
       }
   else
     for (int k = 0; k < SK; ++k)
       for (int j = 0; j < SN; ++j) {
         int lane, slot;
         sub_mix_loc16(k, j, lane, slot);
-        set_field(sub[lane], w * slot, (unsigned)subpay[k * SN + j], w);
+        set_field(sub[lane], w * slot, static_cast<unsigned>(subpay[k * SN + j]), w);
       }
   float *dF = to_dev(fp8mat), *dC = to_dev(Cm);
   fpsan::v8i32_native *dSub;
@@ -1327,12 +1337,12 @@ template <bool AIsSub, class Fp8Elem, int CBSZ, int BLGP> void run_scale16_mixed
     using VFp8 = Value<Fp8Elem, S, kCC>;
     const VF vsa(fpsan::detail::e8m0_to_float(128)), vsb(fpsan::detail::e8m0_to_float(130));
     auto Av = [&](int i, int k) {
-      return AIsSub ? sub_canonical_value<SubFmt, S>((unsigned)subpay[i * SK + k])
+      return AIsSub ? sub_canonical_value<SubFmt, S>(static_cast<unsigned>(subpay[i * SK + k]))
                     : fpsan::cast<float>(VFp8(Fp8Elem(fp8mat[i * SK + k])));
     };
     auto Bv = [&](int k, int j) {
       return AIsSub ? fpsan::cast<float>(VFp8(Fp8Elem(fp8mat[k * SN + j])))
-                    : sub_canonical_value<SubFmt, S>((unsigned)subpay[k * SN + j]);
+                    : sub_canonical_value<SubFmt, S>(static_cast<unsigned>(subpay[k * SN + j]));
     };
     std::vector<std::uint32_t> ref(SM * SN);
     for (int i = 0; i < SM; ++i)
@@ -1459,7 +1469,7 @@ template <bool AIsSub, class Fp8Elem, int CBSZ, int BLGP> void run_scale32_mixed
   for (auto &x : fp8mat)
     x = fpsan_test::pick_int_valued<float>(rng, -3, 3);
   for (auto &x : submat)
-    x = (int)sub_encode(subfmt, fpsan_test::pick_int(rng, -2, 3));
+    x = static_cast<int>(sub_encode(subfmt, fpsan_test::pick_int(rng, -2, 3)));
   for (auto &x : Cm)
     x = fpsan_test::pick_int_valued<float>(rng, -6, 6);
   std::vector<fpsan::v8i32_native> sub(WAVE, fpsan::v8i32_native{});
@@ -1468,22 +1478,24 @@ template <bool AIsSub, class Fp8Elem, int CBSZ, int BLGP> void run_scale32_mixed
       for (int k = 0; k < S2K; ++k) {
         int lane, slot;
         sub_mix_loc32(k, i, lane, slot);
-        set_field(sub[lane], w * slot, (unsigned)submat[i * S2K + k], w);
+        set_field(sub[lane], w * slot, static_cast<unsigned>(submat[i * S2K + k]), w);
       }
   else
     for (int k = 0; k < S2K; ++k)
       for (int j = 0; j < S2N; ++j) {
         int lane, slot;
         sub_mix_loc32(k, j, lane, slot);
-        set_field(sub[lane], w * slot, (unsigned)submat[k * S2N + j], w);
+        set_field(sub[lane], w * slot, static_cast<unsigned>(submat[k * S2N + j]), w);
       }
   auto Aval = [&](int i, int k) {
-    return AIsSub ? (double)sub_decode(subfmt, (unsigned)submat[i * S2K + k])
-                  : (double)fp8mat[i * S2K + k];
+    return AIsSub
+               ? static_cast<double>(sub_decode(subfmt, static_cast<unsigned>(submat[i * S2K + k])))
+               : static_cast<double>(fp8mat[i * S2K + k]);
   };
   auto Bval = [&](int k, int j) {
-    return AIsSub ? (double)fp8mat[k * S2N + j]
-                  : (double)sub_decode(subfmt, (unsigned)submat[k * S2N + j]);
+    return AIsSub ? static_cast<double>(fp8mat[k * S2N + j])
+                  : static_cast<double>(
+                        sub_decode(subfmt, static_cast<unsigned>(submat[k * S2N + j])));
   };
   std::vector<float> ref(S2M * S2N);
   for (int i = 0; i < S2M; ++i)
@@ -1491,7 +1503,7 @@ template <bool AIsSub, class Fp8Elem, int CBSZ, int BLGP> void run_scale32_mixed
       double dot = 0;
       for (int k = 0; k < S2K; ++k)
         dot += Aval(i, k) * Bval(k, j);
-      ref[i * S2N + j] = (float)((double)Cm[i * S2N + j] + dot * fa * fb);
+      ref[i * S2N + j] = static_cast<float>(static_cast<double>(Cm[i * S2N + j]) + dot * fa * fb);
     }
   float *dF = to_dev(fp8mat), *dC = to_dev(Cm), *dD;
   fpsan::v8i32_native *dSub;
@@ -1528,7 +1540,7 @@ template <bool AIsSub, class Fp8Elem, int CBSZ, int BLGP> void run_scale32_mixed
   for (auto &x : fp8mat)
     x = fpsan_test::pick_int_valued<float>(rng, -3, 3);
   for (auto &x : subpay)
-    x = (int)(rng() & ((1u << w) - 1u));
+    x = static_cast<int>(rng() & ((1u << w) - 1u));
   for (auto &x : Cm)
     x = fpsan_test::pick_int_valued<float>(rng, -6, 6);
   std::vector<fpsan::v8i32_native> sub(WAVE, fpsan::v8i32_native{});
@@ -1537,14 +1549,14 @@ template <bool AIsSub, class Fp8Elem, int CBSZ, int BLGP> void run_scale32_mixed
       for (int k = 0; k < S2K; ++k) {
         int lane, slot;
         sub_mix_loc32(k, i, lane, slot);
-        set_field(sub[lane], w * slot, (unsigned)subpay[i * S2K + k], w);
+        set_field(sub[lane], w * slot, static_cast<unsigned>(subpay[i * S2K + k]), w);
       }
   else
     for (int k = 0; k < S2K; ++k)
       for (int j = 0; j < S2N; ++j) {
         int lane, slot;
         sub_mix_loc32(k, j, lane, slot);
-        set_field(sub[lane], w * slot, (unsigned)subpay[k * S2N + j], w);
+        set_field(sub[lane], w * slot, static_cast<unsigned>(subpay[k * S2N + j]), w);
       }
   float *dF = to_dev(fp8mat), *dC = to_dev(Cm);
   fpsan::v8i32_native *dSub;
@@ -1556,12 +1568,12 @@ template <bool AIsSub, class Fp8Elem, int CBSZ, int BLGP> void run_scale32_mixed
     using VFp8 = Value<Fp8Elem, S, kCC>;
     const VF vsa(fpsan::detail::e8m0_to_float(128)), vsb(fpsan::detail::e8m0_to_float(130));
     auto Av = [&](int i, int k) {
-      return AIsSub ? sub_canonical_value<SubFmt, S>((unsigned)subpay[i * S2K + k])
+      return AIsSub ? sub_canonical_value<SubFmt, S>(static_cast<unsigned>(subpay[i * S2K + k]))
                     : fpsan::cast<float>(VFp8(Fp8Elem(fp8mat[i * S2K + k])));
     };
     auto Bv = [&](int k, int j) {
       return AIsSub ? fpsan::cast<float>(VFp8(Fp8Elem(fp8mat[k * S2N + j])))
-                    : sub_canonical_value<SubFmt, S>((unsigned)subpay[k * S2N + j]);
+                    : sub_canonical_value<SubFmt, S>(static_cast<unsigned>(subpay[k * S2N + j]));
     };
     std::vector<std::uint32_t> ref(S2M * S2N);
     for (int i = 0; i < S2M; ++i)

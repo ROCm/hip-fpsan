@@ -120,7 +120,7 @@ template <class V> static void battery_division(const char *tag) {
   long xx = 0, abb = 0, n = 0;
   for (int i = 1; i <= 50; ++i)
     for (int j = 1; j <= 7; ++j, ++n) {
-      V a{(float)i}, b{(float)j};
+      V a{static_cast<float>(i)}, b{static_cast<float>(j)};
       xx += (a / a == V{1.0f});
       abb += ((a / b) * b == a);
     }
@@ -168,8 +168,8 @@ template <class V> static void battery_roots(const char *tag, bool has_cbrt) {
   // sqrt(x)^2 == x holds on the square residues only -- a proper, nonempty subset
   // (1 is always a square, not every value is). Field ~1/2, SG ~1/4, Pyth ~1/8.
   checkf(sq > 0 && sq < n, tag, "sqrt(x)^2 == x on the square residues (not all)");
-  checkf(rinv == (long)(sizeof xs / sizeof *xs), tag, "rsqrt(x)*sqrt(x) == 1");
-  checkf(rcons == (long)(sizeof xs / sizeof *xs), tag, "rsqrt == 1/sqrt");
+  checkf(rinv == static_cast<long>(sizeof xs / sizeof *xs), tag, "rsqrt(x)*sqrt(x) == 1");
+  checkf(rcons == static_cast<long>(sizeof xs / sizeof *xs), tag, "rsqrt == 1/sqrt");
   if (has_cbrt) {
     long mc = 0, c3 = 0;
     for (float u : xs)
@@ -420,7 +420,7 @@ int main() {
   {
     long ok = 0, n = 0;
     for (int i = 1; i <= 300; ++i, ++n)
-      ok += ((Alg{(float)i} / Alg{(float)i}) == Alg{1.0f});
+      ok += ((Alg{static_cast<float>(i)} / Alg{static_cast<float>(i)}) == Alg{1.0f});
     check(ok == n, "alg: x/x == 1 (field)");
   }
   // commutativity / associativity
@@ -656,7 +656,7 @@ int main() {
       for (float v : xs) {
         F8 a{static_cast<fp8_e4m3>(u)}, b{static_cast<fp8_e4m3>(v)};
         F32 c{u}, d{v};
-        F64 e{(double)u}, f{(double)v};
+        F64 e{static_cast<double>(u)}, f{static_cast<double>(v)};
         // widening is multiplicative (fp8 -> fp16, fp8 -> fp32)
         w16 += (cast<_Float16>(a * b) == cast<_Float16>(a) * cast<_Float16>(b));
         w32 += (cast<float>(a * b) == cast<float>(a) * cast<float>(b));

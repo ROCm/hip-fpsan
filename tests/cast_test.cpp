@@ -56,7 +56,7 @@ TEST(Cast, FpsanF32ToF16ToF32RoundTrips) {
       using H = Value<_Float16, S, Conversions::Explicit>;
       for (int i = 0; i < (1 << 16); ++i) {
         _Float16 v;
-        uint16_t b = (uint16_t)i;
+        uint16_t b = static_cast<uint16_t>(i);
         std::memcpy(&v, &b, sizeof v);
         H h(v);
         auto back = cast<_Float16>(cast<float>(h));

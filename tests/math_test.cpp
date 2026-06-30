@@ -49,7 +49,7 @@ TEST(Math, Exp2ExpMatchGroundTruthFloat) {
   using F = Value<float, fpsan::Semantics::Triton, fpsan::Conversions::Explicit>;
   const auto &fmt = fpsan_generic::formats::F32;
   for (float x : xs()) {
-    auto gen = fpsan_generic::FPSanFloat::embed(fmt, (uint32_t)bits_of(x));
+    auto gen = fpsan_generic::FPSanFloat::embed(fmt, static_cast<uint32_t>(bits_of(x)));
     EXPECT_EQ(fpsan::exp2(F(x)).fpsan_payload(), gen.exp2().payload()) << x;
     EXPECT_EQ(fpsan::exp(F(x)).fpsan_payload(), gen.exp().payload()) << x;
   }
@@ -60,11 +60,11 @@ TEST(Math, Exp2MatchesGroundTruthFloat16Exhaustive) {
   using F = Value<_Float16, fpsan::Semantics::Triton, fpsan::Conversions::Explicit>;
   fpsan_generic::FPFormat fmt{"half", 16, 5, 10, 15, true};
   for (uint32_t b = 0; b < (1u << 16); ++b) {
-    uint16_t bb = (uint16_t)b;
+    uint16_t bb = static_cast<uint16_t>(b);
     _Float16 v;
     std::memcpy(&v, &bb, sizeof v);
     auto gen = fpsan_generic::FPSanFloat::embed(fmt, b);
-    ASSERT_EQ(fpsan::exp2(F(v)).fpsan_payload(), (uint16_t)gen.exp2().payload())
+    ASSERT_EQ(fpsan::exp2(F(v)).fpsan_payload(), static_cast<uint16_t>(gen.exp2().payload()))
         << "bits 0x" << std::hex << b;
   }
 #else
@@ -169,16 +169,16 @@ TEST(Math, NativeParity) {
   using F = Value<float, fpsan::Semantics::Native, fpsan::Conversions::Explicit>;
   for (float x : xs()) {
     F a(x);
-    EXPECT_EQ(bits_of((float)fpsan::exp(a)), bits_of(std::exp(x)));
-    EXPECT_EQ(bits_of((float)fpsan::exp2(a)), bits_of(std::exp2(x)));
-    EXPECT_EQ(bits_of((float)fpsan::sin(a)), bits_of(std::sin(x)));
-    EXPECT_EQ(bits_of((float)fpsan::cos(a)), bits_of(std::cos(x)));
-    EXPECT_EQ(bits_of((float)fpsan::floor(a)), bits_of(std::floor(x)));
-    EXPECT_EQ(bits_of((float)fpsan::ceil(a)), bits_of(std::ceil(x)));
+    EXPECT_EQ(bits_of(static_cast<float>(fpsan::exp(a))), bits_of(std::exp(x)));
+    EXPECT_EQ(bits_of(static_cast<float>(fpsan::exp2(a))), bits_of(std::exp2(x)));
+    EXPECT_EQ(bits_of(static_cast<float>(fpsan::sin(a))), bits_of(std::sin(x)));
+    EXPECT_EQ(bits_of(static_cast<float>(fpsan::cos(a))), bits_of(std::cos(x)));
+    EXPECT_EQ(bits_of(static_cast<float>(fpsan::floor(a))), bits_of(std::floor(x)));
+    EXPECT_EQ(bits_of(static_cast<float>(fpsan::ceil(a))), bits_of(std::ceil(x)));
     if (x > 0.f) {
-      EXPECT_EQ(bits_of((float)fpsan::log(a)), bits_of(std::log(x)));
-      EXPECT_EQ(bits_of((float)fpsan::sqrt(a)), bits_of(std::sqrt(x)));
-      EXPECT_EQ(bits_of((float)fpsan::precise_sqrt(a)), bits_of(std::sqrt(x)));
+      EXPECT_EQ(bits_of(static_cast<float>(fpsan::log(a))), bits_of(std::log(x)));
+      EXPECT_EQ(bits_of(static_cast<float>(fpsan::sqrt(a))), bits_of(std::sqrt(x)));
+      EXPECT_EQ(bits_of(static_cast<float>(fpsan::precise_sqrt(a))), bits_of(std::sqrt(x)));
     }
   }
 }
@@ -201,8 +201,8 @@ TEST(Math, MinMaxNativeParity) {
   using F = Value<float, fpsan::Semantics::Native, fpsan::Conversions::Explicit>;
   for (float a : xs())
     for (float b : xs()) {
-      EXPECT_EQ(bits_of((float)fpsan::fmin(F(a), F(b))), bits_of(std::fmin(a, b)));
-      EXPECT_EQ(bits_of((float)fpsan::fmax(F(a), F(b))), bits_of(std::fmax(a, b)));
+      EXPECT_EQ(bits_of(static_cast<float>(fpsan::fmin(F(a), F(b)))), bits_of(std::fmin(a, b)));
+      EXPECT_EQ(bits_of(static_cast<float>(fpsan::fmax(F(a), F(b)))), bits_of(std::fmax(a, b)));
     }
 }
 

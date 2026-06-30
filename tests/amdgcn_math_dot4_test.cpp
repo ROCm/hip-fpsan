@@ -38,7 +38,7 @@ using fpsan::Conversions;
 using fpsan::Semantics;
 using fpsan::Value;
 
-static constexpr Conversions kCC = Conversions::Explicit;
+[[maybe_unused]] static constexpr Conversions kCC = Conversions::Explicit;
 static constexpr int kScalarN = 32;
 
 #ifndef FPSAN_TEST_ENABLE_FDOT2
