@@ -295,11 +295,11 @@ TEST(SwmmacGfx12, F32_F16_FloatMatchesBuiltin) {
     std::memcpy(&bw, &wrap[i], 4);
     EXPECT_EQ(bw, br) << "lane " << (i / 8) << " slot " << (i % 8);
   }
-  (void)hipFree(dA);
-  (void)hipFree(dB);
-  (void)hipFree(dC);
-  (void)hipFree(dRaw);
-  (void)hipFree(dWrap);
+  static_cast<void>(hipFree(dA));
+  static_cast<void>(hipFree(dB));
+  static_cast<void>(hipFree(dC));
+  static_cast<void>(hipFree(dRaw));
+  static_cast<void>(hipFree(dWrap));
 }
 
 TEST(SwmmacGfx12, F32_BF16_FloatMatchesBuiltin) {
@@ -342,11 +342,11 @@ TEST(SwmmacGfx12, F32_BF16_FloatMatchesBuiltin) {
     std::memcpy(&bw, &wrap[i], 4);
     EXPECT_EQ(bw, br) << "lane " << (i / 8) << " slot " << (i % 8);
   }
-  (void)hipFree(dA);
-  (void)hipFree(dB);
-  (void)hipFree(dC);
-  (void)hipFree(dRaw);
-  (void)hipFree(dWrap);
+  static_cast<void>(hipFree(dA));
+  static_cast<void>(hipFree(dB));
+  static_cast<void>(hipFree(dC));
+  static_cast<void>(hipFree(dRaw));
+  static_cast<void>(hipFree(dWrap));
 }
 
 TEST(SwmmacGfx12, F16_F16_FloatMatchesBuiltin) {
@@ -384,11 +384,11 @@ TEST(SwmmacGfx12, F16_F16_FloatMatchesBuiltin) {
       hipMemcpy(wrap.data(), dWrap, wrap.size() * sizeof(std::uint16_t), hipMemcpyDeviceToHost));
   for (size_t i = 0; i < raw.size(); ++i)
     EXPECT_EQ(wrap[i], raw[i]) << "lane " << (i / 8) << " slot " << (i % 8);
-  (void)hipFree(dA);
-  (void)hipFree(dB);
-  (void)hipFree(dC);
-  (void)hipFree(dRaw);
-  (void)hipFree(dWrap);
+  static_cast<void>(hipFree(dA));
+  static_cast<void>(hipFree(dB));
+  static_cast<void>(hipFree(dC));
+  static_cast<void>(hipFree(dRaw));
+  static_cast<void>(hipFree(dWrap));
 }
 
 template <int VARIANT> static void run_fp8_swmmac_test(std::uint32_t seed) {
@@ -431,11 +431,11 @@ template <int VARIANT> static void run_fp8_swmmac_test(std::uint32_t seed) {
     std::memcpy(&bw, &wrap[i], 4);
     EXPECT_EQ(bw, br) << "lane " << (i / 8) << " slot " << (i % 8);
   }
-  (void)hipFree(dA);
-  (void)hipFree(dB);
-  (void)hipFree(dC);
-  (void)hipFree(dRaw);
-  (void)hipFree(dWrap);
+  static_cast<void>(hipFree(dA));
+  static_cast<void>(hipFree(dB));
+  static_cast<void>(hipFree(dC));
+  static_cast<void>(hipFree(dRaw));
+  static_cast<void>(hipFree(dWrap));
 }
 
 TEST(SwmmacGfx12, F32_FP8_FP8_FloatMatchesBuiltin) { run_fp8_swmmac_test<0>(0xfe'00); }

@@ -74,7 +74,7 @@ template <class F> void for_each_fpsan_semantics_all_variants(F &&f) {
 // FieldFast keeps the same embedding and +/* laws, but deliberately tags
 // expensive division/roots.
 template <class FT, fpsan::Semantics S> constexpr bool flavor_is_value_faithful() {
-  (void)sizeof(FT);
+  static_cast<void>(sizeof(FT));
   return fpsan::detail::is_algebraic_semantics(S) && !fpsan::detail::has_fast_field_ops(S);
 }
 

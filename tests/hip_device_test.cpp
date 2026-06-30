@@ -91,10 +91,10 @@ TEST(HipDevice, MatchesHostAndPreservesIdentities) {
     }
   });
 
-  (void)hipFree(da);
-  (void)hipFree(db);
-  (void)hipFree(dc);
-  (void)hipFree(dembed);
-  (void)hipFree(dassoc);
-  (void)hipFree(dexp);
+  static_cast<void>(hipFree(da));
+  static_cast<void>(hipFree(db));
+  static_cast<void>(hipFree(dc));
+  static_cast<void>(hipFree(dembed));
+  static_cast<void>(hipFree(dassoc));
+  static_cast<void>(hipFree(dexp));
 }

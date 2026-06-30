@@ -195,8 +195,8 @@ template <class T> void run_float_matches_host_butterfly() {
     FT got = FT(0);
     HIP_CHECK(hipMemcpy(&got, dOut, sizeof(FT), hipMemcpyDeviceToHost));
     EXPECT_EQ(bits_of(got), bits_of(static_cast<FT>(ref)));
-    (void)hipFree(dIn);
-    (void)hipFree(dOut);
+    static_cast<void>(hipFree(dIn));
+    static_cast<void>(hipFree(dOut));
   }
 }
 
@@ -221,8 +221,8 @@ template <class T, Semantics S> void run_fpsan_matches_host_butterfly() {
   Bits got = Bits(0);
   HIP_CHECK(hipMemcpy(&got, dOut, sizeof(Bits), hipMemcpyDeviceToHost));
   EXPECT_EQ(got, ref.fpsan_payload());
-  (void)hipFree(dIn);
-  (void)hipFree(dOut);
+  static_cast<void>(hipFree(dIn));
+  static_cast<void>(hipFree(dOut));
 }
 
 // Independent oracle: a left-to-right sequential fold of the lane payloads,
@@ -253,8 +253,8 @@ template <class T, Semantics S> void run_fpsan_matches_seq_fold() {
     Bits got = Bits(0);
     HIP_CHECK(hipMemcpy(&got, dOut, sizeof(Bits), hipMemcpyDeviceToHost));
     EXPECT_EQ(got, ref.fpsan_payload());
-    (void)hipFree(dIn);
-    (void)hipFree(dOut);
+    static_cast<void>(hipFree(dIn));
+    static_cast<void>(hipFree(dOut));
   }
 }
 
@@ -277,8 +277,8 @@ template <class T, Semantics S> void run_fpsan_strategy_invariant() {
   Bits got1 = Bits(0);
   HIP_CHECK(hipMemcpy(&got1, dOut, sizeof(Bits), hipMemcpyDeviceToHost));
   EXPECT_EQ(got0, got1);
-  (void)hipFree(dIn);
-  (void)hipFree(dOut);
+  static_cast<void>(hipFree(dIn));
+  static_cast<void>(hipFree(dOut));
 }
 
 // ---------------------------------------------------------------------------

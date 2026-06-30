@@ -181,8 +181,8 @@ void expect_canonical_device_payloads(const std::array<unsigned, N> &codes,
     auto got = from_dev(dO, 8);                                                                    \
     for (int i = 0; i < 8; ++i)                                                                    \
       EXPECT_EQ(got[i], narrow_to_f32(f32_to_narrow(in[i], FMT) & 0xFFu, FMT)) << "elem " << i;    \
-    (void)hipFree(dIn);                                                                            \
-    (void)hipFree(dO);                                                                             \
+    static_cast<void>(hipFree(dIn));                                                               \
+    static_cast<void>(hipFree(dO));                                                                \
   }
 
 PK8_BYTES_GOLDEN(Fp8ToF32, amdgcn_cvt_scale_pk8_f32_fp8, kFp8E4M3, float)
@@ -212,7 +212,7 @@ PK8_BYTES_GOLDEN(Bf8ToBf16, amdgcn_cvt_scale_pk8_bf16_bf8, kFp8E5M2, __bf16)
     for (int i = 0; i < 8; ++i)                                                                    \
       EXPECT_EQ(got[i], narrow_to_f32(f32_to_narrow(in[i], kFp4E2M1) & 0xFu, kFp4E2M1))            \
           << "elem " << i;                                                                         \
-    (void)hipFree(dO);                                                                             \
+    static_cast<void>(hipFree(dO));                                                                \
   }
 
 PK8_NIB_GOLDEN(Fp4ToF32, amdgcn_cvt_scale_pk8_f32_fp4, float)
@@ -243,8 +243,8 @@ PK8_NIB_GOLDEN(Fp4ToBf16, amdgcn_cvt_scale_pk8_bf16_fp4, __bf16)
     auto got = from_dev(dO, 16);                                                                   \
     for (int i = 0; i < 16; ++i)                                                                   \
       EXPECT_EQ(got[i], narrow_to_f32(f32_to_narrow(in[i], FMT) & 0x3Fu, FMT)) << "elem " << i;    \
-    (void)hipFree(dIn);                                                                            \
-    (void)hipFree(dO);                                                                             \
+    static_cast<void>(hipFree(dIn));                                                               \
+    static_cast<void>(hipFree(dO));                                                                \
   }
 
 PK16_CODES_GOLDEN(Fp6ToF32, amdgcn_cvt_scale_pk16_f32_fp6, kFp6E2M3, float)
@@ -283,8 +283,8 @@ TEST(CvtScalePk8Unpack, Fp8ScaleMultiplies) {
     EXPECT_EQ(got[i], narrow_to_f32(f32_to_narrow(in[i], kFp8E4M3) & 0xFFu, kFp8E4M3) *
                           e8m0_decode(kE8M0_x2))
         << "elem " << i;
-  (void)hipFree(dIn);
-  (void)hipFree(dO);
+  static_cast<void>(hipFree(dIn));
+  static_cast<void>(hipFree(dO));
 }
 
 // ============================ FPSan mode ====================================
@@ -320,8 +320,8 @@ template <Semantics S> void run_fpsan_pk8_fp8_payload() {
     const auto want = static_cast<unsigned>(fpsan::cast<float>(src).fpsan_payload());
     EXPECT_EQ(got[i], want) << "elem " << i;
   }
-  (void)hipFree(dIn);
-  (void)hipFree(dO);
+  static_cast<void>(hipFree(dIn));
+  static_cast<void>(hipFree(dO));
 }
 
 TEST(CvtScalePk8Unpack, FpsanFp8Payload) { FPSAN_RUN_FPSAN_SEMANTICS(run_fpsan_pk8_fp8_payload); }
@@ -368,7 +368,7 @@ template <Semantics S> void run_fpsan_pk8_fp4_f32_canonical() {
   std::vector<unsigned> got(got_all.begin(), got_all.begin() + 8);
   std::vector<unsigned> got_sum(got_all.begin() + 8, got_all.end());
   expect_canonical_device_payloads<float, 4, S>(codes, got, got_sum, "gfx1250 pk8 fp4->f32");
-  (void)hipFree(dO);
+  static_cast<void>(hipFree(dO));
 }
 
 template <Semantics S> void run_fpsan_pk8_fp4_f16_canonical() {
@@ -383,7 +383,7 @@ template <Semantics S> void run_fpsan_pk8_fp4_f16_canonical() {
   std::vector<unsigned> got(got_all.begin(), got_all.begin() + 8);
   std::vector<unsigned> got_sum(got_all.begin() + 8, got_all.end());
   expect_canonical_device_payloads<_Float16, 4, S>(codes, got, got_sum, "gfx1250 pk8 fp4->f16");
-  (void)hipFree(dO);
+  static_cast<void>(hipFree(dO));
 }
 
 template <Semantics S> void run_fpsan_pk8_fp4_bf16_canonical() {
@@ -398,7 +398,7 @@ template <Semantics S> void run_fpsan_pk8_fp4_bf16_canonical() {
   std::vector<unsigned> got(got_all.begin(), got_all.begin() + 8);
   std::vector<unsigned> got_sum(got_all.begin() + 8, got_all.end());
   expect_canonical_device_payloads<__bf16, 4, S>(codes, got, got_sum, "gfx1250 pk8 fp4->bf16");
-  (void)hipFree(dO);
+  static_cast<void>(hipFree(dO));
 }
 
 TEST(CvtScalePk8Unpack, FpsanFp4ToF16CanonicalPayload) {
@@ -443,8 +443,8 @@ TEST(CvtScalePk8Unpack, FpsanFp4ToBf16CanonicalPayload) {
     std::vector<unsigned> got(got_all.begin(), got_all.begin() + 16);                              \
     std::vector<unsigned> got_sum(got_all.begin() + 16, got_all.end());                            \
     expect_canonical_device_payloads<DST, 6, S>(codes, got, got_sum, LABEL);                       \
-    (void)hipFree(dIn);                                                                            \
-    (void)hipFree(dO);                                                                             \
+    static_cast<void>(hipFree(dIn));                                                               \
+    static_cast<void>(hipFree(dO));                                                                \
   }                                                                                                \
   TEST(CvtScalePk16Unpack, CASE) { FPSAN_RUN_FPSAN_SEMANTICS(CASE##_run); }
 

@@ -65,10 +65,10 @@ TEST(MfmaF64_4x4x4, LayoutMatchesHardware) {
   HIP_CHECK(hipMemcpy(got.data(), dD, got.size() * sizeof(double), hipMemcpyDeviceToHost));
   for (std::size_t i = 0; i < got.size(); ++i)
     EXPECT_EQ(bits_of(got[i]), bits_of(ref[i])) << "elem " << i;
-  (void)hipFree(dA);
-  (void)hipFree(dB);
-  (void)hipFree(dC);
-  (void)hipFree(dD);
+  static_cast<void>(hipFree(dA));
+  static_cast<void>(hipFree(dB));
+  static_cast<void>(hipFree(dC));
+  static_cast<void>(hipFree(dD));
 }
 
 TEST(MfmaF64_4x4x4, FpsanMatchesScalarReference) {
@@ -97,10 +97,10 @@ TEST(MfmaF64_4x4x4, FpsanMatchesScalarReference) {
     HIP_CHECK(hipMemcpy(got.data(), dD, got.size() * sizeof(std::uint64_t), hipMemcpyDeviceToHost));
     for (std::size_t i = 0; i < got.size(); ++i)
       EXPECT_EQ(got[i], ref[i]) << "elem " << i;
-    (void)hipFree(dA);
-    (void)hipFree(dB);
-    (void)hipFree(dC);
-    (void)hipFree(dD);
+    static_cast<void>(hipFree(dA));
+    static_cast<void>(hipFree(dB));
+    static_cast<void>(hipFree(dC));
+    static_cast<void>(hipFree(dD));
   });
 }
 
@@ -127,10 +127,10 @@ TEST(MfmaF64_4x4x4_NEG5, LayoutMatchesHardware) {
   HIP_CHECK(hipMemcpy(got.data(), dD, got.size() * sizeof(double), hipMemcpyDeviceToHost));
   for (std::size_t i = 0; i < got.size(); ++i)
     EXPECT_EQ(bits_of(got[i]), bits_of(ref[i])) << "elem " << i;
-  (void)hipFree(dA);
-  (void)hipFree(dB);
-  (void)hipFree(dC);
-  (void)hipFree(dD);
+  static_cast<void>(hipFree(dA));
+  static_cast<void>(hipFree(dB));
+  static_cast<void>(hipFree(dC));
+  static_cast<void>(hipFree(dD));
 }
 
 TEST(MfmaF64_4x4x4_NEG5, FpsanMatchesScalarReference) {
@@ -160,9 +160,9 @@ TEST(MfmaF64_4x4x4_NEG5, FpsanMatchesScalarReference) {
     HIP_CHECK(hipMemcpy(got.data(), dD, got.size() * sizeof(std::uint64_t), hipMemcpyDeviceToHost));
     for (std::size_t i = 0; i < got.size(); ++i)
       EXPECT_EQ(got[i], ref[i]) << "elem " << i;
-    (void)hipFree(dA);
-    (void)hipFree(dB);
-    (void)hipFree(dC);
-    (void)hipFree(dD);
+    static_cast<void>(hipFree(dA));
+    static_cast<void>(hipFree(dB));
+    static_cast<void>(hipFree(dC));
+    static_cast<void>(hipFree(dD));
   });
 }

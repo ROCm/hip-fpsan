@@ -118,11 +118,11 @@ BF16_TRANS_KERNEL(amdgcn_tanh_bf16, tanh)
       for (int i = 0; i < N; ++i)                                                                  \
         EXPECT_EQ(pwrap[i], pdir[i]) << fpsan::semantics_name(S) << " lane " << i;                 \
     });                                                                                            \
-    (void)hipFree(dIn);                                                                            \
-    (void)hipFree(dDirect);                                                                        \
-    (void)hipFree(dWrap);                                                                          \
-    (void)hipFree(dPdir);                                                                          \
-    (void)hipFree(dPwrap);                                                                         \
+    static_cast<void>(hipFree(dIn));                                                               \
+    static_cast<void>(hipFree(dDirect));                                                           \
+    static_cast<void>(hipFree(dWrap));                                                             \
+    static_cast<void>(hipFree(dPdir));                                                             \
+    static_cast<void>(hipFree(dPwrap));                                                            \
   }
 
 BF16_TRANS_TEST(amdgcn_rcp_bf16)

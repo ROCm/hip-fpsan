@@ -36,13 +36,13 @@ TEST(SwmmacGfx12, F32_BF16_LayoutMatchesHardware) {
   HIP_CHECK(hipMemcpy(got.data(), dD, kSwM * kSwN * sizeof(float), hipMemcpyDeviceToHost));
   for (int t = 0; t < kSwM * kSwN; ++t)
     EXPECT_EQ(bits_of(got[t]), bits_of(ref[t])) << "at " << t;
-  (void)hipFree(dA);
-  (void)hipFree(dB);
-  (void)hipFree(dC);
-  (void)hipFree(dp0);
-  (void)hipFree(dp1);
-  (void)hipFree(dI);
-  (void)hipFree(dD);
+  static_cast<void>(hipFree(dA));
+  static_cast<void>(hipFree(dB));
+  static_cast<void>(hipFree(dC));
+  static_cast<void>(hipFree(dp0));
+  static_cast<void>(hipFree(dp1));
+  static_cast<void>(hipFree(dI));
+  static_cast<void>(hipFree(dD));
 }
 
 TEST(SwmmacGfx12, F32_BF16_FpsanMatchesScalarReference) {
@@ -64,12 +64,12 @@ TEST(SwmmacGfx12, F32_BF16_FpsanMatchesScalarReference) {
         hipMemcpy(got.data(), dD, kSwM * kSwN * sizeof(std::uint32_t), hipMemcpyDeviceToHost));
     for (int t = 0; t < kSwM * kSwN; ++t)
       EXPECT_EQ(static_cast<std::uint64_t>(got[t]), ref[t]) << "at " << t;
-    (void)hipFree(dD);
+    static_cast<void>(hipFree(dD));
   });
-  (void)hipFree(dA);
-  (void)hipFree(dB);
-  (void)hipFree(dC);
-  (void)hipFree(dp0);
-  (void)hipFree(dp1);
-  (void)hipFree(dI);
+  static_cast<void>(hipFree(dA));
+  static_cast<void>(hipFree(dB));
+  static_cast<void>(hipFree(dC));
+  static_cast<void>(hipFree(dp0));
+  static_cast<void>(hipFree(dp1));
+  static_cast<void>(hipFree(dI));
 }

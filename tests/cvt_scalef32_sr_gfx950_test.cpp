@@ -96,7 +96,7 @@ template <> struct F16Fp8<fp8_e5m2> {
 // OCP decode widened to f16, lane1 preserved from old (=222).
 template <class FP8> __global__ void k_a_float_all(const int *src, float *lane0, float *lane1) {
   int l = threadIdx.x;
-  fpsan::v2h_native ov = {(_Float16)111.0f, (_Float16)222.0f};
+  fpsan::v2h_native ov = {static_cast<_Float16>(111.0f), static_cast<_Float16>(222.0f)};
   auto r = F16Fp8<FP8>::template call<0, false, Semantics::Native>(
       Value<fpsan::v2h_native, Semantics::Native, kCC>(ov), src[l],
       Value<float, Semantics::Native, kCC>{1.0f});
@@ -126,9 +126,9 @@ template <class FP8> void run_a_float_all(const fpsan::detail::FpFormat &fmt, co
       EXPECT_EQ(g0[b], ref) << name << " byte 0x" << std::hex << b;
     EXPECT_EQ(g1[b], 222.0f) << name << " preserve byte 0x" << std::hex << b;
   }
-  (void)hipFree(dS);
-  (void)hipFree(d0);
-  (void)hipFree(d1);
+  static_cast<void>(hipFree(dS));
+  static_cast<void>(hipFree(d0));
+  static_cast<void>(hipFree(d1));
 }
 
 TEST(CvtScalef32Sr, A_FloatUnpackAll_Fp8) { run_a_float_all<fp8_e4m3>(kFp8E4M3, "fp8"); }
@@ -138,7 +138,7 @@ TEST(CvtScalef32Sr, A_FloatUnpackAll_Bf8) { run_a_float_all<fp8_e5m2>(kFp8E5M2, 
 // 4 distinct bytes; for each (Byte, Hi) the chosen half = decode(byte)*scale,
 // the other half is preserved.
 template <class FP8> __global__ void k_a_float_sel(int src, float scale, float *out) {
-  fpsan::v2h_native ov = {(_Float16)111.0f, (_Float16)222.0f};
+  fpsan::v2h_native ov = {static_cast<_Float16>(111.0f), static_cast<_Float16>(222.0f)};
   using VV = Value<fpsan::v2h_native, Semantics::Native, kCC>;
   using VS = Value<float, Semantics::Native, kCC>;
   auto w = [&](int idx, auto r) {
@@ -186,7 +186,7 @@ template <class FP8> void run_a_float_sel(const fpsan::detail::FpFormat &fmt, co
   // (Byte=3,Hi=false)
   EXPECT_EQ(g[8], dec(3)) << name;
   EXPECT_EQ(g[9], 222.0f) << name;
-  (void)hipFree(dO);
+  static_cast<void>(hipFree(dO));
 }
 
 TEST(CvtScalef32Sr, A_FloatSelLoHiScale_Fp8) { run_a_float_sel<fp8_e4m3>(kFp8E4M3, "fp8"); }
@@ -234,7 +234,7 @@ template <class FP8> void run_a_fpsan() {
     EXPECT_EQ(g[1], 0x5678u); // lo: lane1 preserved
     EXPECT_EQ(g[2], 0x1234u); // hi: lane0 preserved
     EXPECT_EQ(g[3], ref_hi);  // hi: lane1 written
-    (void)hipFree(dO);
+    static_cast<void>(hipFree(dO));
   });
 }
 
@@ -318,7 +318,7 @@ template <class FP8, class SrcElem> void run_b(const fpsan::detail::FpFormat &fm
           (static_cast<unsigned>(old) & ~mask) | (static_cast<unsigned>(byte) << (8 * sel));
       EXPECT_EQ(static_cast<unsigned>(g[l]), expect) << "Float lane " << l;
     }
-    (void)hipFree(dO);
+    static_cast<void>(hipFree(dO));
   }
   // ---- FPSan: byte == cast<FP8>(cast<float>(v)/scale) payload; seed opaque.
   fpsan_test::for_each_fpsan_semantics([&](auto sem) {
@@ -341,9 +341,9 @@ template <class FP8, class SrcElem> void run_b(const fpsan::detail::FpFormat &fm
           (static_cast<unsigned>(old) & ~mask) | (static_cast<unsigned>(byte) << (8 * sel));
       EXPECT_EQ(g[l], expect) << "FPSan lane " << l;
     }
-    (void)hipFree(dO);
+    static_cast<void>(hipFree(dO));
   });
-  (void)hipFree(dV);
+  static_cast<void>(hipFree(dV));
 }
 
 TEST(CvtScalef32Sr, B_Fp8_F32) { run_b<fp8_e4m3, float>(kFp8E4M3); }
@@ -433,7 +433,7 @@ template <class SrcElem, class VEC, bool IsFp6> void run_c(const fpsan::detail::
   in[9] = std::numeric_limits<float>::infinity();
   in[23] = std::numeric_limits<float>::quiet_NaN();
   in[27] = -std::numeric_limits<float>::infinity();
-  (void)hipFree(dIn);
+  static_cast<void>(hipFree(dIn));
   dIn = to_dev(in);
   // ---- FPSan: contiguous stream of canonical subbyte narrow codes; seed opaque.
   fpsan_test::for_each_fpsan_semantics([&](auto sem) {
@@ -454,8 +454,8 @@ template <class SrcElem, class VEC, bool IsFp6> void run_c(const fpsan::detail::
     for (int i = 0; i < 6; ++i)
       EXPECT_EQ(g[i], expect[i]) << "FPSan word " << i;
   });
-  (void)hipFree(dIn);
-  (void)hipFree(dO);
+  static_cast<void>(hipFree(dIn));
+  static_cast<void>(hipFree(dO));
 }
 
 TEST(CvtScalef32Sr, C_Fp6_F16) { run_c<_Float16, fpsan::v32h_native, true>(kFp6E2M3); }
@@ -558,7 +558,7 @@ template <class SrcElem, class VEC> void run_d() {
       EXPECT_EQ(g, na | (nb << 4)) << "FPSan non-finite source";
     });
   }
-  (void)hipFree(dO);
+  static_cast<void>(hipFree(dO));
 }
 
 TEST(CvtScalef32Sr, D_Fp4_F16) { run_d<_Float16, fpsan::v2h_native>(); }

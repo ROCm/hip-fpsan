@@ -255,10 +255,10 @@ template <class Traits> void run_dense_vec_layout() {
       hipMemcpy(got.data(), dD, got.size() * sizeof(typename H::CElem), hipMemcpyDeviceToHost));
   for (std::size_t i = 0; i < got.size(); ++i)
     EXPECT_EQ(bits_of(got[i]), bits_of(ref[i])) << "elem " << i;
-  (void)hipFree(dA);
-  (void)hipFree(dB);
-  (void)hipFree(dC);
-  (void)hipFree(dD);
+  static_cast<void>(hipFree(dA));
+  static_cast<void>(hipFree(dB));
+  static_cast<void>(hipFree(dC));
+  static_cast<void>(hipFree(dD));
 }
 
 template <class Traits> void run_dense_vec_fpsan() {
@@ -295,10 +295,10 @@ template <class Traits> void run_dense_vec_fpsan() {
         hipMemcpy(got.data(), dD, got.size() * sizeof(typename H::CBits), hipMemcpyDeviceToHost));
     for (std::size_t i = 0; i < got.size(); ++i)
       EXPECT_EQ(got[i], ref[i]) << "elem " << i;
-    (void)hipFree(dA);
-    (void)hipFree(dB);
-    (void)hipFree(dC);
-    (void)hipFree(dD);
+    static_cast<void>(hipFree(dA));
+    static_cast<void>(hipFree(dB));
+    static_cast<void>(hipFree(dC));
+    static_cast<void>(hipFree(dD));
   });
 }
 
@@ -417,10 +417,10 @@ template <class Traits> void run_dense_f32_layout() {
   HIP_CHECK(hipMemcpy(got.data(), dD, got.size() * sizeof(float), hipMemcpyDeviceToHost));
   for (std::size_t i = 0; i < got.size(); ++i)
     EXPECT_EQ(bits_of(got[i]), bits_of(ref[i])) << "elem " << i;
-  (void)hipFree(dA);
-  (void)hipFree(dB);
-  (void)hipFree(dC);
-  (void)hipFree(dD);
+  static_cast<void>(hipFree(dA));
+  static_cast<void>(hipFree(dB));
+  static_cast<void>(hipFree(dC));
+  static_cast<void>(hipFree(dD));
 }
 
 template <class Traits> void run_dense_f32_fpsan() {
@@ -449,10 +449,10 @@ template <class Traits> void run_dense_f32_fpsan() {
     HIP_CHECK(hipMemcpy(got.data(), dD, got.size() * sizeof(std::uint32_t), hipMemcpyDeviceToHost));
     for (std::size_t i = 0; i < got.size(); ++i)
       EXPECT_EQ(got[i], ref[i]) << "elem " << i;
-    (void)hipFree(dA);
-    (void)hipFree(dB);
-    (void)hipFree(dC);
-    (void)hipFree(dD);
+    static_cast<void>(hipFree(dA));
+    static_cast<void>(hipFree(dB));
+    static_cast<void>(hipFree(dC));
+    static_cast<void>(hipFree(dD));
   });
 }
 

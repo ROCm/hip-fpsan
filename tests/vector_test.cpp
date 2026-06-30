@@ -108,8 +108,8 @@ TEST(Vector, ComparisonMasks) {
   auto lt = (Vn(x) < Vn(y)); // native float order
   auto eq = (Vn(x) == Vn(y));
   for (int i = 0; i < 4; ++i) {
-    EXPECT_EQ((bool)lt[i], x[i] < y[i]);
-    EXPECT_EQ((bool)eq[i], x[i] == y[i]);
+    EXPECT_EQ(static_cast<bool>(lt[i]), x[i] < y[i]);
+    EXPECT_EQ(static_cast<bool>(eq[i]), x[i] == y[i]);
   }
   // FPSan mode: == is exact payload equality, lane-wise.
   fpsan_test::for_each_fpsan_semantics([&](auto sem) {
@@ -117,7 +117,7 @@ TEST(Vector, ComparisonMasks) {
     using Vf = Value<f4, S, Conversions::Explicit>;
     auto feq = (Vf(x) == Vf(x));
     for (int i = 0; i < 4; ++i)
-      EXPECT_TRUE((bool)feq[i]);
+      EXPECT_TRUE(static_cast<bool>(feq[i]));
   });
 }
 

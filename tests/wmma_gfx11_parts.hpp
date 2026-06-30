@@ -292,10 +292,10 @@ template <class Traits> void run_layout_matches_hardware() {
     EXPECT_NEAR(static_cast<float>(got[i]), static_cast<float>(ref[i]), layout_tolerance<CE>())
         << "layout mismatch at " << (i / N) << "," << (i % N) << " got_bits=" << bits_of(got[i])
         << " ref_bits=" << bits_of(ref[i]);
-  (void)hipFree(dA);
-  (void)hipFree(dB);
-  (void)hipFree(dC);
-  (void)hipFree(dD);
+  static_cast<void>(hipFree(dA));
+  static_cast<void>(hipFree(dB));
+  static_cast<void>(hipFree(dC));
+  static_cast<void>(hipFree(dD));
 }
 
 template <class Traits> void run_fpsan_matches_scalar_reference() {
@@ -332,11 +332,11 @@ template <class Traits> void run_fpsan_matches_scalar_reference() {
     HIP_CHECK(hipMemcpy(got.data(), dD, M * N * sizeof(CBits), hipMemcpyDeviceToHost));
     for (int i = 0; i < M * N; ++i)
       EXPECT_EQ(got[i], ref[i]) << "payload mismatch at " << (i / N) << "," << (i % N);
-    (void)hipFree(dD);
+    static_cast<void>(hipFree(dD));
   });
-  (void)hipFree(dA);
-  (void)hipFree(dB);
-  (void)hipFree(dC);
+  static_cast<void>(hipFree(dA));
+  static_cast<void>(hipFree(dB));
+  static_cast<void>(hipFree(dC));
 }
 
 template <class Traits> void run_tied_preserves_unselected() {
@@ -354,7 +354,7 @@ template <class Traits> void run_tied_preserves_unselected() {
   HIP_CHECK(hipDeviceSynchronize());
   std::vector<CE> got_float(count);
   HIP_CHECK(hipMemcpy(got_float.data(), dFloat, count * sizeof(CE), hipMemcpyDeviceToHost));
-  (void)hipFree(dFloat);
+  static_cast<void>(hipFree(dFloat));
 
   for (int lane = 0; lane < Traits::wave_size; ++lane)
     for (int r = 0; r < H::output_regs; ++r) {
@@ -373,7 +373,7 @@ template <class Traits> void run_tied_preserves_unselected() {
     HIP_CHECK(hipDeviceSynchronize());
     std::vector<CBits> got_fpsan(count);
     HIP_CHECK(hipMemcpy(got_fpsan.data(), dFpsan, count * sizeof(CBits), hipMemcpyDeviceToHost));
-    (void)hipFree(dFpsan);
+    static_cast<void>(hipFree(dFpsan));
 
     for (int lane = 0; lane < Traits::wave_size; ++lane)
       for (int r = 0; r < H::output_regs; ++r) {

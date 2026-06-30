@@ -72,7 +72,7 @@ using v4bf_native = __bf16 __attribute__((ext_vector_type(4)));
   FPSAN_DEVICE Value<VEC, S, C> NAME(const Value<FT, S, C> *lds) {                                 \
     using Bits = typename Value<VEC, S, C>::bits_type;                                             \
     Bits bits{};                                                                                   \
-    (void)lds;                                                                                     \
+    static_cast<void>(lds);                                                                        \
     FPSAN_DS_DEVICE_ONLY({                                                                         \
       using v4i16 = short __attribute__((ext_vector_type(4)));                                     \
       auto raw = __builtin_amdgcn_ds_read_tr16_b64_v4i16((v4i16 FPSAN_DS_LDS *)(lds));             \
@@ -97,7 +97,7 @@ FPSAN_DEFINE_DS_READ_TR16(amdgcn_ds_read_tr16_b64_bf16, __bf16, v4bf_native)
   FPSAN_DEVICE Value<VEC, S, C> NAME(const Value<FT, S, C> *lds) {                                 \
     using Bits = typename Value<VEC, S, C>::bits_type;                                             \
     Bits bits{};                                                                                   \
-    (void)lds;                                                                                     \
+    static_cast<void>(lds);                                                                        \
     FPSAN_DS_DEVICE_ONLY({                                                                         \
       auto raw = BUILTIN((RAWVEC FPSAN_DS_LDS *)(lds));                                            \
       bits = __builtin_bit_cast(Bits, raw);                                                        \
@@ -123,7 +123,7 @@ FPSAN_DEFINE_DS_LOAD_TR16_B128(amdgcn_ds_load_tr16_b128_bf16, __bf16, v8bf_nativ
   FPSAN_DEVICE Value<FRAG, S, C> NAME(const Value<detail::vector_element_t<FRAG>, S, C> *lds) {    \
     using Bits = typename Value<FRAG, S, C>::bits_type;                                            \
     Bits bits{};                                                                                   \
-    (void)lds;                                                                                     \
+    static_cast<void>(lds);                                                                        \
     FPSAN_DS_DEVICE_ONLY({                                                                         \
       using v2i32 = int __attribute__((ext_vector_type(2)));                                       \
       auto raw = __builtin_amdgcn_ds_read_tr8_b64_v2i32((v2i32 FPSAN_DS_LDS *)(lds));              \
@@ -148,7 +148,7 @@ FPSAN_DEFINE_DS_READ_TR8(amdgcn_ds_read_tr8_b64_bf8, v8e5m2_native)
   FPSAN_DEVICE Value<FRAG, S, C> NAME(const Value<detail::vector_element_t<FRAG>, S, C> *lds) {    \
     using Bits = typename Value<FRAG, S, C>::bits_type;                                            \
     Bits bits{};                                                                                   \
-    (void)lds;                                                                                     \
+    static_cast<void>(lds);                                                                        \
     FPSAN_DS_DEVICE_ONLY({                                                                         \
       using v2i32 = int __attribute__((ext_vector_type(2)));                                       \
       auto raw = __builtin_amdgcn_ds_load_tr8_b64_v2i32((v2i32 FPSAN_DS_LDS *)(lds));              \
@@ -182,7 +182,7 @@ using v3u32_native = unsigned __attribute__((ext_vector_type(3)));
 template <Semantics S, Conversions C>
 FPSAN_DEVICE v2u32_native amdgcn_ds_read_tr4_b64(const std::uint32_t *lds) {
   v2u32_native bits{};
-  (void)lds;
+  static_cast<void>(lds);
   FPSAN_DS_DEVICE_ONLY({
     using v2i32 = int __attribute__((ext_vector_type(2)));
     auto raw = __builtin_amdgcn_ds_read_tr4_b64_v2i32((v2i32 FPSAN_DS_LDS *)(lds));
@@ -198,7 +198,7 @@ FPSAN_DEVICE v2u32_native amdgcn_ds_read_tr4_b64(const std::uint32_t *lds) {
 template <Semantics S, Conversions C>
 FPSAN_DEVICE v3u32_native amdgcn_ds_read_tr6_b96(const std::uint32_t *lds) {
   v3u32_native bits{};
-  (void)lds;
+  static_cast<void>(lds);
   FPSAN_DS_DEVICE_ONLY({
     using v3i32 = int __attribute__((ext_vector_type(3)));
     auto raw = __builtin_amdgcn_ds_read_tr6_b96_v3i32((v3i32 FPSAN_DS_LDS *)(lds));
@@ -219,7 +219,7 @@ FPSAN_DEVICE v3u32_native amdgcn_ds_read_tr6_b96(const std::uint32_t *lds) {
 template <Semantics S, Conversions C>
 FPSAN_DEVICE v2u32_native amdgcn_ds_load_tr4_b64(const std::uint32_t *lds) {
   v2u32_native bits{};
-  (void)lds;
+  static_cast<void>(lds);
   FPSAN_DS_DEVICE_ONLY({
     using v2i32 = int __attribute__((ext_vector_type(2)));
     auto raw = __builtin_amdgcn_ds_load_tr4_b64_v2i32((v2i32 FPSAN_DS_LDS *)(lds));
@@ -235,7 +235,7 @@ FPSAN_DEVICE v2u32_native amdgcn_ds_load_tr4_b64(const std::uint32_t *lds) {
 template <Semantics S, Conversions C>
 FPSAN_DEVICE v3u32_native amdgcn_ds_load_tr6_b96(const std::uint32_t *lds) {
   v3u32_native bits{};
-  (void)lds;
+  static_cast<void>(lds);
   FPSAN_DS_DEVICE_ONLY({
     using v3i32 = int __attribute__((ext_vector_type(3)));
     auto raw = __builtin_amdgcn_ds_load_tr6_b96_v3i32((v3i32 FPSAN_DS_LDS *)(lds));

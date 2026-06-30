@@ -250,11 +250,11 @@ template <class Traits> void run_layout_matches_hardware() {
     EXPECT_EQ(bits_of(ours[i]), bits_of(ref[i]))
         << "dataflow mismatch at " << (i / N) << "," << (i % N);
   }
-  (void)hipFree(dA);
-  (void)hipFree(dB);
-  (void)hipFree(dC);
-  (void)hipFree(dHw);
-  (void)hipFree(dOurs);
+  static_cast<void>(hipFree(dA));
+  static_cast<void>(hipFree(dB));
+  static_cast<void>(hipFree(dC));
+  static_cast<void>(hipFree(dHw));
+  static_cast<void>(hipFree(dOurs));
 }
 
 // (2) Payload test: the shipped FPSan path vs a host scalar FPSan reference, in
@@ -292,10 +292,10 @@ template <class Traits, Semantics S> void run_fpsan_matches_scalar_reference() {
   HIP_CHECK(hipMemcpy(got.data(), dD, M * N * sizeof(CBits), hipMemcpyDeviceToHost));
   for (int i = 0; i < M * N; ++i)
     EXPECT_EQ(got[i], ref[i]) << "payload mismatch at " << (i / N) << "," << (i % N);
-  (void)hipFree(dA);
-  (void)hipFree(dB);
-  (void)hipFree(dC);
-  (void)hipFree(dD);
+  static_cast<void>(hipFree(dA));
+  static_cast<void>(hipFree(dB));
+  static_cast<void>(hipFree(dC));
+  static_cast<void>(hipFree(dD));
 }
 
 // Run the payload test for EVERY FPSan-family semantics (Triton + all algebraic

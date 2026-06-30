@@ -229,8 +229,8 @@ template <int M, int N, int K, int B, int InBits, class CElem, Semantics S, Conv
           class AFrag, class BFrag, class CFrag, class ExtractA, class ExtractB>
 FPSAN_DEVICE CFrag mfma_software(AFrag a, BFrag b, CFrag c, ExtractA ea, ExtractB eb, int cbsz,
                                  int abid, int blgp) {
-  (void)a;
-  (void)b;
+  static_cast<void>(a);
+  static_cast<void>(b);
   using Acc = Value<CElem, S, C>;
   const int lane = wave_lane_full();
   // Per-lane register count for the output fragment:
@@ -1024,7 +1024,7 @@ FPSAN_DEVICE Value<v4f_native, S, Cv>
 amdgcn_mfma_scale_f32_16x16x128_f8f6f4(Value<AFrag, S, Cv> a, Value<BFrag, S, Cv> b,
                                        Value<v4f_native, S, Cv> c, int scale_a, int scale_b) {
   if constexpr (S == Semantics::Native) {
-    (void)ABID; // scaled MFMA has no ABID operand; kept only for API symmetry.
+    static_cast<void>(ABID); // scaled MFMA has no ABID operand; kept only for API symmetry.
     auto d = __builtin_amdgcn_mfma_scale_f32_16x16x128_f8f6f4(
         __builtin_bit_cast(v8i32_native, a.to_float()),
         __builtin_bit_cast(v8i32_native, b.to_float()), c.to_float(), CBSZ, BLGP, ScaleAOp, scale_a,
@@ -1049,7 +1049,7 @@ FPSAN_DEVICE Value<v16f_native, S, Cv>
 amdgcn_mfma_scale_f32_32x32x64_f8f6f4(Value<AFrag, S, Cv> a, Value<BFrag, S, Cv> b,
                                       Value<v16f_native, S, Cv> c, int scale_a, int scale_b) {
   if constexpr (S == Semantics::Native) {
-    (void)ABID; // scaled MFMA has no ABID operand; kept only for API symmetry.
+    static_cast<void>(ABID); // scaled MFMA has no ABID operand; kept only for API symmetry.
     auto d = __builtin_amdgcn_mfma_scale_f32_32x32x64_f8f6f4(
         __builtin_bit_cast(v8i32_native, a.to_float()),
         __builtin_bit_cast(v8i32_native, b.to_float()), c.to_float(), CBSZ, BLGP, ScaleAOp, scale_a,

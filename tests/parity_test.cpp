@@ -109,10 +109,10 @@ void check_device_matches_host(const std::vector<FT> &a, const std::vector<FT> &
     }
   }
 
-  (void)hipFree(da);
-  (void)hipFree(db);
-  (void)hipFree(dc);
-  (void)hipFree(dout);
+  static_cast<void>(hipFree(da));
+  static_cast<void>(hipFree(db));
+  static_cast<void>(hipFree(dc));
+  static_cast<void>(hipFree(dout));
 }
 #endif // __HIP__
 

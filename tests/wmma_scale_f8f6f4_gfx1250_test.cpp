@@ -93,7 +93,7 @@ TEST(WmmaScaleF8f6f4_128, LayoutMatchesHardware) {
   if (!have_device())
     GTEST_SKIP() << "no HIP device";
   std::mt19937 rng = fpsan_test::make_rng();
-  std::uniform_int_distribution<int> pick(0, (int)(sizeof(kGrid) / sizeof(float)) - 1);
+  std::uniform_int_distribution<int> pick(0, static_cast<int>(sizeof(kGrid) / sizeof(float)) - 1);
   std::uniform_int_distribution<int> pexp(126, 129); // E8M0 exps: 2^-1..2^2
   std::vector<float> A(M * K), B(K * N), C(M * N);
   for (auto &x : A)
@@ -167,12 +167,12 @@ TEST(WmmaScaleF8f6f4_128, LayoutMatchesHardware) {
       ++mism;
     }
   EXPECT_EQ(mism, 0) << mism << " / " << (M * N) << " mismatched";
-  (void)hipFree(dA);
-  (void)hipFree(dB);
-  (void)hipFree(dC);
-  (void)hipFree(dSA);
-  (void)hipFree(dSB);
-  (void)hipFree(dD);
+  static_cast<void>(hipFree(dA));
+  static_cast<void>(hipFree(dB));
+  static_cast<void>(hipFree(dC));
+  static_cast<void>(hipFree(dSA));
+  static_cast<void>(hipFree(dSB));
+  static_cast<void>(hipFree(dD));
 }
 
 // ===================== Sub-byte block-scaled wrapper =====================
@@ -227,7 +227,7 @@ static int gen_scale_byte(std::mt19937 &rng, int sfmt) {
   if (sfmt == 2) {
     const float sv[] = {0.5f, 1.0f, 1.5f, 2.0f, 3.0f, 4.0f};
     std::uniform_int_distribution<int> ps(0, 5);
-    return (int)(f32_to_narrow(sv[ps(rng)], kFp8E4M3) & 0xFF);
+    return static_cast<int>(f32_to_narrow(sv[ps(rng)], kFp8E4M3) & 0xFF);
   }
   std::uniform_int_distribution<int> pexp(126, 129);
   return pexp(rng);
@@ -303,7 +303,7 @@ static void run_sub_scale(const char *tag) {
   if (!have_device())
     GTEST_SKIP() << "no HIP device";
   std::mt19937 rng = fpsan_test::make_rng();
-  std::uniform_int_distribution<int> pick(0, (int)(sizeof(kGrid) / sizeof(float)) - 1);
+  std::uniform_int_distribution<int> pick(0, static_cast<int>(sizeof(kGrid) / sizeof(float)) - 1);
   std::vector<float> A(M * K), B(K * N), C(M * N);
   for (auto &x : A)
     x = kGrid[pick(rng)];
@@ -387,13 +387,13 @@ static void run_sub_scale(const char *tag) {
   }
   EXPECT_EQ(nf, 0) << nf << " float mismatches";
   EXPECT_EQ(np, 0) << np << " payload mismatches";
-  (void)hipFree(dA);
-  (void)hipFree(dB);
-  (void)hipFree(dC);
-  (void)hipFree(dSA);
-  (void)hipFree(dSB);
-  (void)hipFree(dDf);
-  (void)hipFree(dDp);
+  static_cast<void>(hipFree(dA));
+  static_cast<void>(hipFree(dB));
+  static_cast<void>(hipFree(dC));
+  static_cast<void>(hipFree(dSA));
+  static_cast<void>(hipFree(dSB));
+  static_cast<void>(hipFree(dDf));
+  static_cast<void>(hipFree(dDp));
 }
 
 template <int AFMT, int BFMT, int ASFMT = 0, int BSFMT = 0>
@@ -483,15 +483,15 @@ template <int AFMT> static void run_probe(const char *tag) {
       if (d00 == std::ldexp(1.f, b + 1))
         byte = b;
     kbyte[k0] = byte;
-    (void)hipFree(dB1);
+    static_cast<void>(hipFree(dB1));
   }
   printf("logical k -> A-scale byte (%s):\n", tag);
   for (int k0 = 0; k0 < K; ++k0)
     printf("k=%3d byte=%d%s", k0, kbyte[k0], (k0 % 8 == 7) ? "\n" : "  ");
-  (void)hipFree(dA);
-  (void)hipFree(dD);
-  (void)hipFree(dSA);
-  (void)hipFree(dSB);
+  static_cast<void>(hipFree(dA));
+  static_cast<void>(hipFree(dD));
+  static_cast<void>(hipFree(dSA));
+  static_cast<void>(hipFree(dSB));
 }
 
 TEST(WmmaScaleF8f6f4_128, DISABLED_ProbeScaleLayoutFp4) { run_probe<4>("fp4"); }
@@ -538,7 +538,7 @@ template <int AFMT> static void run_probe16(const char *tag) {
   for (int L = 0; L < 32; ++L) {
     unsigned long long word = 0;
     for (int b = 0; b < 8; ++b)
-      word |= (unsigned long long)(128 + b) << (8 * b);
+      word |= static_cast<unsigned long long>(128 + b) << (8 * b);
     SA[L] = word;
   }
   unsigned long long *dSA = to_dev(SA);
@@ -560,15 +560,15 @@ template <int AFMT> static void run_probe16(const char *tag) {
       if (d00 == std::ldexp(1.f, b + 1))
         byte = b;
     kbyte[k0] = byte;
-    (void)hipFree(dB1);
+    static_cast<void>(hipFree(dB1));
   }
   printf("logical k -> A-scale16 byte (%s):\n", tag);
   for (int k0 = 0; k0 < K; ++k0)
     printf("k=%3d byte=%d%s", k0, kbyte[k0], (k0 % 8 == 7) ? "\n" : "  ");
-  (void)hipFree(dA);
-  (void)hipFree(dD);
-  (void)hipFree(dSA);
-  (void)hipFree(dSB);
+  static_cast<void>(hipFree(dA));
+  static_cast<void>(hipFree(dD));
+  static_cast<void>(hipFree(dSA));
+  static_cast<void>(hipFree(dSB));
 }
 
 TEST(WmmaScaleF8f6f4_128, DISABLED_ProbeScale16LayoutFp4) { run_probe16<4>("fp4"); }
@@ -641,7 +641,7 @@ template <Semantics S, int AFMT, int BFMT> static void run_sub_scale16(const cha
   if (!have_device())
     GTEST_SKIP() << "no HIP device";
   std::mt19937 rng = fpsan_test::make_rng();
-  std::uniform_int_distribution<int> pick(0, (int)(sizeof(kGrid) / sizeof(float)) - 1);
+  std::uniform_int_distribution<int> pick(0, static_cast<int>(sizeof(kGrid) / sizeof(float)) - 1);
   std::uniform_int_distribution<int> pexp(126, 129);
   std::vector<float> A(M * K), B(K * N), C(M * N);
   for (auto &x : A)
@@ -661,8 +661,8 @@ template <Semantics S, int AFMT, int BFMT> static void run_sub_scale16(const cha
   for (int r = 0; r < 16; ++r) {
     unsigned long long wa = 0, wb = 0;
     for (int b = 0; b < NB16; ++b) {
-      wa |= (unsigned long long)(eA[r * NB16 + b] & 0xFF) << (8 * b);
-      wb |= (unsigned long long)(eB[r * NB16 + b] & 0xFF) << (8 * b);
+      wa |= static_cast<unsigned long long>(eA[r * NB16 + b] & 0xFF) << (8 * b);
+      wb |= static_cast<unsigned long long>(eB[r * NB16 + b] & 0xFF) << (8 * b);
     }
     SA[r] = SA[r + 16] = wa;
     SB[r] = SB[r + 16] = wb;
@@ -737,13 +737,13 @@ template <Semantics S, int AFMT, int BFMT> static void run_sub_scale16(const cha
   }
   EXPECT_EQ(nf, 0) << nf << " float mismatches";
   EXPECT_EQ(np, 0) << np << " payload mismatches";
-  (void)hipFree(dA);
-  (void)hipFree(dB);
-  (void)hipFree(dC);
-  (void)hipFree(dSA);
-  (void)hipFree(dSB);
-  (void)hipFree(dDf);
-  (void)hipFree(dDp);
+  static_cast<void>(hipFree(dA));
+  static_cast<void>(hipFree(dB));
+  static_cast<void>(hipFree(dC));
+  static_cast<void>(hipFree(dSA));
+  static_cast<void>(hipFree(dSB));
+  static_cast<void>(hipFree(dDf));
+  static_cast<void>(hipFree(dDp));
 }
 
 template <int AFMT, int BFMT> static void run_sub_scale16_all(const char *tag) {
@@ -830,7 +830,7 @@ static void run_mixed_scale(const char *tag) {
   if (!have_device())
     GTEST_SKIP() << "no HIP device";
   std::mt19937 rng = fpsan_test::make_rng();
-  std::uniform_int_distribution<int> pick(0, (int)(sizeof(kGrid) / sizeof(float)) - 1);
+  std::uniform_int_distribution<int> pick(0, static_cast<int>(sizeof(kGrid) / sizeof(float)) - 1);
   std::vector<float> A(M * K), B(K * N), C(M * N);
   for (auto &x : A)
     x = kGrid[pick(rng)];
@@ -905,13 +905,13 @@ static void run_mixed_scale(const char *tag) {
   }
   EXPECT_EQ(nf, 0) << nf << " float mismatches";
   EXPECT_EQ(np, 0) << np << " payload mismatches";
-  (void)hipFree(dA);
-  (void)hipFree(dB);
-  (void)hipFree(dC);
-  (void)hipFree(dSA);
-  (void)hipFree(dSB);
-  (void)hipFree(dDf);
-  (void)hipFree(dDp);
+  static_cast<void>(hipFree(dA));
+  static_cast<void>(hipFree(dB));
+  static_cast<void>(hipFree(dC));
+  static_cast<void>(hipFree(dSA));
+  static_cast<void>(hipFree(dSB));
+  static_cast<void>(hipFree(dDf));
+  static_cast<void>(hipFree(dDp));
 }
 
 template <int AFMT, int BFMT, int ASFMT = 0, int BSFMT = 0>
@@ -979,7 +979,7 @@ template <Semantics S, int AFMT, int BFMT> static void run_mixed_scale16(const c
   if (!have_device())
     GTEST_SKIP() << "no HIP device";
   std::mt19937 rng = fpsan_test::make_rng();
-  std::uniform_int_distribution<int> pick(0, (int)(sizeof(kGrid) / sizeof(float)) - 1);
+  std::uniform_int_distribution<int> pick(0, static_cast<int>(sizeof(kGrid) / sizeof(float)) - 1);
   std::uniform_int_distribution<int> pexp(126, 129);
   std::vector<float> A(M * K), B(K * N), C(M * N);
   for (auto &x : A)
@@ -998,8 +998,8 @@ template <Semantics S, int AFMT, int BFMT> static void run_mixed_scale16(const c
   for (int r = 0; r < 16; ++r) {
     unsigned long long wa = 0, wb = 0;
     for (int b = 0; b < NB16; ++b) {
-      wa |= (unsigned long long)(eA[r * NB16 + b] & 0xFF) << (8 * b);
-      wb |= (unsigned long long)(eB[r * NB16 + b] & 0xFF) << (8 * b);
+      wa |= static_cast<unsigned long long>(eA[r * NB16 + b] & 0xFF) << (8 * b);
+      wb |= static_cast<unsigned long long>(eB[r * NB16 + b] & 0xFF) << (8 * b);
     }
     SA[r] = SA[r + 16] = wa;
     SB[r] = SB[r + 16] = wb;
@@ -1068,13 +1068,13 @@ template <Semantics S, int AFMT, int BFMT> static void run_mixed_scale16(const c
   }
   EXPECT_EQ(nf, 0) << nf << " float mismatches";
   EXPECT_EQ(np, 0) << np << " payload mismatches";
-  (void)hipFree(dA);
-  (void)hipFree(dB);
-  (void)hipFree(dC);
-  (void)hipFree(dSA);
-  (void)hipFree(dSB);
-  (void)hipFree(dDf);
-  (void)hipFree(dDp);
+  static_cast<void>(hipFree(dA));
+  static_cast<void>(hipFree(dB));
+  static_cast<void>(hipFree(dC));
+  static_cast<void>(hipFree(dSA));
+  static_cast<void>(hipFree(dSB));
+  static_cast<void>(hipFree(dDf));
+  static_cast<void>(hipFree(dDp));
 }
 
 template <int AFMT, int BFMT> static void run_mixed_scale16_all(const char *tag) {

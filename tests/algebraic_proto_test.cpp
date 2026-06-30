@@ -28,7 +28,7 @@ template <class FT> static u64 raw_bits(FT v) {
   using B = typename fp_traits<FT>::bits_type;
   B b{};
   std::memcpy(&b, &v, sizeof b);
-  return (u64)b;
+  return static_cast<u64>(b);
 }
 template <class FT> static u64 emb(const AlgConfig &c, FT v) { return alg_embed1(c, raw_bits(v)); }
 
@@ -38,29 +38,32 @@ template <class FT> static void test_width(const char *name, AlgVariant field, A
   AlgConfig ce = make_alg_config<FT>(exp);
 
   // encoding basics
-  check(emb<FT>(cf, (FT)0) == 0, "phi(0)=0");
-  check(emb<FT>(cf, (FT)1) == 1, "phi(1)=1");
-  check(emb<FT>(cf, (FT)2) == 2 % cf.n, "phi(2)=2");
-  check(emb<FT>(cf, (FT)-1) == cf.n - 1, "phi(-1)=-1");
-  check(emb<FT>(cf, (FT)0.5) == cf.inv2, "phi(1/2)=inv2");
+  check(emb<FT>(cf, static_cast<FT>(0)) == 0, "phi(0)=0");
+  check(emb<FT>(cf, static_cast<FT>(1)) == 1, "phi(1)=1");
+  check(emb<FT>(cf, static_cast<FT>(2)) == 2 % cf.n, "phi(2)=2");
+  check(emb<FT>(cf, static_cast<FT>(-1)) == cf.n - 1, "phi(-1)=-1");
+  check(emb<FT>(cf, static_cast<FT>(0.5)) == cf.inv2, "phi(1/2)=inv2");
 
   // ring homomorphism + value-faithfulness on exactly-representable integers
   long hadd = 0, hmul = 0, n = 0;
   for (int i = -8; i <= 8; ++i)
     for (int j = -8; j <= 8; ++j, ++n) {
-      hadd += alg_add1(cf, emb<FT>(cf, (FT)i), emb<FT>(cf, (FT)j)) == emb<FT>(cf, (FT)(i + j));
-      hmul += alg_mul1(cf, emb<FT>(cf, (FT)i), emb<FT>(cf, (FT)j)) == emb<FT>(cf, (FT)(i * j));
+      hadd += alg_add1(cf, emb<FT>(cf, static_cast<FT>(i)), emb<FT>(cf, static_cast<FT>(j))) ==
+              emb<FT>(cf, static_cast<FT>(i + j));
+      hmul += alg_mul1(cf, emb<FT>(cf, static_cast<FT>(i)), emb<FT>(cf, static_cast<FT>(j))) ==
+              emb<FT>(cf, static_cast<FT>(i * j));
     }
   check(hadd == n, "phi(i+j)=phi(i)+phi(j)");
   check(hmul == n, "phi(i*j)=phi(i)*phi(j)");
-  check(emb<FT>(cf, (FT)2) != 0 &&
-            alg_add1(cf, emb<FT>(cf, (FT)2), emb<FT>(cf, (FT)2)) == emb<FT>(cf, (FT)4),
+  check(emb<FT>(cf, static_cast<FT>(2)) != 0 &&
+            alg_add1(cf, emb<FT>(cf, static_cast<FT>(2)), emb<FT>(cf, static_cast<FT>(2))) ==
+                emb<FT>(cf, static_cast<FT>(4)),
         "2+2==4 (value-faithful)");
 
   // field: x/x == 1 for every nonzero value (Field variant has no zero-divisors)
   long xx = 0, cnt = 0;
   for (int i = 1; i < 200; ++i, ++cnt) {
-    u64 r = emb<FT>(cf, (FT)i);
+    u64 r = emb<FT>(cf, static_cast<FT>(i));
     xx += alg_div1(cf, r, r) == 1;
   }
   check(xx == cnt, "x/x == 1 (field)");

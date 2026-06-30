@@ -70,7 +70,7 @@ TEST(AmdgcnLdexp, F32) {
       HIP_CHECK(hipMemcpy(got.data(), dO, N * sizeof(float), hipMemcpyDeviceToHost));
       for (int i = 0; i < N; ++i)
         EXPECT_EQ(got[i], std::ldexp(in[i], n)) << "n=" << n << " i=" << i;
-      (void)hipFree(dO);
+      static_cast<void>(hipFree(dO));
     }
     // FPSan: payload == (v * 2^n) in the ring, for every algebraic model.
     fpsan_test::for_each_fpsan_semantics([&](auto sem) {
@@ -87,10 +87,10 @@ TEST(AmdgcnLdexp, F32) {
       HIP_CHECK(hipMemcpy(got.data(), dO, N * sizeof(std::uint32_t), hipMemcpyDeviceToHost));
       for (int i = 0; i < N; ++i)
         EXPECT_EQ(got[i], ref[i]) << "FPSan n=" << n << " i=" << i;
-      (void)hipFree(dO);
+      static_cast<void>(hipFree(dO));
     });
   }
-  (void)hipFree(dIn);
+  static_cast<void>(hipFree(dIn));
 }
 
 template <Semantics S, class Out> __global__ void k_ldexp(const double *in, Out *out, int n) {
@@ -123,7 +123,7 @@ TEST(AmdgcnLdexp, F64) {
       HIP_CHECK(hipMemcpy(got.data(), dO, N * sizeof(double), hipMemcpyDeviceToHost));
       for (int i = 0; i < N; ++i)
         EXPECT_EQ(got[i], std::ldexp(in[i], n)) << "n=" << n << " i=" << i;
-      (void)hipFree(dO);
+      static_cast<void>(hipFree(dO));
     }
     fpsan_test::for_each_fpsan_semantics([&](auto sem) {
       constexpr Semantics S = decltype(sem)::value;
@@ -139,10 +139,10 @@ TEST(AmdgcnLdexp, F64) {
       HIP_CHECK(hipMemcpy(got.data(), dO, N * sizeof(std::uint64_t), hipMemcpyDeviceToHost));
       for (int i = 0; i < N; ++i)
         EXPECT_EQ(got[i], ref[i]) << "FPSan n=" << n << " i=" << i;
-      (void)hipFree(dO);
+      static_cast<void>(hipFree(dO));
     });
   }
-  (void)hipFree(dIn);
+  static_cast<void>(hipFree(dIn));
 }
 
 template <Semantics S, class Out> __global__ void k_ldexph(const float *in, Out *out, int n) {
@@ -178,7 +178,7 @@ TEST(AmdgcnLdexp, F16) {
             static_cast<_Float16>(std::ldexp(static_cast<float>(static_cast<_Float16>(in[i])), n));
         EXPECT_EQ(got[i], static_cast<float>(ref)) << "n=" << n << " i=" << i;
       }
-      (void)hipFree(dO);
+      static_cast<void>(hipFree(dO));
     }
     fpsan_test::for_each_fpsan_semantics([&](auto sem) {
       constexpr Semantics S = decltype(sem)::value;
@@ -195,8 +195,8 @@ TEST(AmdgcnLdexp, F16) {
       HIP_CHECK(hipMemcpy(got.data(), dO, N * sizeof(std::uint32_t), hipMemcpyDeviceToHost));
       for (int i = 0; i < N; ++i)
         EXPECT_EQ(got[i], ref[i]) << "FPSan n=" << n << " i=" << i;
-      (void)hipFree(dO);
+      static_cast<void>(hipFree(dO));
     });
   }
-  (void)hipFree(dIn);
+  static_cast<void>(hipFree(dIn));
 }

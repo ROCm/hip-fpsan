@@ -76,15 +76,15 @@ inline bool device_is_gfx950() {
 // Allocate device memory and copy a host vector into it. Caller hipFree()s.
 template <class T> T *to_dev(const std::vector<T> &h) {
   T *d = nullptr;
-  (void)hipMalloc(&d, h.size() * sizeof(T));
-  (void)hipMemcpy(d, h.data(), h.size() * sizeof(T), hipMemcpyHostToDevice);
+  static_cast<void>(hipMalloc(&d, h.size() * sizeof(T)));
+  static_cast<void>(hipMemcpy(d, h.data(), h.size() * sizeof(T), hipMemcpyHostToDevice));
   return d;
 }
 
 // Copy n elements back from device memory into a host vector.
 template <class T> std::vector<T> from_dev(const T *d, std::size_t n) {
   std::vector<T> h(n);
-  (void)hipMemcpy(h.data(), d, n * sizeof(T), hipMemcpyDeviceToHost);
+  static_cast<void>(hipMemcpy(h.data(), d, n * sizeof(T), hipMemcpyDeviceToHost));
   return h;
 }
 

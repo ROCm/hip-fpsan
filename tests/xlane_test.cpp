@@ -91,7 +91,7 @@ template <Semantics S> void test_readlane(int from) {
     expected = src_v.fpsan_payload();
   for (int i = 0; i < LANES; ++i)
     EXPECT_EQ(got[i], expected) << "lane " << i;
-  (void)hipFree(d_out);
+  static_cast<void>(hipFree(d_out));
 }
 
 TEST(Xlane, ReadlaneFloat0) { test_readlane<Semantics::Native>(0); }
@@ -135,7 +135,7 @@ template <Semantics S> void test_readfirstlane() {
     expected = src_v.fpsan_payload();
   for (int i = 0; i < LANES; ++i)
     EXPECT_EQ(got[i], expected) << "lane " << i;
-  (void)hipFree(d_out);
+  static_cast<void>(hipFree(d_out));
 }
 
 TEST(Xlane, ReadfirstlaneFloat) { test_readfirstlane<Semantics::Native>(); }
@@ -186,7 +186,7 @@ template <Semantics S> void test_ds_bpermute_xor(int off) {
       expected = src_v.fpsan_payload();
     EXPECT_EQ(got[i], expected) << "lane " << i << " xor " << off;
   }
-  (void)hipFree(d_out);
+  static_cast<void>(hipFree(d_out));
 }
 
 TEST(Xlane, DsBpermuteXorFloat1) { test_ds_bpermute_xor<Semantics::Native>(1); }
@@ -249,7 +249,7 @@ template <Semantics S> void test_ds_permute_xor(int off) {
       expected = src_v.fpsan_payload();
     EXPECT_EQ(got[i], expected) << "lane " << i << " xor " << off;
   }
-  (void)hipFree(d_out);
+  static_cast<void>(hipFree(d_out));
 }
 
 TEST(Xlane, DsPermuteXorFloat1) { test_ds_permute_xor<Semantics::Native>(1); }
@@ -323,8 +323,8 @@ template <Semantics S> void test_ds_swizzle_lane_mapping() {
       EXPECT_EQ(got_p[i], VP{src}.fpsan_payload())
           << "FPSan lane mapping differs from Float at lane " << i << " sel=" << sel;
     }
-    (void)hipFree(d_f);
-    (void)hipFree(d_p);
+    static_cast<void>(hipFree(d_f));
+    static_cast<void>(hipFree(d_p));
   }
 }
 
@@ -390,8 +390,8 @@ template <unsigned PAT> static void check_ds_swizzle_oracle(const char *tag) {
           << tag << " " << fpsan::semantics_name(S) << " lane " << i << " expected src lane " << s;
     }
   });
-  (void)hipFree(d_f);
-  (void)hipFree(d_p);
+  static_cast<void>(hipFree(d_f));
+  static_cast<void>(hipFree(d_p));
 }
 
 TEST(Xlane, DsSwizzleHostOracle) {
@@ -446,7 +446,7 @@ template <Semantics S> void test_mov_dpp_identity() {
       expected = src_v.fpsan_payload();
     EXPECT_EQ(got[i], expected) << "lane " << i;
   }
-  (void)hipFree(d_out);
+  static_cast<void>(hipFree(d_out));
 }
 
 TEST(Xlane, MovDppIdentityFloat) { test_mov_dpp_identity<Semantics::Native>(); }
@@ -496,7 +496,7 @@ template <Semantics S> void test_update_dpp_quad_swap_row_mask() {
       expected = src_v.fpsan_payload();
     EXPECT_EQ(got[i], expected) << "lane " << i;
   }
-  (void)hipFree(d_out);
+  static_cast<void>(hipFree(d_out));
 }
 
 TEST(Xlane, UpdateDppQuadSwapRowMaskFloat) {
@@ -542,7 +542,7 @@ template <Semantics S> void test_mov_dpp8_identity() {
       expected = src_v.fpsan_payload();
     EXPECT_EQ(got[i], expected) << "lane " << i;
   }
-  (void)hipFree(d_out);
+  static_cast<void>(hipFree(d_out));
 }
 
 TEST(Xlane, MovDpp8IdentityFloat) {
@@ -592,8 +592,8 @@ template <Semantics S> void test_permlane64() {
   if constexpr (LANES == 32) {
     if (device_is_gfx1250()) {
       SUCCEED() << "permlane64 wrapper executed without crashing on gfx1250 wave32";
-      (void)hipFree(dIn);
-      (void)hipFree(dOut);
+      static_cast<void>(hipFree(dIn));
+      static_cast<void>(hipFree(dOut));
       return;
     }
   }
@@ -608,8 +608,8 @@ template <Semantics S> void test_permlane64() {
       expected = src_v.fpsan_payload();
     EXPECT_EQ(got[i], expected) << "lane " << i;
   }
-  (void)hipFree(dIn);
-  (void)hipFree(dOut);
+  static_cast<void>(hipFree(dIn));
+  static_cast<void>(hipFree(dOut));
 }
 
 TEST(Xlane, Permlane64Float) { test_permlane64<Semantics::Native>(); }
@@ -630,7 +630,7 @@ static __host__ __device__ inline int wave_shfl_quarter_src_lane(int lane) {
   if constexpr (HighHalfSource)
     return 32 | (lane & 15);
 #else
-  (void)HighHalfSource;
+  static_cast<void>(HighHalfSource);
 #endif
   return lane & 15;
 }
@@ -670,7 +670,7 @@ template <class FT, Semantics S, bool HighHalfSource> void test_wave_shfl_quarte
       expected = src_v.fpsan_payload();
     EXPECT_EQ(got[i], expected) << "lane " << i << " src_lane " << src_lane;
   }
-  (void)hipFree(d_out);
+  static_cast<void>(hipFree(d_out));
 }
 
 template <Semantics S> void test_wave_shfl_low_quarter_float() {
@@ -766,8 +766,8 @@ template <PermOp Op> void test_permlane_family(int sel0, int sel1) {
       EXPECT_EQ(got_p[i], VP{got_f[i]}.fpsan_payload())
           << fpsan::semantics_name(S) << " lane " << i;
   });
-  (void)hipFree(d_f);
-  (void)hipFree(d_p);
+  static_cast<void>(hipFree(d_f));
+  static_cast<void>(hipFree(d_p));
 }
 
 // gfx1250 v_permlane_{bcast,down,up,xor}_b32 lane crossbar: the Float and FPSan
@@ -822,7 +822,7 @@ template <Semantics S> void test_ds_bpermute_fi_xor(int off) {
       expected = src_v.fpsan_payload();
     EXPECT_EQ(got[i], expected) << "lane " << i << " xor " << off;
   }
-  (void)hipFree(d_out);
+  static_cast<void>(hipFree(d_out));
 }
 
 TEST(Xlane, DsBpermuteFiXorFloat1) { test_ds_bpermute_fi_xor<Semantics::Native>(1); }
@@ -848,8 +848,10 @@ __global__ void k_permlane16(Out *out, unsigned sel0, unsigned sel1) {
   const int lane = threadIdx.x;
   Value<float, S, kCC> src{lane_input_float(lane)};
   Value<float, S, kCC> old{-999.f};
-  auto r = CROSS ? fpsan::amdgcn_permlanex16<false, false>(old, src, (int)sel0, (int)sel1)
-                 : fpsan::amdgcn_permlane16<false, false>(old, src, (int)sel0, (int)sel1);
+  auto r = CROSS ? fpsan::amdgcn_permlanex16<false, false>(old, src, static_cast<int>(sel0),
+                                                           static_cast<int>(sel1))
+                 : fpsan::amdgcn_permlane16<false, false>(old, src, static_cast<int>(sel0),
+                                                          static_cast<int>(sel1));
   if constexpr (S == Semantics::Native)
     out[lane] = static_cast<float>(r);
   else
@@ -887,8 +889,8 @@ template <bool CROSS> static void check_permlane16(unsigned sel0, unsigned sel1,
           << tag << " " << fpsan::semantics_name(S) << " lane " << i << " src " << s;
     }
   });
-  (void)hipFree(d_f);
-  (void)hipFree(d_p);
+  static_cast<void>(hipFree(d_f));
+  static_cast<void>(hipFree(d_p));
 }
 
 TEST(Xlane, Permlane16HostOracle) {
@@ -956,10 +958,10 @@ TEST(Xlane, Permlane16SwapCrossMode) {
       EXPECT_EQ(py[i], VP{fy[i]}.fpsan_payload()) << fpsan::semantics_name(S) << " y lane " << i;
     }
   });
-  (void)hipFree(dfx);
-  (void)hipFree(dfy);
-  (void)hipFree(dpx);
-  (void)hipFree(dpy);
+  static_cast<void>(hipFree(dfx));
+  static_cast<void>(hipFree(dfy));
+  static_cast<void>(hipFree(dpx));
+  static_cast<void>(hipFree(dpy));
 }
 #endif // __has_builtin(__builtin_amdgcn_permlane16_swap)
 
@@ -1009,10 +1011,10 @@ TEST(Xlane, Permlane32SwapCrossMode) {
       EXPECT_EQ(py[i], VP{fy[i]}.fpsan_payload()) << fpsan::semantics_name(S) << " y lane " << i;
     }
   });
-  (void)hipFree(dfx);
-  (void)hipFree(dfy);
-  (void)hipFree(dpx);
-  (void)hipFree(dpy);
+  static_cast<void>(hipFree(dfx));
+  static_cast<void>(hipFree(dfy));
+  static_cast<void>(hipFree(dpx));
+  static_cast<void>(hipFree(dpy));
 }
 #endif // __has_builtin(__builtin_amdgcn_permlane32_swap)
 
@@ -1041,8 +1043,8 @@ TEST(Xlane, PermlaneIdxGenDeterministic) {
   HIP_CHECK(hipMemcpy(b.data(), d1, LANES * sizeof(std::uint32_t), hipMemcpyDeviceToHost));
   for (int i = 0; i < LANES; ++i)
     EXPECT_EQ(a[i], b[i]) << "lane " << i;
-  (void)hipFree(d0);
-  (void)hipFree(d1);
+  static_cast<void>(hipFree(d0));
+  static_cast<void>(hipFree(d1));
 }
 #endif // __has_builtin(__builtin_amdgcn_permlane_idx_gen)
 
@@ -1072,8 +1074,8 @@ TEST(Xlane, BallotW64) {
   std::uint64_t mask = 0;
   HIP_CHECK(hipMemcpy(&mask, dMask, sizeof mask, hipMemcpyDeviceToHost));
   EXPECT_EQ(mask, 0x5555555555555555ull);
-  (void)hipFree(dPred);
-  (void)hipFree(dMask);
+  static_cast<void>(hipFree(dPred));
+  static_cast<void>(hipFree(dMask));
 }
 #else
 __global__ void k_ballot(const int *pred, std::uint32_t *mask) {
@@ -1101,7 +1103,7 @@ TEST(Xlane, BallotW32) {
   std::uint32_t mask = 0;
   HIP_CHECK(hipMemcpy(&mask, dMask, sizeof mask, hipMemcpyDeviceToHost));
   EXPECT_EQ(mask, 0x55555555u);
-  (void)hipFree(dPred);
-  (void)hipFree(dMask);
+  static_cast<void>(hipFree(dPred));
+  static_cast<void>(hipFree(dMask));
 }
 #endif

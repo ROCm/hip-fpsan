@@ -38,7 +38,7 @@ using fpsan::Conversions;
 using fpsan::Semantics;
 using fpsan::Value;
 
-static constexpr Conversions kCC = Conversions::Explicit;
+[[maybe_unused]] static constexpr Conversions kCC = Conversions::Explicit;
 static constexpr int kScalarN = 32;
 
 #ifndef FPSAN_TEST_ENABLE_FDOT2
@@ -208,13 +208,13 @@ std::vector<float> make_dot4_acc() {
         EXPECT_EQ(pwrap[i], pdir[i]) << "FPSan lane " << i;                                        \
       }                                                                                            \
     });                                                                                            \
-    (void)hipFree(dA);                                                                             \
-    (void)hipFree(dB);                                                                             \
-    (void)hipFree(dC);                                                                             \
-    (void)hipFree(dDir);                                                                           \
-    (void)hipFree(dWrap);                                                                          \
-    (void)hipFree(dPdir);                                                                          \
-    (void)hipFree(dPwrap);                                                                         \
+    static_cast<void>(hipFree(dA));                                                                \
+    static_cast<void>(hipFree(dB));                                                                \
+    static_cast<void>(hipFree(dC));                                                                \
+    static_cast<void>(hipFree(dDir));                                                              \
+    static_cast<void>(hipFree(dWrap));                                                             \
+    static_cast<void>(hipFree(dPdir));                                                             \
+    static_cast<void>(hipFree(dPwrap));                                                            \
   }
 
 DOT4_TEST(amdgcn_dot4_f32_fp8_fp8)
