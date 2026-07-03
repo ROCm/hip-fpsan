@@ -227,8 +227,9 @@ template <class T, Semantics S> void run_fpsan_matches_host_butterfly() {
 
 // Independent oracle: a left-to-right sequential fold of the lane payloads,
 // which is a *different* reduction order than the device butterfly. For the
-// associative + commutative payload ops (fadd, fmin, fmax) the two must agree;
-// this is a stronger statement than "matches a same-shaped butterfly".
+// selected associative + commutative Value<> ops (fadd, fmin, fmax) the two
+// must agree; this is a stronger statement than "matches a same-shaped
+// butterfly".
 template <class T, Semantics S> void run_fpsan_matches_seq_fold() {
   if constexpr (!T::sequential_is_safe) {
     GTEST_SKIP() << "non-associative op; sequential order may differ from hw";

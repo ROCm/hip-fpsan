@@ -8,8 +8,7 @@
 // both the final value and the bit-for-bit equivalence of the FPSan path with
 // a host scalar reference applied in some canonical order. The point of FPSan
 // for atomics: the FPSan answer doesn't depend on the contention-determined
-// order, because the payload op (integer add / signed-int min/max) is
-// associative + commutative.
+// order, because the wrapper applies the selected Value<> operation atomically.
 #include "fpsan/amdgcn_atomic.hpp"
 #include "fpsan/fpsan.hpp"
 
@@ -205,7 +204,7 @@ TEST(Atomic, FmaxFloatMatchesScalarMax) {
   (void)hipFree(dSlot);
 }
 
-TEST(Atomic, FminFpsanMatchesScalarPayloadMin) {
+TEST(Atomic, FminFpsanMatchesScalarMin) {
   int ndev = 0;
   if (hipGetDeviceCount(&ndev) != hipSuccess || ndev == 0)
     GTEST_SKIP() << "no HIP device";
@@ -215,7 +214,6 @@ TEST(Atomic, FminFpsanMatchesScalarPayloadMin) {
     using V = Value<float, decltype(sem)::value, kCC>;
     V *dSlot;
     HIP_CHECK(hipMalloc(&dSlot, sizeof(V)));
-    // Seed with a payload that is signed-greater than any input's payload.
     V init{1e30f};
     HIP_CHECK(hipMemcpy(dSlot, &init, sizeof(V), hipMemcpyHostToDevice));
     k_atomic_fmin<decltype(sem)::value><<<1, LANES>>>(dSlot, dIn);
@@ -266,7 +264,75 @@ TEST(Atomic, FaddReturnsOldFloat) {
   (void)hipFree(dOld2);
 }
 
-TEST(Atomic, FmaxFpsanMatchesScalarPayloadMax) {
+// FPSan fmin/fmax returned-old correctness. These use explicit payloads so the
+// reference is the selected Value<> order, not IEEE numeric order.
+template <bool IsMin, Semantics S>
+__global__ void k_atomic_fmm_returns_old32(Value<float, S, kCC> *slot, std::uint32_t *old1,
+                                           std::uint32_t *old2, std::uint32_t *final,
+                                           std::uint32_t rhs1, std::uint32_t rhs2) {
+  using V = Value<float, S, kCC>;
+  const V v1 = V::from_fpsan_payload(rhs1);
+  const V v2 = V::from_fpsan_payload(rhs2);
+  const V r1 =
+      IsMin ? fpsan::amdgcn_atomic_fmin_f32(slot, v1) : fpsan::amdgcn_atomic_fmax_f32(slot, v1);
+  const V r2 =
+      IsMin ? fpsan::amdgcn_atomic_fmin_f32(slot, v2) : fpsan::amdgcn_atomic_fmax_f32(slot, v2);
+  *old1 = r1.fpsan_payload();
+  *old2 = r2.fpsan_payload();
+  *final = slot->fpsan_payload();
+}
+
+template <bool IsMin, Semantics S> static void run_fpsan_fmm_returns_old32(const char *label) {
+  int ndev = 0;
+  if (hipGetDeviceCount(&ndev) != hipSuccess || ndev == 0)
+    GTEST_SKIP() << "no HIP device";
+
+  using V = Value<float, S, kCC>;
+  using Bits = typename V::bits_type;
+  const Bits initp = IsMin ? Bits{1} : Bits{0};
+  const Bits rhs1p = IsMin ? Bits{0} : Bits{1};
+  const Bits rhs2p = Bits{2};
+  const V init = V::from_fpsan_payload(initp);
+  const V after1 = IsMin ? fpsan::min(init, V::from_fpsan_payload(rhs1p))
+                         : fpsan::max(init, V::from_fpsan_payload(rhs1p));
+  const V after2 = IsMin ? fpsan::min(after1, V::from_fpsan_payload(rhs2p))
+                         : fpsan::max(after1, V::from_fpsan_payload(rhs2p));
+
+  V *dSlot;
+  Bits *dOld1, *dOld2, *dFinal;
+  HIP_CHECK(hipMalloc(&dSlot, sizeof(V)));
+  HIP_CHECK(hipMalloc(&dOld1, sizeof(Bits)));
+  HIP_CHECK(hipMalloc(&dOld2, sizeof(Bits)));
+  HIP_CHECK(hipMalloc(&dFinal, sizeof(Bits)));
+  HIP_CHECK(hipMemcpy(dSlot, &init, sizeof(V), hipMemcpyHostToDevice));
+  k_atomic_fmm_returns_old32<IsMin, S><<<1, 1>>>(dSlot, dOld1, dOld2, dFinal, rhs1p, rhs2p);
+  HIP_CHECK(hipDeviceSynchronize());
+
+  Bits old1 = 0, old2 = 0, final = 0;
+  HIP_CHECK(hipMemcpy(&old1, dOld1, sizeof(Bits), hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(&old2, dOld2, sizeof(Bits), hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(&final, dFinal, sizeof(Bits), hipMemcpyDeviceToHost));
+  EXPECT_EQ(old1, init.fpsan_payload()) << label << " S=" << int(S);
+  EXPECT_EQ(old2, after1.fpsan_payload()) << label << " S=" << int(S);
+  EXPECT_EQ(final, after2.fpsan_payload()) << label << " S=" << int(S);
+
+  (void)hipFree(dSlot);
+  (void)hipFree(dOld1);
+  (void)hipFree(dOld2);
+  (void)hipFree(dFinal);
+}
+
+TEST(Atomic, FminFpsanReturnsOld) {
+  fpsan_test::for_each_fpsan_semantics(
+      [](auto sem) { run_fpsan_fmm_returns_old32<true, decltype(sem)::value>("fmin32"); });
+}
+
+TEST(Atomic, FmaxFpsanReturnsOld) {
+  fpsan_test::for_each_fpsan_semantics(
+      [](auto sem) { run_fpsan_fmm_returns_old32<false, decltype(sem)::value>("fmax32"); });
+}
+
+TEST(Atomic, FmaxFpsanMatchesScalarMax) {
   int ndev = 0;
   if (hipGetDeviceCount(&ndev) != hipSuccess || ndev == 0)
     GTEST_SKIP() << "no HIP device";
@@ -385,7 +451,73 @@ TEST(Atomic, Fmax64FloatMatchesScalarMax) {
   (void)hipFree(dSlot);
 }
 
-TEST(Atomic, Fmin64FpsanMatchesScalarPayloadMin) {
+template <bool IsMin, Semantics S>
+__global__ void k_atomic_fmm_returns_old64(Value<double, S, kCC> *slot, std::uint64_t *old1,
+                                           std::uint64_t *old2, std::uint64_t *final,
+                                           std::uint64_t rhs1, std::uint64_t rhs2) {
+  using V = Value<double, S, kCC>;
+  const V v1 = V::from_fpsan_payload(rhs1);
+  const V v2 = V::from_fpsan_payload(rhs2);
+  const V r1 =
+      IsMin ? fpsan::amdgcn_atomic_fmin_f64(slot, v1) : fpsan::amdgcn_atomic_fmax_f64(slot, v1);
+  const V r2 =
+      IsMin ? fpsan::amdgcn_atomic_fmin_f64(slot, v2) : fpsan::amdgcn_atomic_fmax_f64(slot, v2);
+  *old1 = r1.fpsan_payload();
+  *old2 = r2.fpsan_payload();
+  *final = slot->fpsan_payload();
+}
+
+template <bool IsMin, Semantics S> static void run_fpsan_fmm_returns_old64(const char *label) {
+  int ndev = 0;
+  if (hipGetDeviceCount(&ndev) != hipSuccess || ndev == 0)
+    GTEST_SKIP() << "no HIP device";
+
+  using V = Value<double, S, kCC>;
+  using Bits = typename V::bits_type;
+  const Bits initp = IsMin ? Bits{1} : Bits{0};
+  const Bits rhs1p = IsMin ? Bits{0} : Bits{1};
+  const Bits rhs2p = Bits{2};
+  const V init = V::from_fpsan_payload(initp);
+  const V after1 = IsMin ? fpsan::min(init, V::from_fpsan_payload(rhs1p))
+                         : fpsan::max(init, V::from_fpsan_payload(rhs1p));
+  const V after2 = IsMin ? fpsan::min(after1, V::from_fpsan_payload(rhs2p))
+                         : fpsan::max(after1, V::from_fpsan_payload(rhs2p));
+
+  V *dSlot;
+  Bits *dOld1, *dOld2, *dFinal;
+  HIP_CHECK(hipMalloc(&dSlot, sizeof(V)));
+  HIP_CHECK(hipMalloc(&dOld1, sizeof(Bits)));
+  HIP_CHECK(hipMalloc(&dOld2, sizeof(Bits)));
+  HIP_CHECK(hipMalloc(&dFinal, sizeof(Bits)));
+  HIP_CHECK(hipMemcpy(dSlot, &init, sizeof(V), hipMemcpyHostToDevice));
+  k_atomic_fmm_returns_old64<IsMin, S><<<1, 1>>>(dSlot, dOld1, dOld2, dFinal, rhs1p, rhs2p);
+  HIP_CHECK(hipDeviceSynchronize());
+
+  Bits old1 = 0, old2 = 0, final = 0;
+  HIP_CHECK(hipMemcpy(&old1, dOld1, sizeof(Bits), hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(&old2, dOld2, sizeof(Bits), hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(&final, dFinal, sizeof(Bits), hipMemcpyDeviceToHost));
+  EXPECT_EQ(old1, init.fpsan_payload()) << label << " S=" << int(S);
+  EXPECT_EQ(old2, after1.fpsan_payload()) << label << " S=" << int(S);
+  EXPECT_EQ(final, after2.fpsan_payload()) << label << " S=" << int(S);
+
+  (void)hipFree(dSlot);
+  (void)hipFree(dOld1);
+  (void)hipFree(dOld2);
+  (void)hipFree(dFinal);
+}
+
+TEST(Atomic, Fmin64FpsanReturnsOld) {
+  fpsan_test::for_each_fpsan_semantics(
+      [](auto sem) { run_fpsan_fmm_returns_old64<true, decltype(sem)::value>("fmin64"); });
+}
+
+TEST(Atomic, Fmax64FpsanReturnsOld) {
+  fpsan_test::for_each_fpsan_semantics(
+      [](auto sem) { run_fpsan_fmm_returns_old64<false, decltype(sem)::value>("fmax64"); });
+}
+
+TEST(Atomic, Fmin64FpsanMatchesScalarMin) {
   int ndev = 0;
   if (hipGetDeviceCount(&ndev) != hipSuccess || ndev == 0)
     GTEST_SKIP() << "no HIP device";
@@ -410,7 +542,7 @@ TEST(Atomic, Fmin64FpsanMatchesScalarPayloadMin) {
   (void)hipFree(dIn);
 }
 
-TEST(Atomic, Fmax64FpsanMatchesScalarPayloadMax) {
+TEST(Atomic, Fmax64FpsanMatchesScalarMax) {
   int ndev = 0;
   if (hipGetDeviceCount(&ndev) != hipSuccess || ndev == 0)
     GTEST_SKIP() << "no HIP device";
