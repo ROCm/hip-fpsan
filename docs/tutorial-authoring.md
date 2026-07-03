@@ -27,8 +27,8 @@ The three template parameters are:
 
 `Value` supports the usual operators (`+ - * /`, unary `-`, compound
 assignment, comparisons) and the standard math functions in `<fpsan/math.hpp>`
-(`exp`, `exp2`, `log`, `sin`, `cos`, `sqrt`, `fma`, `min`, `max`, ...), found by
-ADL:
+(`abs`, `fabs`, `exp`, `exp2`, `log`, `sin`, `cos`, `sqrt`, `fma`, `min`,
+`max`, ...), found by ADL:
 
 ```cpp
 Scalar f(Scalar x) {

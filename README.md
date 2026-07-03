@@ -97,11 +97,12 @@ want the fingerprint arithmetic to preserve.
 
 `<fpsan/math.hpp>` provides standard-library-style math as ADL free functions on
 `Value` (write `using std::exp; exp(x);` in generic code, or `fpsan::exp(x)`).
-`Semantics::Native` forwards to `std::` where applicable. FPSan-family
-semantics implement deterministic fingerprint operations: some preserve useful
-identities, while the rest produce operation-distinguishing tags. Triton
-behavior is introduced in [`docs/triton-fpsan.md`](docs/triton-fpsan.md);
-algebraic behavior is summarized in
+`Semantics::Native` forwards to `std::` where applicable, including `abs`/`fabs`.
+FPSan-family semantics implement deterministic fingerprint operations: some
+preserve useful identities, while the rest produce operation-distinguishing tags.
+Triton behavior is introduced in [`docs/triton-fpsan.md`](docs/triton-fpsan.md);
+algebraic behavior, including Field-family quadratic-residue-positive
+`abs`/selection, is summarized in
 [`docs/algebraic-fpsan.md`](docs/algebraic-fpsan.md).
 
 ## AMD GPU intrinsic support

@@ -44,6 +44,27 @@ template <class FT> static void test_width(const char *name, AlgVariant field, A
   check(emb<FT>(cf, static_cast<FT>(-1)) == cf.n - 1, "phi(-1)=-1");
   check(emb<FT>(cf, static_cast<FT>(0.5)) == cf.inv2, "phi(1/2)=inv2");
 
+  // Field-family order primitives: nonzero quadratic residues are the
+  // "positive" half. Since the Field primes are 3 mod 4, -1 is not a square,
+  // so exactly one of x and -x is qr for every finite nonzero x.
+  u64 non_qr = 0;
+  for (u64 r = 2; r < cf.n && non_qr == 0; ++r)
+    if (!alg_is_nonzero_qr(cf, r))
+      non_qr = r;
+  check(alg_is_nonzero_qr(cf, u64{1}), "1 is qr-positive");
+  check(!alg_is_nonzero_qr(cf, u64{0}), "0 is not qr-positive");
+  check(non_qr != 0, "found a finite non-qr residue");
+  check(alg_is_nonzero_qr(cf, alg_neg1(cf, non_qr)), "negative of non-qr is qr-positive");
+  check(alg_qr_abs(cf, u64{1}) == 1, "qr_abs keeps qr-positive residues");
+  check(alg_qr_abs(cf, non_qr) == alg_neg1(cf, non_qr), "qr_abs negates non-qr residues");
+  check(alg_qr_less(cf, u64{0}, u64{1}), "qr order: zero < qr");
+  check(!alg_qr_less(cf, u64{0}, non_qr), "qr order: zero is not < non-qr");
+  check(!alg_qr_less(cf, non_qr, u64{0}), "qr order: non-qr is not < zero");
+  check(alg_qr_less(cf, non_qr, u64{1}), "qr order: non-qr < qr");
+  check(!alg_qr_less(cf, u64{1}, non_qr), "qr order: qr is not < non-qr");
+  check(alg_qr_min(cf, u64{1}, non_qr) == non_qr, "qr min selects non-qr");
+  check(alg_qr_max(cf, u64{1}, non_qr) == 1, "qr max selects qr");
+
   // ring homomorphism + value-faithfulness on exactly-representable integers
   long hadd = 0, hmul = 0, n = 0;
   for (int i = -8; i <= 8; ++i)

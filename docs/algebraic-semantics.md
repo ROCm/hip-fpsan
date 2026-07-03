@@ -181,6 +181,42 @@ all residues in `Field`.
 prime choices so its finite fingerprints match `Field`, but `sqrt`, `rsqrt`, and
 `cbrt` are deterministic tags there.
 
+### Field-family order and `abs`
+
+No finite field admits an order compatible with both addition and
+multiplication, so Field-family comparisons still do not model IEEE-754 numeric
+magnitude. They do, however, use the same quadratic-residue split that appears in
+the square-root discussion above.
+
+For `Semantics::Field`, `Semantics::FieldFast`, and
+`Semantics::FieldWithMulCasts` (and their `2` variants), a finite nonzero
+residue is treated as "positive" when it is a quadratic residue modulo `p`.
+Zero, infinity, NaN, and finite non-residues are not qr-positive. Because the
+Field primes are `3 mod 4`, `-1` is a non-residue, so exactly one of `x` and
+`-x` is qr-positive for every finite nonzero `x`.
+
+The resulting `abs` is canonical:
+
+```text
+abs(x) = x   if x is qr-positive
+abs(x) = -x  otherwise
+```
+
+Thus `abs(x) == abs(-x)` for finite nonzero residues, and the result is the qr
+representative of `{x, -x}`. Because zero is not qr-positive but `-0 == 0` in
+the algebraic model, `abs(0) == 0`.
+
+The comparison operators expose the same two-class preorder. Strict `<` detects
+only a move from the non-positive class to the qr-positive class:
+`a < b` iff `a` is not qr-positive and `b` is qr-positive. Non-strict `<=` is
+not the same relation; it is the usual `!(b < a)`, so `a <= b` is true whenever
+`b` is qr-positive or `a` is not qr-positive. For example, `0 <= n` and
+`n <= 0` both hold for a finite non-residue `n`, while neither `0 < n` nor
+`n < 0` holds. The `min`/`max` helpers prefer non-positive and qr-positive
+residues respectively, with a deterministic payload tie-break inside each class.
+This convention can keep rank-revealing algebraic algorithms from collapsing all
+pivots to zero, while remaining deliberately non-numeric.
+
 ### FieldFast semantics
 
 `Semantics::FieldFast` keeps the same leaf map and the same `+`, `-`, and `*`
@@ -403,7 +439,7 @@ test unexpectedly passes or fails in one algebraic variant, rerun the matching
 - IEEE-754 rounding and exception flags.
 - Overflow from a large finite expression to infinity.
 - Signed zero and signed infinity.
-- IEEE-754 numeric ordering for comparisons, `min`, or `max`.
+- IEEE-754 numeric ordering for comparisons, `min`, `max`, or `abs`.
 - Recovering a useful float from an algebraic fingerprint.
 
 These are deliberate boundaries of the model. Algebraic FPSan answers "did these

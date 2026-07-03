@@ -457,6 +457,16 @@ template <class U = u64> FPSAN_HOST_DEVICE constexpr bool alg_is_nan(const AlgCo
 template <class U = u64> FPSAN_HOST_DEVICE constexpr bool alg_is_fin(const AlgConfig &c, U p) {
   return p < static_cast<U>(c.n);
 }
+template <class U = u64>
+FPSAN_HOST_DEVICE constexpr bool alg_is_nonzero_qr(const AlgConfig &c, U p) {
+  if (!alg_is_fin<U>(c, p) || p == 0)
+    return false;
+  return alg_powmod<U>(p, static_cast<U>((c.n - 1) / 2), static_cast<U>(c.n)) == 1;
+}
+template <class U = u64>
+FPSAN_HOST_DEVICE constexpr bool alg_qr_less(const AlgConfig &c, U a, U b) {
+  return !alg_is_nonzero_qr<U>(c, a) && alg_is_nonzero_qr<U>(c, b);
+}
 
 template <class U = u64> FPSAN_HOST_DEVICE constexpr U alg_neg1(const AlgConfig &c, U a) {
   if (!alg_is_fin<U>(c, a))
@@ -642,6 +652,29 @@ FPSAN_HOST_DEVICE constexpr Bits alg_fast_div(const AlgConfig &c, Bits a, Bits b
 }
 template <class Bits> FPSAN_HOST_DEVICE constexpr Bits alg_neg(const AlgConfig &c, Bits a) {
   return alg_lanewise1(a, [&](auto x) { return alg_neg1(c, x); });
+}
+template <class Bits> FPSAN_HOST_DEVICE constexpr Bits alg_qr_abs(const AlgConfig &c, Bits a) {
+  return alg_lanewise1(a, [&](auto x) { return alg_is_nonzero_qr(c, x) ? x : alg_neg1(c, x); });
+}
+template <class Bits>
+FPSAN_HOST_DEVICE constexpr Bits alg_qr_min(const AlgConfig &c, Bits a, Bits b) {
+  return alg_lanewise2(a, b, [&](auto x, auto y) {
+    const bool x_pos = alg_is_nonzero_qr(c, x);
+    const bool y_pos = alg_is_nonzero_qr(c, y);
+    if (x_pos != y_pos)
+      return x_pos ? y : x;
+    return x < y ? x : y;
+  });
+}
+template <class Bits>
+FPSAN_HOST_DEVICE constexpr Bits alg_qr_max(const AlgConfig &c, Bits a, Bits b) {
+  return alg_lanewise2(a, b, [&](auto x, auto y) {
+    const bool x_pos = alg_is_nonzero_qr(c, x);
+    const bool y_pos = alg_is_nonzero_qr(c, y);
+    if (x_pos != y_pos)
+      return x_pos ? x : y;
+    return x < y ? y : x;
+  });
 }
 template <class Bits> FPSAN_HOST_DEVICE constexpr Bits alg_exp(const AlgConfig &c, Bits a) {
   return alg_lanewise1(a, [&](auto x) { return alg_exp1(c, x); });

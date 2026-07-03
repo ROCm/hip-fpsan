@@ -35,6 +35,27 @@ template <class FT> using compute_t = std::conditional_t<std::is_same_v<FT, doub
 // p is the payload of x; build the result wrapper from a computed payload.
 #define FPSAN_FROM_PAYLOAD(F, expr) F::from_fpsan_payload(static_cast<typename F::bits_type>(expr))
 
+template <class FT, Semantics S, Conversions C>
+FPSAN_HOST_DEVICE Value<FT, S, C> abs(Value<FT, S, C> x) {
+  using F = Value<FT, S, C>;
+  if constexpr (F::is_vector) {
+    F out{};
+    for (unsigned i = 0; i < F::lanes; ++i)
+      out.set(i, fpsan::abs(x.get(i)));
+    return out;
+  } else if constexpr (F::is_algebraic && detail::has_field_qr_order(S))
+    return FPSAN_FROM_PAYLOAD(F, detail::alg_qr_abs(F::alg_cfg(), x.fpsan_payload()));
+  else if constexpr (F::is_fpsan)
+    return x < F(FT(0)) ? -x : x;
+  else
+    return F(static_cast<FT>(std::fabs(static_cast<detail::compute_t<FT>>(x.to_float()))));
+}
+
+template <class FT, Semantics S, Conversions C>
+FPSAN_HOST_DEVICE Value<FT, S, C> fabs(Value<FT, S, C> x) {
+  return fpsan::abs(x);
+}
+
 // ---- algebraic unary: exp, exp2, sin, cos ----------------------------------
 #define FPSAN_DEFINE_ALGEBRAIC_UNARY(NAME, PAYLOAD_FN, ALG_EXPR, STD_FN)                           \
   template <class FT, Semantics S, Conversions C>                                                  \
@@ -252,30 +273,35 @@ FPSAN_HOST_DEVICE Value<FT, S, C> fmod(Value<FT, S, C> a, Value<FT, S, C> b) {
                                        static_cast<detail::compute_t<FT>>(b.to_float()))));
 }
 
-#define FPSAN_DEFINE_MINMAX(NAME, PAYLOAD_FN, STD_FN)                                              \
+#define FPSAN_DEFINE_MINMAX(NAME, PAYLOAD_FN, ALGEBRAIC_FIELD_FN, STD_FN)                          \
   template <class FT, Semantics S, Conversions C>                                                  \
   FPSAN_HOST_DEVICE Value<FT, S, C> NAME(Value<FT, S, C> a, Value<FT, S, C> b) {                   \
     using F = Value<FT, S, C>;                                                                     \
-    /* Both FPSan and the algebraic variants order by the signed integer value */                  \
-    /* of the payload (Triton's min/max contract): deterministic, a.c.i., and  */                  \
-    /* reassociation-invariant -- though not value-faithful, since a finite    */                  \
-    /* field has no compatible order. */                                                           \
-    if constexpr (F::is_fpsan)                                                                     \
+    /* Field-family values use the qr-positive prototype order. Other payload */                   \
+    /* modes keep Triton's signed-payload min/max contract. */                                     \
+    if constexpr (F::is_vector) {                                                                  \
+      F out{};                                                                                     \
+      for (unsigned i = 0; i < F::lanes; ++i)                                                      \
+        out.set(i, fpsan::NAME(a.get(i), b.get(i)));                                               \
+      return out;                                                                                  \
+    } else if constexpr (F::is_algebraic && detail::has_field_qr_order(S)) {                       \
+      return FPSAN_FROM_PAYLOAD(                                                                   \
+          F, detail::ALGEBRAIC_FIELD_FN(F::alg_cfg(), a.fpsan_payload(), b.fpsan_payload()));      \
+    } else if constexpr (F::is_fpsan)                                                              \
       return FPSAN_FROM_PAYLOAD(                                                                   \
           F, detail::PAYLOAD_FN(F::config, a.fpsan_payload(), b.fpsan_payload()));                 \
     else                                                                                           \
       return F(static_cast<FT>(STD_FN(static_cast<detail::compute_t<FT>>(a.to_float()),            \
                                       static_cast<detail::compute_t<FT>>(b.to_float()))));         \
   }
-FPSAN_DEFINE_MINMAX(fmin, payload_min, std::fmin)
-FPSAN_DEFINE_MINMAX(fmax, payload_max, std::fmax)
-FPSAN_DEFINE_MINMAX(min, payload_min, std::fmin)
-FPSAN_DEFINE_MINMAX(max, payload_max, std::fmax)
+FPSAN_DEFINE_MINMAX(fmin, payload_min, alg_qr_min, std::fmin)
+FPSAN_DEFINE_MINMAX(fmax, payload_max, alg_qr_max, std::fmax)
+FPSAN_DEFINE_MINMAX(min, payload_min, alg_qr_min, std::fmin)
+FPSAN_DEFINE_MINMAX(max, payload_max, alg_qr_max, std::fmax)
 #undef FPSAN_DEFINE_MINMAX
 
-// ---- fmed3: median of 3. In FPSan-family semantics this resolves to
-// signed-int median on the payload via three min/max calls. In Native mode
-// it's the float median expressed the same way. ---------------------------
+// ---- fmed3: median of 3 via three min/max calls. In Native mode it's the
+// float median expressed the same way. ------------------------------------
 template <class FT, Semantics S, Conversions C>
 FPSAN_HOST_DEVICE Value<FT, S, C> fmed3(Value<FT, S, C> a, Value<FT, S, C> b, Value<FT, S, C> c) {
   return fpsan::max(fpsan::min(fpsan::max(a, b), c), fpsan::min(a, b));

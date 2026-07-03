@@ -802,7 +802,7 @@ apply to expressions built from it: for example \(t+t=2t\) and
 \((t+u)v=tv+uv\) are still enforced.  The only thing withheld is a mathematical
 relation between \(t\) and the operands of the opaque operation.
 
-\section{Infinity, NaN, and order}
+\section{Infinity and NaN}
 
 The finite residue model is extended by one unsigned infinity and one absorbing
 NaN.  In the Field case, the finite residues together with infinity form the
@@ -828,10 +828,94 @@ and indeterminate forms such as \(0/0\), \(0\cdot\infty\), and
 finite residues never overflow; among the basic arithmetic operations on finite
 values, the only source of infinity is \(x/0\) with \(x\ne 0\).
 
+\section{Order, absolute value, and selection}
+
 No finite ring can carry a total order compatible with its addition and
 multiplication.  Consequently the algebraic semantics do not model IEEE-754
-numeric ordering.  Comparisons, \texttt{min}, and \texttt{max} use deterministic
-fingerprint ordering, as Triton FPSan does.
+numeric ordering.  Comparisons, \texttt{min}, \texttt{max}, and \texttt{abs}
+are therefore fingerprint operations, not magnitude operations.
+
+For the Field-family prime moduli, the implementation uses the quadratic
+residue split as a canonical sign convention.  A quadratic residue modulo \(p\)
+is a nonzero residue that is a square: \(x\) is a quadratic residue when
+\(x=y^2\) for some nonzero \(y\in\F_p\).  We call exactly these finite nonzero
+residues positive.  Zero is not positive; neither are the infinity and NaN
+sentinels.  Since the Field primes satisfy \(p\equiv 3\pmod 4\), \(-1\) is not
+a square, so exactly one of \(x\) and \(-x\) is positive for every finite
+nonzero \(x\).  This gives a canonical absolute value
+\[
+  |x|_{\mathrm{qr}} =
+  \begin{cases}
+    x, & x\text{ a quadratic residue},\\
+    -x, & \text{otherwise},
+  \end{cases}
+\]
+with \(|x|_{\mathrm{qr}}=|-x|_{\mathrm{qr}}\) for finite nonzero \(x\).  In
+terms of the Legendre symbol \(\chi(x)\in\{\pm1\}\), this is
+\(|x|_{\mathrm{qr}}=\chi(x)x\) for finite nonzero \(x\).  The extension to the
+special cases is by the same implementation rule: since zero and the sentinels
+are not positive, \texttt{abs} negates them, and negation fixes them in this
+model.  Thus \(\texttt{abs}(0)=0\), \(\texttt{abs}(\infty)=\infty\), and
+\(\texttt{abs}(\mathrm{NaN})=\mathrm{NaN}\).
+
+This sign convention is compatible with multiplication on finite nonzero
+residues.  Products of two positive residues and products of two negative
+residues are positive, while a positive times a negative is negative:
+\[
+  Q\cdot Q\subset Q,\qquad N\cdot N\subset Q,\qquad Q\cdot N\subset N,
+\]
+where \(Q\) is the set of quadratic residues and \(N\) is the set of
+non-residues.  Equivalently, \(\chi(xy)=\chi(x)\chi(y)\).  Consequently
+\[
+  |xy|_{\mathrm{qr}}=|x|_{\mathrm{qr}}\,|y|_{\mathrm{qr}}
+\]
+for finite nonzero \(x,y\).  Every finite nonzero square is positive, and the
+Field square-root power map \(S\) from Constraint~\ref{con:sqrt} is exact on
+squares in the canonical sense:
+\[
+  S(x^2)=|x|_{\mathrm{qr}},\qquad |x|_{\mathrm{qr}}^2=x^2.
+\]
+
+The associated comparison is only a two-class preorder:
+\[
+  a < b \quad\Longleftrightarrow\quad a\notin Q\ \text{and}\ b\in Q.
+\]
+Here \(Q\) still means only finite nonzero quadratic residues; zero, infinities,
+NaNs, and finite non-residues all lie outside \(Q\).  The non-strict comparison
+is not the same relation as the strict comparison.  It is defined in the usual
+C++ way, \(a\le b\) iff not \(b<a\), hence
+\[
+  a \le b \quad\Longleftrightarrow\quad b\in Q\ \text{or}\ a\notin Q.
+\]
+Therefore \(a<b\) implies \(a\le b\), but many pairs satisfy \(a\le b\) without
+satisfying \(a<b\).  For example \(0\le n\) and \(n\le0\) both hold for a
+finite non-residue \(n\), while neither \(0<n\) nor \(n<0\) holds.
+
+The \texttt{min} and \texttt{max} operations use the same positive/non-positive
+split, with deterministic payload tie-breaking inside a class.  This tie-break
+is a selection convention, not an additional comparison law.  In particular,
+\texttt{max} prefers a positive residue over zero or a non-residue, and all
+finite nonzero values become positive after \texttt{abs}.
+
+This convention is not a magnitude order, and it does not make ordered-field
+algebra possible.  It is nevertheless useful operationally in rank-revealing
+linear algebra.  Pivoting code often first needs the algebraic property that a
+chosen pivot or normalization denominator is nonzero; the real-valued fact that
+it is the largest magnitude candidate is secondary for FPSan's exact-equivalence
+purpose.  With the \(\mathrm{qr}\) absolute value,
+\(\max_i |a_i|_{\mathrm{qr}}\) is nonzero
+whenever any finite \(a_i\) is nonzero.  Likewise, if a routine compares
+candidate denominators represented as exact squares \(r_i^2\), the nonzero
+candidates are positive, the chosen square root is the canonical
+\(|r_i|_{\mathrm{qr}}\), and division by the selected value is ordinary field
+division rather than an opaque tag or a zero fallback.  This is the algebraic
+analogue of choosing a largest pivot or largest \(L^2\)-norm denominator: the
+selection is deterministic and preserves the square/root/nonzero relationships
+that the algorithm needs, while making no claim to reproduce numerical magnitude
+order.
+
+Triton FPSan and the composite algebraic modes keep signed-payload fingerprint
+ordering instead of this qr convention.
 
 \section{Extension to irrational number schemes}
 
