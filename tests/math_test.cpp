@@ -3,7 +3,7 @@
 //
 // tests/math_test.cpp
 //
-// FPSan math: exp2/exp cross-checked bit-for-bit against the ground-truth
+// FPSan math: abs, exp2/exp cross-checked bit-for-bit against the ground-truth
 // reference; algebraic identities for exp/exp2/cos/sin; determinism and
 // op-distinctness for the tagged functions; and native (mode=false) parity with
 // std::.
@@ -173,6 +173,8 @@ TEST(Math, NativeParity) {
     EXPECT_EQ(bits_of(static_cast<float>(fpsan::exp2(a))), bits_of(std::exp2(x)));
     EXPECT_EQ(bits_of(static_cast<float>(fpsan::sin(a))), bits_of(std::sin(x)));
     EXPECT_EQ(bits_of(static_cast<float>(fpsan::cos(a))), bits_of(std::cos(x)));
+    EXPECT_EQ(bits_of(static_cast<float>(fpsan::abs(a))), bits_of(std::fabs(x)));
+    EXPECT_EQ(bits_of(static_cast<float>(fpsan::fabs(a))), bits_of(std::fabs(x)));
     EXPECT_EQ(bits_of(static_cast<float>(fpsan::floor(a))), bits_of(std::floor(x)));
     EXPECT_EQ(bits_of(static_cast<float>(fpsan::ceil(a))), bits_of(std::ceil(x)));
     if (x > 0.f) {
@@ -184,6 +186,18 @@ TEST(Math, NativeParity) {
 }
 
 // ---- modular: fma / fmod / min / max ---------------------------------------
+TEST(Math, AbsFpsanBasicProperties) {
+  fpsan_test::for_each_fpsan_semantics_all_variants([](auto sem) {
+    using F = Value<float, decltype(sem)::value, Conversions::Explicit>;
+    for (float x : xs()) {
+      F a(x);
+      EXPECT_TRUE(fpsan::abs(a) == a || fpsan::abs(a) == -a);
+      EXPECT_TRUE(fpsan::fabs(a) == fpsan::abs(a));
+      EXPECT_TRUE(fpsan::abs(fpsan::abs(a)) == fpsan::abs(a));
+    }
+  });
+}
+
 // fma(A,B,C) == A*B + C is an exact payload-ring identity in every fpsan flavor.
 TEST(Math, FmaMatchesMulAdd) {
   fpsan_test::for_each_fpsan_semantics_all_variants([](auto sem) {

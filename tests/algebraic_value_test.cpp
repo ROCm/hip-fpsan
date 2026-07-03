@@ -263,8 +263,66 @@ template <class V> static void battery_misc(const char *tag) {
          "min/max reassociation-invariant");
 }
 
+template <class V> static typename V::bits_type first_non_qr_payload() {
+  using Bits = typename V::bits_type;
+  const auto cfg = V::alg_cfg();
+  for (detail::u64 r = 2; r < cfg.n; ++r) {
+    const Bits p = static_cast<Bits>(r);
+    if (!detail::alg_is_nonzero_qr(cfg, p))
+      return p;
+  }
+  return Bits{0};
+}
+
+template <class V> static void battery_field_qr_order(const char *tag) {
+  static_assert(detail::has_field_qr_order(V::semantics), "Field-family semantics required");
+  using Bits = typename V::bits_type;
+  const auto cfg = V::alg_cfg();
+  const Bits qr_payload = Bits{1};
+  const Bits non_qr_payload = first_non_qr_payload<V>();
+  const V zero{0.0f};
+  const V qr = V::from_fpsan_payload(qr_payload);
+  const V non_qr = V::from_fpsan_payload(non_qr_payload);
+  const V inf = V::from_fpsan_payload(static_cast<Bits>(cfg.inf_code));
+  const V nan = V::from_fpsan_payload(static_cast<Bits>(cfg.nan_code));
+
+  checkf(non_qr_payload != Bits{0}, tag, "found a finite non-qr residue");
+  checkf(detail::alg_is_nonzero_qr(cfg, qr.fpsan_payload()), tag, "1 is qr-positive");
+  checkf(!detail::alg_is_nonzero_qr(cfg, zero.fpsan_payload()), tag, "0 is not qr-positive");
+  checkf(!detail::alg_is_nonzero_qr(cfg, non_qr.fpsan_payload()), tag, "test residue is non-qr");
+  checkf(detail::alg_is_nonzero_qr(cfg, (-non_qr).fpsan_payload()), tag,
+         "negative of non-qr is qr-positive");
+
+  checkf(abs(qr) == qr, tag, "abs keeps qr-positive residues");
+  checkf(abs(-qr) == qr, tag, "abs(-qr) canonicalizes to qr");
+  checkf(abs(non_qr) == -non_qr, tag, "abs(non-qr) negates to qr");
+  checkf(abs(non_qr) == abs(-non_qr), tag, "abs is sign-canonical on nonzero residues");
+  checkf(fabs(non_qr) == abs(non_qr), tag, "fabs delegates to abs");
+  checkf(abs(zero) == zero, tag, "abs(0) == 0");
+  checkf(abs(inf) == inf, tag, "abs(Inf) == Inf");
+  checkf(abs(nan) == nan, tag, "abs(NaN) == NaN");
+
+  checkf(non_qr < qr, tag, "qr order: non-qr < qr");
+  checkf(zero < qr, tag, "qr order: zero < qr");
+  checkf(!(qr < non_qr), tag, "qr order: qr is not < non-qr");
+  checkf(!(zero < non_qr) && !(non_qr < zero), tag,
+         "qr order: zero and non-qr are not strictly ordered");
+  checkf(non_qr <= qr, tag, "qr order: non-qr <= qr");
+  checkf(zero <= non_qr && non_qr <= zero, tag, "qr preorder: zero and non-qr <= each other");
+  checkf(!(qr <= non_qr), tag, "qr order: qr is not <= non-qr");
+  checkf(!(qr <= zero), tag, "qr order: qr is not <= zero");
+  checkf(qr >= non_qr, tag, "qr order: qr >= non-qr");
+  checkf(!(non_qr >= qr), tag, "qr order: non-qr is not >= qr");
+  checkf(min(qr, non_qr) == non_qr && min(non_qr, qr) == non_qr, tag,
+         "min selects non-qr before qr");
+  checkf(min(qr, zero) == zero && min(zero, qr) == zero, tag, "min selects zero before qr");
+  checkf(max(qr, non_qr) == qr && max(non_qr, qr) == qr, tag, "max selects qr before non-qr");
+  checkf(max(qr, zero) == qr && max(zero, qr) == qr, tag, "max selects qr before zero");
+}
+
 template <class V> static void battery_fast_field(const char *tag) {
   battery_misc<V>(tag);
+  battery_field_qr_order<V>(tag);
   battery_ring<V>(tag);
   battery_infnan<V>(tag);
   battery_transcendental<V>(tag, false);
@@ -303,6 +361,7 @@ static void run_scorecard(const char *fld_tag, const char *sg_tag, const char *p
   battery_misc<Fld>(fld_tag);
   battery_misc<SG>(sg_tag);
   battery_misc<Py>(py_tag);
+  battery_field_qr_order<Fld>(fld_tag);
   battery_ring<Fld>(fld_tag);
   battery_ring<SG>(sg_tag);
   battery_ring<Py>(py_tag);
@@ -401,6 +460,8 @@ int main() {
   checkf(F<Semantics::Field2>{0.5f}.fpsan_payload() ==
              F<Semantics::FieldFast2>{0.5f}.fpsan_payload(),
          "field mirror", "Field2 and FieldFast2 share finite fingerprints");
+  battery_field_qr_order<F<Semantics::FieldWithMulCasts>>("fieldWithMulCasts");
+  battery_field_qr_order<F<Semantics::FieldWithMulCasts2>>("fieldWithMulCasts2");
   checkf(F<Semantics::SophieGermainRing>{0.5f}.fpsan_payload() !=
              F<Semantics::SophieGermainRing2>{0.5f}.fpsan_payload(),
          "re-rollable", "SophieGermain vs twin distinct moduli");
@@ -594,7 +655,8 @@ int main() {
     check(mc == n, "field cbrt: cbrt(x*y) == cbrt(x)*cbrt(y) (multiplicative)");
     check(c3 == n, "field cbrt: cbrt(x)^3 == x (perfect)");
     check(inset == n, "field sqrt: sqrt(x)^2 in {x, -x} always");
-    check(half > 0 && half < n, "field sqrt: round-trip sqrt(x)^2==x on ~half (QRs)");
+    check(half > 0 && half < n,
+          "field sqrt: round-trip sqrt(x)^2==x on ~half (quadratic residues)");
   }
   // rsqrt is exactly 1/sqrt
   {
@@ -818,6 +880,8 @@ int main() {
                                                 "dbl Pythagorean2");
   battery_fast_field<D<Semantics::FieldFast>>("dbl fieldFast");
   battery_fast_field<D<Semantics::FieldFast2>>("dbl fieldFast2");
+  battery_field_qr_order<D<Semantics::FieldWithMulCasts>>("dbl fieldWithMulCasts");
+  battery_field_qr_order<D<Semantics::FieldWithMulCasts2>>("dbl fieldWithMulCasts2");
   check(D<Semantics::Field>{0.5}.fpsan_payload() != D<Semantics::Field2>{0.5}.fpsan_payload(),
         "dbl field/field2 use distinct moduli");
 #if FPSAN_HAS_FLOAT16

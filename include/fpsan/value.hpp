@@ -107,6 +107,11 @@ FPSAN_HOST_DEVICE constexpr bool has_multiplicative_field_casts(Semantics s) {
 FPSAN_HOST_DEVICE constexpr bool has_fast_field_ops(Semantics s) {
   return s == Semantics::FieldFast || s == Semantics::FieldFast2;
 }
+FPSAN_HOST_DEVICE constexpr bool has_field_qr_order(Semantics s) {
+  return s == Semantics::Field || s == Semantics::Field2 || s == Semantics::FieldFast ||
+         s == Semantics::FieldFast2 || s == Semantics::FieldWithMulCasts ||
+         s == Semantics::FieldWithMulCasts2;
+}
 // Map the public Semantics onto the algebra-layer variant.
 FPSAN_HOST_DEVICE constexpr AlgVariant alg_variant_of(Semantics s) {
   switch (s) {
@@ -281,9 +286,12 @@ public:
 
   // ---- comparisons ---------------------------------------------------------
   // == / != compare payloads in FPSan-family semantics (exact) and the floats
-  // otherwise. Ordering in FPSan-family semantics is the *signed integer* order
-  // of payloads (Triton's min/max contract), NOT IEEE float order. Vector
-  // Values return per-lane masks.
+  // otherwise. Field-family scalar `<` uses the experimental qr-positive
+  // two-class relation: finite nonzero quadratic residues are positive; zero,
+  // sentinels, and non-residues are not. `<=` is `!(b < a)`, not the same
+  // relation as `<`. Other payload modes use the *signed integer* order of
+  // payloads (Triton's min/max contract), NOT IEEE float order. Vector Values
+  // return per-lane masks.
   FPSAN_HOST_DEVICE friend constexpr cmp_t operator==(Value a, Value b) { return a.eq(b); }
   FPSAN_HOST_DEVICE friend constexpr cmp_t operator!=(Value a, Value b) { return lnot(a.eq(b)); }
   FPSAN_HOST_DEVICE friend constexpr cmp_t operator<(Value a, Value b) { return a.less(b); }
@@ -364,7 +372,9 @@ private:
 
   FPSAN_HOST_DEVICE constexpr cmp_t eq(Value o) const { return storage_ == o.storage_; }
   FPSAN_HOST_DEVICE constexpr cmp_t less(Value o) const {
-    if constexpr (is_fpsan)
+    if constexpr (is_fpsan && is_algebraic && !is_vector && detail::has_field_qr_order(semantics))
+      return detail::alg_qr_less(alg_cfg(), storage_, o.storage_);
+    else if constexpr (is_fpsan)
       return __builtin_bit_cast(signed_bits_type, storage_) <
              __builtin_bit_cast(signed_bits_type, o.storage_);
     else

@@ -43,7 +43,7 @@ inside their supported algebraic fragment.
 | Use this semantics | When you want | Main tradeoff |
 |---|---|---|
 | `Semantics::Triton` | Compatibility with the original Triton FPSan model, including its structured `exp`, `exp2`, `sin`, and `cos` fingerprints. | It does not know value facts such as `2 + 2 == 4` or `x + x == 2*x`; infinities and NaNs are just scrambled fingerprints. |
-| `Semantics::Field` | The cleanest algebraic model for rational/polynomial code: exact `+ - * /`, no zero-divisors, and multiplicative `sqrt`/`cbrt`. | Division and `sqrt`/`cbrt` can be slow; `exp`, `log`, `sin`, and `cos` are opaque tags; mixed-width casts are cheap deterministic conventions, not homomorphisms. |
+| `Semantics::Field` | The cleanest algebraic model for rational/polynomial code: exact `+ - * /`, no zero-divisors, multiplicative `sqrt`/`cbrt`, and quadratic-residue-based `abs`/selection. | Division and `sqrt`/`cbrt` can be slow; `exp`, `log`, `sin`, and `cos` are opaque tags; mixed-width casts are cheap deterministic conventions, not homomorphisms; comparisons are not IEEE numeric order. |
 | `Semantics::FieldFast` | The same primes and finite fingerprints as `Field`, but expensive operations such as division and roots use deterministic tags. | Keeps the core `+ - *` value identities and cheap casts, but gives up `x/x == 1`, multiplicative roots, and field-inverse division. |
 | `Semantics::FieldWithMulCasts` | The same Field primes and arithmetic, but with multiplicative casts across the supported width tower, including same-width format changes such as `f16`↔`bf16` and `e4m3`↔`e5m2`. | Casts compute discrete logarithms and can be much slower, especially `f32`↔`f64`. |
 | `Semantics::SophieGermainRing` | The algebraic value model plus exact `exp`/`exp2`/`exp10` and `log`/`log2`/`log10` laws. | The modulus is composite, so rare zero-divisors exist; casts lose the Field family's optional multiplicative structure. |
@@ -208,6 +208,13 @@ Markers:
 | `1/inf == 0` | ❌ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | indeterminate forms produce `NaN` | ❌ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | `NaN` is absorbing and deterministic | ❌ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| **Order and selection** | | | | | | |
+| IEEE numeric ordering for comparisons, `min`, `max`, `abs` | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| deterministic comparison, `min`, and `max` | ✅ signed payload | ✅ qr-positive | ✅ qr-positive | ✅ qr-positive | ✅ signed payload | ✅ signed payload |
+| zero is qr-positive | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| `<` is the same relation as `<=` | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| `abs(x) == abs(-x)` for finite nonzero `x` | ❌ | ✅ qr representative | ✅ qr representative | ✅ qr representative | ❌ | ❌ |
+| `max(qr, non-qr)` selects the qr residue | ❌ | ✅ | ✅ | ✅ | ❌ | ❌ |
 | **Roots** | | | | | | |
 | `sqrt(x*y) == sqrt(x)*sqrt(y)` | ❌ tag | ✅ | ❌ tag | ✅ | ✅ | ✅ |
 | `rsqrt == 1/sqrt` | ❌ tag | ✅ | ❌ tag | ✅ | ✅ | ✅ |
@@ -243,6 +250,15 @@ Notes:
   `Semantics::FieldWithMulCasts` use the same primes and therefore
   the same finite fingerprints for input values. `FieldFast` differs in
   division and roots; `FieldWithMulCasts` differs in casts.
+- Field-family comparisons and `min`/`max` do not model magnitude. They split
+  finite nonzero residues into quadratic residues and non-residues, treating the
+  qr half as "positive"; zero, infinity, NaN, and non-residues are not
+  qr-positive. Strict `<` is true only from the non-positive class to the
+  qr-positive class, while `<=` is its reflexive preorder (`!(b < a)`). Thus
+  `0 <= n` and `n <= 0` both hold for a finite non-residue `n`, but neither is
+  strictly less than the other. `abs(x)` returns the canonical qr representative
+  of `{x, -x}`. This is useful for algebraic sign choices in rank-revealing code,
+  but it is still only deterministic fingerprint order.
 - Performance rows are order-of-magnitude summaries from the checked-in
   microbenchmarks. Exact factors still vary by target.
 - `Semantics::FieldWithMulCasts` casts are the expensive outlier because they
@@ -267,6 +283,9 @@ implementation.
 - It checks exact algebraic equivalence, not IEEE-754 rounding behavior.
 - It intentionally ignores overflow magnitude. A finite algebraic sum remains a
   finite residue; infinity comes from division by true zero.
+- Its comparisons, `min`, `max`, and `abs` are fingerprint operations, not
+  IEEE-754 magnitude/order operations. Field-family scalars use the
+  qr-positive convention described above.
 - Algebraic fingerprints do not decode back to useful floats. `to_float()` is
   deliberately unavailable in algebraic semantics.
 - Collisions are possible because a fixed-width residue cannot injectively

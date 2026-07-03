@@ -159,9 +159,9 @@ template <class B> struct bits_lane<B, true> {
 };
 template <class B> using bits_lane_t = typename bits_lane<B>::type;
 
-// Signed counterpart of a (possibly vector) unsigned bits type, used for the
-// signed-payload ordering in FPSan mode. Specialized so make_signed is never
-// applied to a vector type directly.
+// Signed counterpart of a (possibly vector) unsigned bits type, used by payload
+// modes that keep Triton's signed-payload ordering. Specialized so make_signed
+// is never applied to a vector type directly.
 template <class B, bool = is_clang_vector_v<B>> struct signed_bits {
   using type = std::make_signed_t<B>;
 };
