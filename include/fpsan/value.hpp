@@ -286,12 +286,12 @@ public:
 
   // ---- comparisons ---------------------------------------------------------
   // == / != compare payloads in FPSan-family semantics (exact) and the floats
-  // otherwise. Field-family scalar `<` uses the experimental qr-positive
-  // two-class relation: finite nonzero quadratic residues are positive; zero,
-  // sentinels, and non-residues are not. `<=` is `!(b < a)`, not the same
-  // relation as `<`. Other payload modes use the *signed integer* order of
-  // payloads (Triton's min/max contract), NOT IEEE float order. Vector Values
-  // return per-lane masks.
+  // otherwise. Field-family `<` uses the experimental qr-positive two-class
+  // relation: finite nonzero quadratic residues are positive; zero, sentinels,
+  // and non-residues are not. `<=` is `!(b < a)`, not the same relation as `<`.
+  // Other payload modes use the *signed integer* order of payloads (Triton's
+  // min/max contract), NOT IEEE float order. Vector Values return per-lane
+  // masks.
   FPSAN_HOST_DEVICE friend constexpr cmp_t operator==(Value a, Value b) { return a.eq(b); }
   FPSAN_HOST_DEVICE friend constexpr cmp_t operator!=(Value a, Value b) { return lnot(a.eq(b)); }
   FPSAN_HOST_DEVICE friend constexpr cmp_t operator<(Value a, Value b) { return a.less(b); }
@@ -372,9 +372,18 @@ private:
 
   FPSAN_HOST_DEVICE constexpr cmp_t eq(Value o) const { return storage_ == o.storage_; }
   FPSAN_HOST_DEVICE constexpr cmp_t less(Value o) const {
-    if constexpr (is_fpsan && is_algebraic && !is_vector && detail::has_field_qr_order(semantics))
-      return detail::alg_qr_less(alg_cfg(), storage_, o.storage_);
-    else if constexpr (is_fpsan)
+    if constexpr (is_fpsan && is_algebraic && detail::has_field_qr_order(semantics)) {
+      if constexpr (is_vector) {
+        using MaskLane = detail::vector_element_t<cmp_t>;
+        cmp_t out{};
+        for (unsigned i = 0; i < lanes; ++i)
+          out[i] = detail::alg_qr_less(alg_cfg(), storage_[i], o.storage_[i])
+                       ? static_cast<MaskLane>(-1)
+                       : static_cast<MaskLane>(0);
+        return out;
+      } else
+        return detail::alg_qr_less(alg_cfg(), storage_, o.storage_);
+    } else if constexpr (is_fpsan)
       return __builtin_bit_cast(signed_bits_type, storage_) <
              __builtin_bit_cast(signed_bits_type, o.storage_);
     else

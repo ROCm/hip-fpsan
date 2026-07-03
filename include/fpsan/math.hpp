@@ -38,7 +38,7 @@ template <class FT> using compute_t = std::conditional_t<std::is_same_v<FT, doub
 template <class FT, Semantics S, Conversions C>
 FPSAN_HOST_DEVICE Value<FT, S, C> abs(Value<FT, S, C> x) {
   using F = Value<FT, S, C>;
-  if constexpr (F::is_algebraic && !F::is_vector && detail::has_field_qr_order(S))
+  if constexpr (F::is_algebraic && detail::has_field_qr_order(S))
     return FPSAN_FROM_PAYLOAD(F, detail::alg_qr_abs(F::alg_cfg(), x.fpsan_payload()));
   else if constexpr (F::is_fpsan)
     return x < F(FT(0)) ? -x : x;
@@ -272,9 +272,9 @@ FPSAN_HOST_DEVICE Value<FT, S, C> fmod(Value<FT, S, C> a, Value<FT, S, C> b) {
   template <class FT, Semantics S, Conversions C>                                                  \
   FPSAN_HOST_DEVICE Value<FT, S, C> NAME(Value<FT, S, C> a, Value<FT, S, C> b) {                   \
     using F = Value<FT, S, C>;                                                                     \
-    /* Field-family scalars use the qr-positive prototype order. Other payload */                  \
+    /* Field-family values use the qr-positive prototype order. Other payload */                   \
     /* modes keep Triton's signed-payload min/max contract. */                                     \
-    if constexpr (F::is_algebraic && !F::is_vector && detail::has_field_qr_order(S)) {             \
+    if constexpr (F::is_algebraic && detail::has_field_qr_order(S)) {                              \
       return FPSAN_FROM_PAYLOAD(                                                                   \
           F, detail::ALGEBRAIC_FIELD_FN(F::alg_cfg(), a.fpsan_payload(), b.fpsan_payload()));      \
     } else if constexpr (F::is_fpsan)                                                              \
