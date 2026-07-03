@@ -209,12 +209,11 @@ Markers:
 | indeterminate forms produce `NaN` | ❌ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | `NaN` is absorbing and deterministic | ❌ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | **Order and selection** | | | | | | |
-| IEEE numeric ordering for comparisons, `min`, `max`, `abs` | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
-| deterministic comparison, `min`, and `max` | ✅ signed payload | ✅ qr-positive | ✅ qr-positive | ✅ qr-positive | ✅ signed payload | ✅ signed payload |
-| zero is qr-positive | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
-| `<` is the same relation as `<=` | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| deterministic comparison, `min`, `max`, and `abs`; not IEEE magnitude order | ✅ signed payload | ✅ qr-positive | ✅ qr-positive | ✅ qr-positive | ✅ signed payload | ✅ signed payload |
+| finite nonzero squares are positive | ❌ | ✅ qr-positive | ✅ qr-positive | ✅ qr-positive | ❌ | ❌ |
 | `abs(x) == abs(-x)` for finite nonzero `x` | ❌ | ✅ qr representative | ✅ qr representative | ✅ qr representative | ❌ | ❌ |
-| `max(qr, non-qr)` selects the qr residue | ❌ | ✅ | ✅ | ✅ | ❌ | ❌ |
+| `abs(x*y) == abs(x)*abs(y)` for finite nonzero `x,y` | ❌ | ✅ | ✅ | ✅ | ❌ | ❌ |
+| `max(positive, non-positive)` selects the positive value | ❌ | ✅ qr-positive | ✅ qr-positive | ✅ qr-positive | ❌ | ❌ |
 | **Roots** | | | | | | |
 | `sqrt(x*y) == sqrt(x)*sqrt(y)` | ❌ tag | ✅ | ❌ tag | ✅ | ✅ | ✅ |
 | `rsqrt == 1/sqrt` | ❌ tag | ✅ | ❌ tag | ✅ | ✅ | ✅ |
@@ -257,8 +256,10 @@ Notes:
   qr-positive class, while `<=` is its reflexive preorder (`!(b < a)`). Thus
   `0 <= n` and `n <= 0` both hold for a finite non-residue `n`, but neither is
   strictly less than the other. `abs(x)` returns the canonical qr representative
-  of `{x, -x}`. This is useful for algebraic sign choices in rank-revealing code,
-  but it is still only deterministic fingerprint order.
+  of `{x, -x}`, finite nonzero squares are qr-positive, and `abs` is
+  multiplicative on finite nonzero values. This is useful for algebraic sign
+  choices and nonzero pivot/norm selection in rank-revealing code, but it is
+  still only deterministic fingerprint order.
 - Performance rows are order-of-magnitude summaries from the checked-in
   microbenchmarks. Exact factors still vary by target.
 - `Semantics::FieldWithMulCasts` casts are the expensive outlier because they
