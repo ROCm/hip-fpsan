@@ -310,7 +310,7 @@ template <class Traits> void run_fpsan_matches_scalar_reference() {
   AE *dA = to_dev(m.A);
   BE *dB = to_dev(m.B);
   CE *dC = to_dev(m.C);
-  fpsan_test::for_each_fpsan_semantics([&](auto sem) {
+  fpsan_test::for_matrix_fpsan_semantics([&](auto sem) {
     constexpr Semantics S = decltype(sem)::value;
     using VA = Value<AE, S, kCC>;
     using VB = Value<BE, S, kCC>;
@@ -365,7 +365,7 @@ template <class Traits> void run_tied_preserves_unselected() {
           << "Float preserve mismatch lane=" << lane << " idx=" << idx;
     }
 
-  fpsan_test::for_each_fpsan_semantics([&](auto sem) {
+  fpsan_test::for_matrix_fpsan_semantics([&](auto sem) {
     constexpr Semantics S = decltype(sem)::value;
     CBits *dFpsan;
     HIP_CHECK(hipMalloc(&dFpsan, count * sizeof(CBits)));

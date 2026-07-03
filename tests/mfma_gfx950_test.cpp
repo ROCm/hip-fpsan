@@ -222,7 +222,7 @@ TEST(MfmaF64_16x16x4, FpsanMatchesScalarReference) {
     GTEST_SKIP() << "no HIP device";
   F64Mats m = make_f64_inputs();
   double *dA = to_dev(m.A), *dB = to_dev(m.B), *dC = to_dev(m.C);
-  fpsan_test::for_each_fpsan_semantics([&](auto sem) {
+  fpsan_test::for_matrix_fpsan_semantics([&](auto sem) {
     constexpr Semantics S = decltype(sem)::value;
     using VD = Value<double, S, kCC>;
     std::vector<std::uint64_t> ref(F64_M * F64_N);
@@ -286,7 +286,7 @@ TEST(MfmaF64_16x16x4_NEG5, FpsanMatchesScalarReference) {
   constexpr int NEG = 5;
   F64Mats m = make_f64_inputs();
   double *dA = to_dev(m.A), *dB = to_dev(m.B), *dC = to_dev(m.C);
-  fpsan_test::for_each_fpsan_semantics([&](auto sem) {
+  fpsan_test::for_matrix_fpsan_semantics([&](auto sem) {
     constexpr Semantics S = decltype(sem)::value;
     using VD = Value<double, S, kCC>;
     std::vector<std::uint64_t> ref(F64_M * F64_N);
@@ -378,7 +378,7 @@ TEST(MfmaF64_4x4x4, FpsanMatchesScalarReference) {
     GTEST_SKIP() << "no HIP device";
   auto A = make_f64_4x4x4_vec(0), B = make_f64_4x4x4_vec(1), C = make_f64_4x4x4_vec(2);
   double *dA = to_dev(A), *dB = to_dev(B), *dC = to_dev(C);
-  fpsan_test::for_each_fpsan_semantics([&](auto sem) {
+  fpsan_test::for_matrix_fpsan_semantics([&](auto sem) {
     constexpr Semantics S = decltype(sem)::value;
     using VD = Value<double, S, kCC>;
     std::vector<std::uint64_t> ref(WAVE);
@@ -441,7 +441,7 @@ TEST(MfmaF64_4x4x4_NEG5, FpsanMatchesScalarReference) {
   constexpr int NEG = 5;
   auto A = make_f64_4x4x4_vec(0), B = make_f64_4x4x4_vec(1), C = make_f64_4x4x4_vec(2);
   double *dA = to_dev(A), *dB = to_dev(B), *dC = to_dev(C);
-  fpsan_test::for_each_fpsan_semantics([&](auto sem) {
+  fpsan_test::for_matrix_fpsan_semantics([&](auto sem) {
     constexpr Semantics S = decltype(sem)::value;
     using VD = Value<double, S, kCC>;
     std::vector<std::uint64_t> ref(WAVE);
@@ -637,7 +637,7 @@ template <class T> void run_legf32_fpsan() {
   LegF32Data<T> m = make_legf32<T>();
   float *dA = to_dev(m.A), *dB = to_dev(m.B), *dC = to_dev(m.C);
   const int total = T::Bk * T::M * T::N;
-  fpsan_test::for_each_fpsan_semantics([&](auto sem) {
+  fpsan_test::for_matrix_fpsan_semantics([&](auto sem) {
     constexpr Semantics S = decltype(sem)::value;
     using VF = Value<float, S, kCC>;
     std::vector<std::uint32_t> ref(total);
@@ -872,7 +872,7 @@ template <class T> void run_legf16_fpsan() {
   using AE = typename T::AElem;
   float *dA = to_dev(m.A), *dB = to_dev(m.B), *dC = to_dev(m.C);
   const int total = T::Bk * T::M * T::N;
-  fpsan_test::for_each_fpsan_semantics([&](auto sem) {
+  fpsan_test::for_matrix_fpsan_semantics([&](auto sem) {
     constexpr Semantics S = decltype(sem)::value;
     using VF = Value<float, S, kCC>;
     std::vector<std::uint32_t> ref(total);

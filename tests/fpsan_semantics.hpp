@@ -26,6 +26,20 @@
 
 #include <type_traits>
 
+#define FPSAN_TEST_MATRIX_SEMANTICS_TRITON 0
+#define FPSAN_TEST_MATRIX_SEMANTICS_REPRESENTATIVE 1
+#define FPSAN_TEST_MATRIX_SEMANTICS_FULL 2
+
+#ifndef FPSAN_TEST_MATRIX_SEMANTICS
+#define FPSAN_TEST_MATRIX_SEMANTICS FPSAN_TEST_MATRIX_SEMANTICS_REPRESENTATIVE
+#endif
+
+#if FPSAN_TEST_MATRIX_SEMANTICS != FPSAN_TEST_MATRIX_SEMANTICS_TRITON &&                           \
+    FPSAN_TEST_MATRIX_SEMANTICS != FPSAN_TEST_MATRIX_SEMANTICS_REPRESENTATIVE &&                   \
+    FPSAN_TEST_MATRIX_SEMANTICS != FPSAN_TEST_MATRIX_SEMANTICS_FULL
+#error "FPSAN_TEST_MATRIX_SEMANTICS must be triton, representative, or full"
+#endif
+
 namespace fpsan_test {
 // Invoke f(std::integral_constant<Semantics, S>{}) for each default
 // FPSan-family semantics. Use a generic lambda and read the value as
@@ -42,6 +56,31 @@ template <class F> void for_each_fpsan_semantics(F &&f) {
   f(std::integral_constant<S, S::FieldWithMulCasts>{});
   f(std::integral_constant<S, S::SophieGermainRing>{});
   f(std::integral_constant<S, S::PythagoreanRing>{});
+}
+
+// Narrow consumer loop for expensive integration tests whose correctness does
+// not depend on re-running every algebraic flavor. Use this only after a cheap
+// primitive test covers the feature under every default/all-variant semantic.
+// Native remains excluded for the same reason as above: tests drive it as the
+// separate hardware oracle.
+template <class F> void for_triton_field_fpsan_semantics(F &&f) {
+  using S = fpsan::Semantics;
+  f(std::integral_constant<S, S::Triton>{});
+  f(std::integral_constant<S, S::Field>{});
+}
+
+// Profile-controlled loop for expensive matrix integration tests. The CMake
+// option FPSAN_TEST_MATRIX_SEMANTIC_PROFILE selects full, representative
+// (Triton + Field), or Triton-only coverage. Keep primitive semantic tests on
+// the explicit loops above so their strength does not change with this profile.
+template <class F> void for_matrix_fpsan_semantics(F &&f) {
+#if FPSAN_TEST_MATRIX_SEMANTICS == FPSAN_TEST_MATRIX_SEMANTICS_FULL
+  for_each_fpsan_semantics(f);
+#elif FPSAN_TEST_MATRIX_SEMANTICS == FPSAN_TEST_MATRIX_SEMANTICS_TRITON
+  f(std::integral_constant<fpsan::Semantics, fpsan::Semantics::Triton>{});
+#else
+  for_triton_field_fpsan_semantics(f);
+#endif
 }
 
 // The exhaustive variant loop keeps the 2-suffixed reroll variants. Use it
@@ -134,6 +173,13 @@ template <class FT, fpsan::Semantics S> constexpr bool flavor_has_cbrt() {
 //   TEST(Foo, BarFpsan) { FPSAN_RUN_FPSAN_SEMANTICS(test_bar, 17); }
 #define FPSAN_RUN_FPSAN_SEMANTICS(fn, ...)                                                         \
   ::fpsan_test::for_each_fpsan_semantics([&](auto sem) { fn<decltype(sem)::value>(__VA_ARGS__); })
+
+#define FPSAN_RUN_TRITON_FIELD_FPSAN_SEMANTICS(fn, ...)                                            \
+  ::fpsan_test::for_triton_field_fpsan_semantics(                                                  \
+      [&](auto sem) { fn<decltype(sem)::value>(__VA_ARGS__); })
+
+#define FPSAN_RUN_MATRIX_FPSAN_SEMANTICS(fn, ...)                                                  \
+  ::fpsan_test::for_matrix_fpsan_semantics([&](auto sem) { fn<decltype(sem)::value>(__VA_ARGS__); })
 
 #define FPSAN_RUN_ALL_VARIANTS(fn, ...)                                                            \
   ::fpsan_test::for_each_fpsan_semantics_all_variants(                                             \

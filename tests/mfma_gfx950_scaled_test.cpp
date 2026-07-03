@@ -185,7 +185,7 @@ template <class AElem, class BElem, int CBSZ, int BLGP> void run_scale16_fpsan()
   ScaleMats m = make_scale_mats();
   const int sa = 128, sb = 130; // both scales nonzero
   float *dA = to_dev(m.A), *dB = to_dev(m.B), *dC = to_dev(m.C);
-  fpsan_test::for_each_fpsan_semantics([&](auto sem) {
+  fpsan_test::for_matrix_fpsan_semantics([&](auto sem) {
     constexpr Semantics S = decltype(sem)::value;
     using VF = Value<float, S, kCC>;
     using VA = Value<AElem, S, kCC>;
@@ -338,7 +338,7 @@ template <class AElem, class BElem, int CBSZ, int BLGP> void run_scale32_fpsan()
   ScaleMats m = make_scale_mats32();
   const int sa = 128, sb = 130;
   float *dA = to_dev(m.A), *dB = to_dev(m.B), *dC = to_dev(m.C);
-  fpsan_test::for_each_fpsan_semantics([&](auto sem) {
+  fpsan_test::for_matrix_fpsan_semantics([&](auto sem) {
     constexpr Semantics S = decltype(sem)::value;
     using VF = Value<float, S, kCC>;
     using VA = Value<AElem, S, kCC>;
@@ -557,7 +557,7 @@ template <int CBSZ, int BLGP> void run_scale_sub16_fpsan() {
   HIP_CHECK(hipMemcpy(dA, A.data(), WAVE * sizeof(fpsan::v8i32_native), hipMemcpyHostToDevice));
   HIP_CHECK(hipMemcpy(dB, B.data(), WAVE * sizeof(fpsan::v8i32_native), hipMemcpyHostToDevice));
   HIP_CHECK(hipMemcpy(dC, Cm.data(), SM * SN * sizeof(float), hipMemcpyHostToDevice));
-  fpsan_test::for_each_fpsan_semantics([&](auto sem) {
+  fpsan_test::for_matrix_fpsan_semantics([&](auto sem) {
     constexpr Semantics S = decltype(sem)::value;
     using VF = Value<float, S, kCC>;
     const VF vsa(fpsan::detail::e8m0_to_float(128)), vsb(fpsan::detail::e8m0_to_float(130));
@@ -711,7 +711,7 @@ template <int CBSZ, int BLGP> void run_scale_sub32_fpsan() {
   HIP_CHECK(hipMemcpy(dA, A.data(), WAVE * sizeof(fpsan::v8i32_native), hipMemcpyHostToDevice));
   HIP_CHECK(hipMemcpy(dB, B.data(), WAVE * sizeof(fpsan::v8i32_native), hipMemcpyHostToDevice));
   HIP_CHECK(hipMemcpy(dC, Cm.data(), S2M * S2N * sizeof(float), hipMemcpyHostToDevice));
-  fpsan_test::for_each_fpsan_semantics([&](auto sem) {
+  fpsan_test::for_matrix_fpsan_semantics([&](auto sem) {
     constexpr Semantics S = decltype(sem)::value;
     using VF = Value<float, S, kCC>;
     const VF vsa(fpsan::detail::e8m0_to_float(128)), vsb(fpsan::detail::e8m0_to_float(130));
@@ -863,7 +863,7 @@ template <class AElem, class BElem, int CBSZ, int BLGP> void run_scale16_perbloc
     (void)hipFree(dD);
   }
   // ---- FPSan-family semantics vs payload-ring reference ---------------------
-  fpsan_test::for_each_fpsan_semantics([&](auto sem) {
+  fpsan_test::for_matrix_fpsan_semantics([&](auto sem) {
     constexpr Semantics S = decltype(sem)::value;
     using VF = Value<float, S, kCC>;
     using VA = Value<AElem, S, kCC>;
@@ -983,7 +983,7 @@ template <class AElem, class BElem, int CBSZ, int BLGP> void run_scale32_perbloc
       EXPECT_EQ(bits_of(got[i]), bits_of(ref[i])) << "Float at " << i;
     (void)hipFree(dD);
   }
-  fpsan_test::for_each_fpsan_semantics([&](auto sem) {
+  fpsan_test::for_matrix_fpsan_semantics([&](auto sem) {
     constexpr Semantics S = decltype(sem)::value;
     using VF = Value<float, S, kCC>;
     using VA = Value<AElem, S, kCC>;
@@ -1087,7 +1087,7 @@ template <int CBSZ, int BLGP> void run_scale_sub16_perblock_fpsan() {
   HIP_CHECK(hipMemcpy(dB, B.data(), WAVE * sizeof(fpsan::v8i32_native), hipMemcpyHostToDevice));
   HIP_CHECK(hipMemcpy(dC, Cm.data(), SM * SN * sizeof(float), hipMemcpyHostToDevice));
   int *dSA = to_dev(SA), *dSB = to_dev(SB);
-  fpsan_test::for_each_fpsan_semantics([&](auto sem) {
+  fpsan_test::for_matrix_fpsan_semantics([&](auto sem) {
     constexpr Semantics S = decltype(sem)::value;
     using VF = Value<float, S, kCC>;
     std::vector<std::uint32_t> ref(SM * SN);
@@ -1331,7 +1331,7 @@ template <bool AIsSub, class Fp8Elem, int CBSZ, int BLGP> void run_scale16_mixed
   fpsan::v8i32_native *dSub;
   HIP_CHECK(hipMalloc(&dSub, WAVE * sizeof(fpsan::v8i32_native)));
   HIP_CHECK(hipMemcpy(dSub, sub.data(), WAVE * sizeof(fpsan::v8i32_native), hipMemcpyHostToDevice));
-  fpsan_test::for_each_fpsan_semantics([&](auto sem) {
+  fpsan_test::for_matrix_fpsan_semantics([&](auto sem) {
     constexpr Semantics S = decltype(sem)::value;
     using VF = Value<float, S, kCC>;
     using VFp8 = Value<Fp8Elem, S, kCC>;
@@ -1562,7 +1562,7 @@ template <bool AIsSub, class Fp8Elem, int CBSZ, int BLGP> void run_scale32_mixed
   fpsan::v8i32_native *dSub;
   HIP_CHECK(hipMalloc(&dSub, WAVE * sizeof(fpsan::v8i32_native)));
   HIP_CHECK(hipMemcpy(dSub, sub.data(), WAVE * sizeof(fpsan::v8i32_native), hipMemcpyHostToDevice));
-  fpsan_test::for_each_fpsan_semantics([&](auto sem) {
+  fpsan_test::for_matrix_fpsan_semantics([&](auto sem) {
     constexpr Semantics S = decltype(sem)::value;
     using VF = Value<float, S, kCC>;
     using VFp8 = Value<Fp8Elem, S, kCC>;

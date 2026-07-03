@@ -334,7 +334,7 @@ static void run_fpsan(const char *tag) {
 }
 
 template <int AFMT, int BFMT, bool MIXED = false> static void run_fpsan_all(const char *tag) {
-  fpsan_test::for_each_fpsan_semantics(
+  fpsan_test::for_matrix_fpsan_semantics(
       [&](auto sem) { run_fpsan<decltype(sem)::value, AFMT, BFMT, MIXED>(tag); });
 }
 

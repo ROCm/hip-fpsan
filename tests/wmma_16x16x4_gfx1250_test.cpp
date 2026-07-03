@@ -179,5 +179,5 @@ template <Semantics S> void run_fpsan_matches_scalar_reference() {
 }
 
 TEST(WmmaF32F32_4, FpsanMatchesScalarReference) {
-  FPSAN_RUN_FPSAN_SEMANTICS(run_fpsan_matches_scalar_reference);
+  FPSAN_RUN_MATRIX_FPSAN_SEMANTICS(run_fpsan_matches_scalar_reference);
 }

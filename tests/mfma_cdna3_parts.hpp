@@ -266,7 +266,7 @@ template <class Traits> void run_dense_vec_fpsan() {
   if (!have_device())
     GTEST_SKIP() << "no HIP device";
   auto d = make_dense_vec_inputs<Traits>();
-  fpsan_test::for_each_fpsan_semantics([&](auto sem) {
+  fpsan_test::for_matrix_fpsan_semantics([&](auto sem) {
     constexpr Semantics S = decltype(sem)::value;
     using VA = Value<typename H::AElem, S, kCC>;
     using VB = Value<typename H::BElem, S, kCC>;
@@ -427,7 +427,7 @@ template <class Traits> void run_dense_f32_fpsan() {
   if (!have_device())
     GTEST_SKIP() << "no HIP device";
   auto d = make_dense_f32_inputs<Traits>();
-  fpsan_test::for_each_fpsan_semantics([&](auto sem) {
+  fpsan_test::for_matrix_fpsan_semantics([&](auto sem) {
     constexpr Semantics S = decltype(sem)::value;
     using VF = Value<float, S, kCC>;
     std::vector<std::uint32_t> ref(Traits::Bk * Traits::M * Traits::N);

@@ -248,7 +248,7 @@ struct WmmaF32F16_32 {
 };
 TEST(WmmaF32F16_32, LayoutMatchesHardware) { run_layout_matches_hardware<WmmaF32F16_32>(); }
 TEST(WmmaF32F16_32, FpsanMatchesScalarReference) {
-  fpsan_test::for_each_fpsan_semantics(
+  fpsan_test::for_matrix_fpsan_semantics(
       [](auto sem) { run_fpsan_matches_scalar_reference<WmmaF32F16_32, decltype(sem)::value>(); });
 }
 
@@ -267,7 +267,7 @@ struct WmmaF16F16_32 {
 };
 TEST(WmmaF16F16_32, LayoutMatchesHardware) { run_layout_matches_hardware<WmmaF16F16_32>(); }
 TEST(WmmaF16F16_32, FpsanMatchesScalarReference) {
-  fpsan_test::for_each_fpsan_semantics(
+  fpsan_test::for_matrix_fpsan_semantics(
       [](auto sem) { run_fpsan_matches_scalar_reference<WmmaF16F16_32, decltype(sem)::value>(); });
 }
 
@@ -286,7 +286,7 @@ struct WmmaF32BF16_32 {
 };
 TEST(WmmaF32BF16_32, LayoutMatchesHardware) { run_layout_matches_hardware<WmmaF32BF16_32>(); }
 TEST(WmmaF32BF16_32, FpsanMatchesScalarReference) {
-  fpsan_test::for_each_fpsan_semantics(
+  fpsan_test::for_matrix_fpsan_semantics(
       [](auto sem) { run_fpsan_matches_scalar_reference<WmmaF32BF16_32, decltype(sem)::value>(); });
 }
 
@@ -305,7 +305,7 @@ struct WmmaBF16BF16_32 {
 };
 TEST(WmmaBF16BF16_32, LayoutMatchesHardware) { run_layout_matches_hardware<WmmaBF16BF16_32>(); }
 TEST(WmmaBF16BF16_32, FpsanMatchesScalarReference) {
-  fpsan_test::for_each_fpsan_semantics([](auto sem) {
+  fpsan_test::for_matrix_fpsan_semantics([](auto sem) {
     run_fpsan_matches_scalar_reference<WmmaBF16BF16_32, decltype(sem)::value>();
   });
 }
@@ -417,15 +417,15 @@ template <int Cmod, Semantics S> void run_modifier_f16() {
 }
 
 TEST(WmmaF32F16_32, ModifierNegC) {
-  fpsan_test::for_each_fpsan_semantics(
+  fpsan_test::for_matrix_fpsan_semantics(
       [](auto sem) { run_modifier_f16<1, decltype(sem)::value>(); });
 }
 TEST(WmmaF32F16_32, ModifierAbsC) {
-  fpsan_test::for_each_fpsan_semantics(
+  fpsan_test::for_matrix_fpsan_semantics(
       [](auto sem) { run_modifier_f16<2, decltype(sem)::value>(); });
 }
 TEST(WmmaF32F16_32, ModifierNegAbsC) {
-  fpsan_test::for_each_fpsan_semantics(
+  fpsan_test::for_matrix_fpsan_semantics(
       [](auto sem) { run_modifier_f16<3, decltype(sem)::value>(); });
 }
 
@@ -563,6 +563,6 @@ template <Semantics S> void run_bf16f32_fpsan_matches_scalar_reference() {
 }
 
 TEST(WmmaBF16F32_32, FpsanMatchesScalarReference) {
-  fpsan_test::for_each_fpsan_semantics(
+  fpsan_test::for_matrix_fpsan_semantics(
       [](auto sem) { run_bf16f32_fpsan_matches_scalar_reference<decltype(sem)::value>(); });
 }

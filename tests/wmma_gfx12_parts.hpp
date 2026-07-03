@@ -259,7 +259,8 @@ template <class Traits> void run_layout_matches_hardware() {
 
 // (2) Payload test: the shipped FPSan path vs a host scalar FPSan reference, in
 // one semantics S. Self-consistency (device payload == host recompute in S), so
-// it holds for every algebraic model; driven over all of them by the caller below.
+// it holds for every algebraic model; the caller below runs representative
+// Triton + algebraic field coverage for expensive integration tests.
 template <class Traits, Semantics S> void run_fpsan_matches_scalar_reference() {
   using AE = typename Harness<Traits>::AElem;
   using BE = typename Harness<Traits>::BElem;
@@ -298,12 +299,12 @@ template <class Traits, Semantics S> void run_fpsan_matches_scalar_reference() {
   (void)hipFree(dD);
 }
 
-// Run the payload test for EVERY FPSan-family semantics (Triton + all algebraic
-// algebraic models). One device check up front; then the central list drives it.
+// Run the payload test for representative FPSan-family semantics (Triton + one
+// algebraic field). One device check up front; then the central list drives it.
 template <class Traits> void run_fpsan_matches_scalar_reference_all() {
   if (!have_device())
     GTEST_SKIP() << "no HIP device";
-  fpsan_test::for_each_fpsan_semantics(
+  fpsan_test::for_matrix_fpsan_semantics(
       [](auto sem) { run_fpsan_matches_scalar_reference<Traits, decltype(sem)::value>(); });
 }
 

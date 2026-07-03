@@ -399,7 +399,7 @@ void run_fp8_layout_and_fpsan(std::uint32_t seed, WrapFloatFn wf, MakeFpsanFn ma
     EXPECT_EQ(bits_of(got[t]), bits_of(ref[t])) << "Layout at " << t;
   (void)hipFree(dDf);
 
-  fpsan_test::for_each_fpsan_semantics([&](auto sem) {
+  fpsan_test::for_matrix_fpsan_semantics([&](auto sem) {
     constexpr Semantics S = decltype(sem)::value;
     auto wp = make_wp(sem);
     std::vector<std::uint32_t> ref_p = sw_reference_fp8_fpsan<S, AScalar, BScalar>(d);

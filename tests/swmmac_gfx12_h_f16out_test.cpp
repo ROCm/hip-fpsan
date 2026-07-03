@@ -53,7 +53,7 @@ TEST(SwmmacGfx12, F16_F16_FpsanMatchesScalarReference) {
   float *dA = to_dev(d.A), *dB = to_dev(d.B), *dC = to_dev(d.C);
   int *dp0 = to_dev(d.p0), *dp1 = to_dev(d.p1);
   std::uint16_t *dI = to_dev(d.idx);
-  fpsan_test::for_each_fpsan_semantics([&](auto sem) {
+  fpsan_test::for_matrix_fpsan_semantics([&](auto sem) {
     constexpr Semantics S = decltype(sem)::value;
     std::vector<std::uint64_t> ref = sw_reference_fpsan_h<S, _Float16, _Float16, _Float16>(d);
     std::uint16_t *dD = nullptr;

@@ -27,6 +27,28 @@ option(
     ON
 )
 
+set(FPSAN_TEST_MATRIX_SEMANTIC_PROFILE
+    "representative"
+    CACHE STRING
+    "Matrix integration FPSan semantic profile: full, representative, or triton"
+)
+set_property(
+    CACHE FPSAN_TEST_MATRIX_SEMANTIC_PROFILE
+    PROPERTY STRINGS full representative triton
+)
+if(FPSAN_TEST_MATRIX_SEMANTIC_PROFILE STREQUAL "triton")
+    set(_fpsan_test_matrix_semantics 0)
+elseif(FPSAN_TEST_MATRIX_SEMANTIC_PROFILE STREQUAL "representative")
+    set(_fpsan_test_matrix_semantics 1)
+elseif(FPSAN_TEST_MATRIX_SEMANTIC_PROFILE STREQUAL "full")
+    set(_fpsan_test_matrix_semantics 2)
+else()
+    message(
+        FATAL_ERROR
+        "FPSAN_TEST_MATRIX_SEMANTIC_PROFILE must be one of: full, representative, triton"
+    )
+endif()
+
 # Helper: define a test executable from one source file, link the library, set
 # its language, and register it with ctest.
 function(fpsan_add_test name src)
@@ -34,6 +56,10 @@ function(fpsan_add_test name src)
     add_executable(${name} ${src})
     set_source_files_properties(${src} PROPERTIES LANGUAGE ${FPSAN_TEST_LANG})
     target_link_libraries(${name} PRIVATE fpsan::fpsan fpsan_project_warnings)
+    target_compile_definitions(
+        ${name}
+        PRIVATE FPSAN_TEST_MATRIX_SEMANTICS=${_fpsan_test_matrix_semantics}
+    )
     if(TARGET GTest::gtest_main AND FPSAN_CTEST_PER_CASE)
         target_link_libraries(${name} PRIVATE GTest::gtest_main)
         include(GoogleTest)
