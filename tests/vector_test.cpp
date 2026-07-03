@@ -121,6 +121,35 @@ TEST(Vector, ComparisonMasks) {
   });
 }
 
+template <Semantics S> void expect_math_helpers_match_scalar_per_lane() {
+  using Vf = Value<f4, S, Conversions::Explicit>;
+  using Sf = Value<float, S, Conversions::Explicit>;
+  f4 x = {-4.f, -0.5f, 2.f, 3.25f};
+  f4 y = {1.f, -7.f, 0.5f, -1.25f};
+  Vf a(x), b(y);
+  const Vf abs_a = fpsan::abs(a);
+  const Vf fabs_a = fpsan::fabs(a);
+  const Vf min_ab = fpsan::min(a, b);
+  const Vf max_ab = fpsan::max(a, b);
+  const Vf fmin_ab = fpsan::fmin(a, b);
+  const Vf fmax_ab = fpsan::fmax(a, b);
+  for (int i = 0; i < 4; ++i) {
+    const Sf sx(x[i]), sy(y[i]);
+    EXPECT_TRUE(abs_a.get(i) == fpsan::abs(sx)) << "lane " << i << " S=" << int(S);
+    EXPECT_TRUE(fabs_a.get(i) == fpsan::fabs(sx)) << "lane " << i << " S=" << int(S);
+    EXPECT_TRUE(min_ab.get(i) == fpsan::min(sx, sy)) << "lane " << i << " S=" << int(S);
+    EXPECT_TRUE(max_ab.get(i) == fpsan::max(sx, sy)) << "lane " << i << " S=" << int(S);
+    EXPECT_TRUE(fmin_ab.get(i) == fpsan::fmin(sx, sy)) << "lane " << i << " S=" << int(S);
+    EXPECT_TRUE(fmax_ab.get(i) == fpsan::fmax(sx, sy)) << "lane " << i << " S=" << int(S);
+  }
+}
+
+TEST(Vector, MathHelpersMatchScalarPerLane) {
+  expect_math_helpers_match_scalar_per_lane<Semantics::Native>();
+  fpsan_test::for_each_fpsan_semantics_all_variants(
+      [](auto sem) { expect_math_helpers_match_scalar_per_lane<decltype(sem)::value>(); });
+}
+
 // ---- lane accessors get(i)/set(i) ------------------------------------------
 TEST(Vector, GetSetLanes) {
   fpsan_test::for_each_fpsan_semantics([](auto sem) {
