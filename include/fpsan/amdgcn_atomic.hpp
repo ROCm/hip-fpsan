@@ -13,9 +13,10 @@
 //     uses a CAS loop that recomputes old + v through Value's operator+. That
 //     covers both Triton's Z/2^w payload ring and the algebraic Z/nZ variants.
 //
-//   - FPSan order is signed-int order on the payload ([[value.hpp]]:less()) for
-//     every FPSan-family semantics. Hardware signed-int atomicMin/atomicMax on
-//     the payload IS the FPSan atomic_fmin/fmax -- lock-free and exact.
+//   - FPSan fmin/fmax follows the selected Value<> order. Triton and the
+//     non-field algebraic rings still use signed payload order, so hardware
+//     signed-int atomicMin/atomicMax on the payload is exact there. Field-family
+//     semantics use QR-positive order and need a CAS loop through fpsan::min/max.
 //
 // We use HIP's atomicAdd/atomicMin/atomicMax overloads as the underlying
 // primitive: HIP picks the right hardware instruction (global/flat/ds) based
@@ -33,6 +34,7 @@
 #define FPSAN_AMDGCN_ATOMIC_HPP
 
 #include "fpsan/detail/native_vec.hpp"
+#include "fpsan/math.hpp"
 #include "fpsan/value.hpp"
 
 #include <hip/hip_runtime.h>
@@ -78,16 +80,17 @@ FPSAN_DEVICE Value<float, S, C> amdgcn_atomic_fadd_f32(Value<float, S, C> *addr,
 }
 
 // ---- atomic_fmin_f32 / atomic_fmax_f32 --------------------------------------
-// FPSan mode reduces to hardware SIGNED-INT atomicMin/atomicMax on the
-// payload. Native mode runs a CAS loop on the float bits.
+// Native mode runs a CAS loop on the float bits. FPSan modes use hardware
+// signed-payload atomics only when that matches the selected Value<> order;
+// Field-family QR order uses a CAS loop through fpsan::min/max.
 namespace detail {
 
 // Type-correct libdevice min/max: fminf/fmaxf for float, fmin/fmax for
 // double (so the float path never silently promotes to the double builtin).
 FPSAN_DEVICE inline float fmm_min(float a, float b) { return fminf(a, b); }
 FPSAN_DEVICE inline float fmm_max(float a, float b) { return fmaxf(a, b); }
-FPSAN_DEVICE inline double fmm_min(double a, double b) { return fmin(a, b); }
-FPSAN_DEVICE inline double fmm_max(double a, double b) { return fmax(a, b); }
+FPSAN_DEVICE inline double fmm_min(double a, double b) { return std::fmin(a, b); }
+FPSAN_DEVICE inline double fmm_max(double a, double b) { return std::fmax(a, b); }
 
 // Native-mode fmin/fmax CAS loop on the raw bits, shared by f32 and f64:
 // read old, compute the FP min/max, CAS until success. UInt is the
@@ -107,6 +110,24 @@ template <bool IsMin, class Float, class UInt> FPSAN_DEVICE Float atomic_fmm(Flo
   }
 }
 
+// FPSan fmin/fmax CAS loop for semantics whose order is not the hardware
+// signed-payload order. This keeps the old-value return convention while
+// delegating the actual ordering to fpsan::min/max.
+template <bool IsMin, class V, class UInt> FPSAN_DEVICE V atomic_value_fmm(V *addr, V v) {
+  static_assert(sizeof(V) == sizeof(UInt), "atomic fmin/fmax expects one scalar storage word");
+  auto *p = reinterpret_cast<UInt *>(addr);
+  UInt old_bits = *p;
+  for (;;) {
+    const V oldV = V::from_storage_bits(__builtin_bit_cast(typename V::bits_type, old_bits));
+    const V newV = IsMin ? fpsan::min(oldV, v) : fpsan::max(oldV, v);
+    const UInt new_bits = __builtin_bit_cast(UInt, newV.to_storage_bits());
+    const UInt witness = atomicCAS(p, old_bits, new_bits);
+    if (witness == old_bits)
+      return oldV;
+    old_bits = witness;
+  }
+}
+
 } // namespace detail
 
 template <Semantics S, Conversions C>
@@ -116,6 +137,8 @@ FPSAN_DEVICE Value<float, S, C> amdgcn_atomic_fmin_f32(Value<float, S, C> *addr,
     float old =
         detail::atomic_fmm<true, float, unsigned>(reinterpret_cast<float *>(addr), v.to_float());
     return Value<float, S, C>(old);
+  } else if constexpr (detail::has_field_qr_order(S)) {
+    return detail::atomic_value_fmm<true, Value<float, S, C>, unsigned>(addr, v);
   } else {
     int old = atomicMin(reinterpret_cast<int *>(addr), static_cast<int>(v.fpsan_payload()));
     return Value<float, S, C>::from_fpsan_payload(static_cast<std::uint32_t>(old));
@@ -129,6 +152,8 @@ FPSAN_DEVICE Value<float, S, C> amdgcn_atomic_fmax_f32(Value<float, S, C> *addr,
     float old =
         detail::atomic_fmm<false, float, unsigned>(reinterpret_cast<float *>(addr), v.to_float());
     return Value<float, S, C>(old);
+  } else if constexpr (detail::has_field_qr_order(S)) {
+    return detail::atomic_value_fmm<false, Value<float, S, C>, unsigned>(addr, v);
   } else {
     int old = atomicMax(reinterpret_cast<int *>(addr), static_cast<int>(v.fpsan_payload()));
     return Value<float, S, C>::from_fpsan_payload(static_cast<std::uint32_t>(old));
@@ -166,9 +191,8 @@ FPSAN_DEVICE Value<double, S, C> amdgcn_atomic_fadd_f64(Value<double, S, C> *add
 }
 
 // ---- atomic_fmin_f64 / atomic_fmax_f64 -------------------------------------
-// FPSan order is signed-int order on the (64-bit) payload, so FPSan reduces to
-// a hardware signed 64-bit atomicMin/atomicMax. Native mode runs a CAS loop on
-// the 64-bit float bits (no hardware integer-typed atomic on a double).
+// Same ordering split as f32. Native mode runs a CAS loop on the 64-bit float
+// bits (no hardware integer-typed atomic on a double).
 template <Semantics S, Conversions C>
 FPSAN_DEVICE Value<double, S, C> amdgcn_atomic_fmin_f64(Value<double, S, C> *addr,
                                                         Value<double, S, C> v) {
@@ -176,6 +200,8 @@ FPSAN_DEVICE Value<double, S, C> amdgcn_atomic_fmin_f64(Value<double, S, C> *add
     double old = detail::atomic_fmm<true, double, unsigned long long>(
         reinterpret_cast<double *>(addr), v.to_float());
     return Value<double, S, C>(old);
+  } else if constexpr (detail::has_field_qr_order(S)) {
+    return detail::atomic_value_fmm<true, Value<double, S, C>, unsigned long long>(addr, v);
   } else {
     long long old =
         atomicMin(reinterpret_cast<long long *>(addr), static_cast<long long>(v.fpsan_payload()));
@@ -190,6 +216,8 @@ FPSAN_DEVICE Value<double, S, C> amdgcn_atomic_fmax_f64(Value<double, S, C> *add
     double old = detail::atomic_fmm<false, double, unsigned long long>(
         reinterpret_cast<double *>(addr), v.to_float());
     return Value<double, S, C>(old);
+  } else if constexpr (detail::has_field_qr_order(S)) {
+    return detail::atomic_value_fmm<false, Value<double, S, C>, unsigned long long>(addr, v);
   } else {
     long long old =
         atomicMax(reinterpret_cast<long long *>(addr), static_cast<long long>(v.fpsan_payload()));

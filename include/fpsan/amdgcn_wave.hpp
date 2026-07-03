@@ -7,15 +7,16 @@
 // cross-lane data movers, ...). Like amdgcn_matrix.hpp, this is GPU-only and
 // opt-in (not pulled by <fpsan/fpsan.hpp>).
 //
-// The wave-reduce family relies on two identities (see also [[mix.hpp]],
-// [[value.hpp]]):
-//   - FPSan addition is integer add mod 2^w on the payload, so a butterfly
-//     reduce produces the same payload as a sequential reduce once the lane
-//     exchange covers the full wave. Strategy and tree shape are irrelevant in
-//     FPSan mode.
-//   - FPSan order is signed-int order on the payload, so fpsan::min /
-//   fpsan::max
-//     reduce to signed-int min / max on storage. Same butterfly works.
+// The wave-reduce family relies on the selected Value<> operation being
+// order-independent for the certified reductions:
+//   - FPSan addition uses the mode's payload addition (Triton's Z/2^w ring or
+//     the algebraic Z/nZ variants), so a butterfly reduce produces the same
+//     payload as a sequential reduce once the lane exchange covers the full
+//     wave. Strategy and tree shape are irrelevant in FPSan mode.
+//   - FPSan fmin/fmax use fpsan::min/max. Triton and non-field algebraic rings
+//     keep signed-payload order; Field-family semantics use QR-positive order
+//     with deterministic same-class tie-breaking. The same butterfly works
+//     because the selected min/max operation is associative and commutative.
 //
 // The wrappers are emitted by the FPSAN_DEFINE_WAVE_REDUCE macro; new (op,
 // type) pairs are one-liners.
@@ -37,8 +38,8 @@ namespace fpsan {
 // (passes Strategy as the _Constant int32_t arg). FPSan mode runs a wave-size
 // correct XOR butterfly with COMBINE_EXPR, where the names `r` and `other` are
 // in scope and resolve to per-stage Values. Strategy is ignored in FPSan mode
-// (for fadd/fmin/fmax: the combine op is associative + commutative on
-// payloads, so the tree shape doesn't matter; for fsub: we pick the same
+// (for fadd/fmin/fmax: the selected Value<> combine op is associative and
+// commutative, so the tree shape doesn't matter; for fsub: we pick the same
 // butterfly shape as the rest of the family and document that the Float and
 // FPSan paths may differ in last-stage rounding -- the FPSan answer is the
 // one that matches an independent host scalar butterfly reference, which is
