@@ -484,6 +484,30 @@ static void check_field_cast_tower_constants(detail::AlgVariant v, const char *t
     }
 }
 
+template <Semantics S> static void check_composite_dlog_fast_path(const char *tag) {
+  using V = F<S>;
+  const auto cfg = V::alg_cfg();
+  checkf(cfg.two_moduli, tag, "composite dlog test requires a two-moduli variant");
+  const detail::u64 p = cfg.n / cfg.d;
+  const detail::u64 gp = cfg.g % p;
+  const detail::u64 cases[] = {0,         1,         2,         3,         5,        cfg.d / 7,
+                               cfg.d / 3, cfg.d / 2, cfg.d - 3, cfg.d - 2, cfg.d - 1};
+  for (detail::u64 k : cases) {
+    const detail::u64 r = detail::alg_powmod(cfg.g, k, cfg.n);
+    const detail::u64 target = detail::alg_powmod(r % p, cfg.d + 1, p);
+    const detail::u64 exact = detail::alg_dlog_scan(target, gp, cfg.d, p);
+    const detail::u64 got = detail::alg_dlog1(cfg, r);
+    char msg[192];
+    std::snprintf(msg, sizeof msg, "dlog fast path matches exact scan for k=%llu",
+                  static_cast<unsigned long long>(k));
+    checkf(got == exact && exact == k, tag, msg);
+    checkf(
+        log(V::from_fpsan_payload(static_cast<typename V::bits_type>(r))) ==
+            V::from_fpsan_payload(static_cast<typename V::bits_type>((cfg.n / cfg.d) * k % cfg.n)),
+        tag, "log(g^k) lands in the additive order-d subgroup");
+  }
+}
+
 int main() {
   using Alg = F<Semantics::Field>;
   using Scr = F<Semantics::Triton>; // Triton model
@@ -513,6 +537,10 @@ int main() {
          "re-rollable", "field vs field2 distinct moduli");
   check_field_cast_tower_constants(detail::AlgVariant::Field1, "field cast tower");
   check_field_cast_tower_constants(detail::AlgVariant::Field2, "field2 cast tower");
+  check_composite_dlog_fast_path<Semantics::SophieGermainRing>("SophieGermain dlog");
+  check_composite_dlog_fast_path<Semantics::SophieGermainRing2>("SophieGermain2 dlog");
+  check_composite_dlog_fast_path<Semantics::PythagoreanRing>("Pythagorean dlog");
+  check_composite_dlog_fast_path<Semantics::PythagoreanRing2>("Pythagorean2 dlog");
   checkf(F<Semantics::Field>::alg_cfg().n == F<Semantics::FieldWithMulCasts>::alg_cfg().n,
          "field mirror", "Field and FieldWithMulCasts share the same prime");
   checkf(F<Semantics::Field>::alg_cfg().n == F<Semantics::FieldFast>::alg_cfg().n, "field mirror",
