@@ -957,41 +957,25 @@ FPSAN_HOST_DEVICE constexpr u64 alg_dlog_rho(u64 target, u64 gp, u64 d, u64 p) {
   }
   return 0; // astronomically unlikely across 16 walks; payload then poisoned
 }
-// The original linear log scan: Find k such that gp ^ k mod p = target
-FPSAN_HOST_DEVICE constexpr u64 alg_dlog_scan(u64 target, u64 gp, u64 d, u64 p) {
-  u64 cur = 1 % p;
-  for (u64 k = 0; k < d; ++k) {
-    if (cur == target)
-      return k;
-    cur = alg_mulmod(cur, gp, p);
-  }
-  return d; // unreachable when target lies in <g>
-}
 FPSAN_HOST_DEVICE constexpr u64 alg_dlog1(const AlgConfig &c, u64 r) {
   const u64 p = c.n / c.d; // prime field factor (n = p*d)
   const u64 rp = r % p;
   if (rp == 0)
-    return c.d; // sentinel: value vanishes in the F_p factor
-  if (rp == 1)
-    return 0;
+    return c.d;                                  // sentinel: value vanishes in the F_p factor
   const u64 gp = c.g % p;                        // order-d generator in F_p^*
   const u64 target = alg_powmod(rp, c.d + 1, p); // r's order-d component
-  if (target == 1 % p)
-    return 0;
   // Small order: the exact O(d) scan (proven, used by fp8/16/32). Large
   // order (64-bit, d ~ 2^31): Pollard's rho, O(sqrt d). Both return the
   // same unique k in [0, d).
-  if (c.d > (u64{1} << 20)) {
-    const u64 k = alg_dlog_rho(target, gp, c.d, p);
-    return alg_powmod(gp, k, p) == target ? k : c.d;
-  }
-  // Try pollard's rho here for medium size orders as well
-  if (c.d > (u64{1} << 10)) {
-    const u64 k = alg_dlog_rho(target, gp, c.d, p);
-    if (k < c.d && alg_powmod(gp, k, p) == target)
+  if (c.d > (u64{1} << 20))
+    return alg_dlog_rho(target, gp, c.d, p);
+  u64 cur = 1 % p;
+  for (u64 k = 0; k < c.d; ++k) {
+    if (cur == target)
       return k;
+    cur = alg_mulmod(cur, gp, p);
   }
-  return alg_dlog_scan(target, gp, c.d, p);
+  return c.d; // unreachable: target lies in <g>
 }
 FPSAN_HOST_DEVICE constexpr u64 alg_log1(const AlgConfig &c, u64 r) {
   if (!c.two_moduli)
@@ -1000,8 +984,6 @@ FPSAN_HOST_DEVICE constexpr u64 alg_log1(const AlgConfig &c, u64 r) {
     return c.nan_code; // log(Inf/NaN)
   if (r == 0)
     return c.inf_code; // log(0) = -inf (unsigned pole)
-  if (r == 1)
-    return 0;
   const u64 k = alg_dlog1(c, r);
   if (k >= c.d)
     return c.nan_code; // vanishes in the F_p factor
@@ -1063,8 +1045,6 @@ template <class U> FPSAN_HOST_DEVICE constexpr U alg_logb_1(const AlgConfig &c, 
     return static_cast<U>(c.nan_code);
   if (r == 0)
     return static_cast<U>(c.inf_code);
-  if (r == static_cast<U>(1))
-    return static_cast<U>(0);
   const U k = static_cast<U>(alg_dlog1(c, static_cast<u64>(r)));
   if (k >= static_cast<U>(c.d))
     return static_cast<U>(c.nan_code);
