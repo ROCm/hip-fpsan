@@ -13,10 +13,10 @@
 //     uses a CAS loop that recomputes old + v through Value's operator+. That
 //     covers both Triton's Z/2^w payload ring and the algebraic Z/nZ variants.
 //
-//   - FPSan fmin/fmax follows the selected Value<> order. Triton and the
-//     non-field algebraic rings still use signed payload order, so hardware
-//     signed-int atomicMin/atomicMax on the payload is exact there. Field-family
-//     semantics use QR-positive order and need a CAS loop through fpsan::min/max.
+//   - FPSan fmin/fmax follows the selected Value<> order. Triton and algebraic
+//     modes without qr-order use signed payload order, so hardware signed-int
+//     atomicMin/atomicMax on the payload is exact there. Algebraic qr-order
+//     semantics need a CAS loop through fpsan::min/max.
 //
 // We use HIP's atomicAdd/atomicMin/atomicMax overloads as the underlying
 // primitive: HIP picks the right hardware instruction (global/flat/ds) based
@@ -82,7 +82,7 @@ FPSAN_DEVICE Value<float, S, C> amdgcn_atomic_fadd_f32(Value<float, S, C> *addr,
 // ---- atomic_fmin_f32 / atomic_fmax_f32 --------------------------------------
 // Native mode runs a CAS loop on the float bits. FPSan modes use hardware
 // signed-payload atomics only when that matches the selected Value<> order;
-// Field-family QR order uses a CAS loop through fpsan::min/max.
+// algebraic qr-order uses a CAS loop through fpsan::min/max.
 namespace detail {
 
 // Type-correct libdevice min/max: fminf/fmaxf for float, fmin/fmax for
@@ -128,6 +128,13 @@ template <bool IsMin, class V, class UInt> FPSAN_DEVICE V atomic_value_fmm(V *ad
   }
 }
 
+template <class V> FPSAN_HOST_DEVICE constexpr bool atomic_needs_value_fmm() {
+  if constexpr (V::is_algebraic)
+    return alg_has_qr_order(V::alg_cfg());
+  else
+    return false;
+}
+
 } // namespace detail
 
 template <Semantics S, Conversions C>
@@ -137,7 +144,7 @@ FPSAN_DEVICE Value<float, S, C> amdgcn_atomic_fmin_f32(Value<float, S, C> *addr,
     float old =
         detail::atomic_fmm<true, float, unsigned>(reinterpret_cast<float *>(addr), v.to_float());
     return Value<float, S, C>(old);
-  } else if constexpr (detail::has_field_qr_order(S)) {
+  } else if constexpr (detail::atomic_needs_value_fmm<Value<float, S, C>>()) {
     return detail::atomic_value_fmm<true, Value<float, S, C>, unsigned>(addr, v);
   } else {
     int old = atomicMin(reinterpret_cast<int *>(addr), static_cast<int>(v.fpsan_payload()));
@@ -152,7 +159,7 @@ FPSAN_DEVICE Value<float, S, C> amdgcn_atomic_fmax_f32(Value<float, S, C> *addr,
     float old =
         detail::atomic_fmm<false, float, unsigned>(reinterpret_cast<float *>(addr), v.to_float());
     return Value<float, S, C>(old);
-  } else if constexpr (detail::has_field_qr_order(S)) {
+  } else if constexpr (detail::atomic_needs_value_fmm<Value<float, S, C>>()) {
     return detail::atomic_value_fmm<false, Value<float, S, C>, unsigned>(addr, v);
   } else {
     int old = atomicMax(reinterpret_cast<int *>(addr), static_cast<int>(v.fpsan_payload()));
@@ -200,7 +207,7 @@ FPSAN_DEVICE Value<double, S, C> amdgcn_atomic_fmin_f64(Value<double, S, C> *add
     double old = detail::atomic_fmm<true, double, unsigned long long>(
         reinterpret_cast<double *>(addr), v.to_float());
     return Value<double, S, C>(old);
-  } else if constexpr (detail::has_field_qr_order(S)) {
+  } else if constexpr (detail::atomic_needs_value_fmm<Value<double, S, C>>()) {
     return detail::atomic_value_fmm<true, Value<double, S, C>, unsigned long long>(addr, v);
   } else {
     long long old =
@@ -216,7 +223,7 @@ FPSAN_DEVICE Value<double, S, C> amdgcn_atomic_fmax_f64(Value<double, S, C> *add
     double old = detail::atomic_fmm<false, double, unsigned long long>(
         reinterpret_cast<double *>(addr), v.to_float());
     return Value<double, S, C>(old);
-  } else if constexpr (detail::has_field_qr_order(S)) {
+  } else if constexpr (detail::atomic_needs_value_fmm<Value<double, S, C>>()) {
     return detail::atomic_value_fmm<false, Value<double, S, C>, unsigned long long>(addr, v);
   } else {
     long long old =

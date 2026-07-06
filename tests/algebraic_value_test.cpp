@@ -294,9 +294,9 @@ template <class V> static typename V::bits_type first_non_qr_payload() {
   return Bits{0};
 }
 
-template <class V> static void battery_field_qr_order(const char *tag) {
-  static_assert(!V::is_vector, "scalar Field-family semantics required");
-  static_assert(detail::has_field_qr_order(V::semantics), "Field-family semantics required");
+template <class V> static void battery_qr_order(const char *tag) {
+  static_assert(!V::is_vector, "scalar algebraic qr-order semantics required");
+  static_assert(detail::alg_has_qr_order(V::alg_cfg()), "algebraic qr-order semantics required");
   using Bits = typename V::bits_type;
   const auto cfg = V::alg_cfg();
   const Bits qr_payload = Bits{1};
@@ -341,10 +341,24 @@ template <class V> static void battery_field_qr_order(const char *tag) {
   checkf(max(qr, zero) == qr && max(zero, qr) == qr, tag, "max selects qr before zero");
 }
 
-template <class V> static void battery_field_qr_order_vector(const char *tag) {
-  static_assert(V::is_vector, "vector Field-family semantics required");
+template <class V>
+static void battery_qr_small_primes(const char *tag, bool expect_two_positive,
+                                    bool expect_three_positive) {
+  using Elem = typename V::element_type;
+  const auto cfg = V::alg_cfg();
+  const V two{Elem{2.0f}};
+  const V three{Elem{3.0f}};
+  checkf(detail::alg_has_qr_order(cfg), tag, "small primes: selected factor supports qr-order");
+  checkf(detail::alg_is_nonzero_qr(cfg, two.fpsan_payload()) == expect_two_positive, tag,
+         expect_two_positive ? "2 is qr-positive" : "2 is not qr-positive");
+  checkf(detail::alg_is_nonzero_qr(cfg, three.fpsan_payload()) == expect_three_positive, tag,
+         expect_three_positive ? "3 is qr-positive" : "3 is not qr-positive");
+}
+
+template <class V> static void battery_qr_order_vector(const char *tag) {
+  static_assert(V::is_vector, "vector algebraic qr-order semantics required");
   static_assert(V::lanes >= 4, "test expects at least four lanes");
-  static_assert(detail::has_field_qr_order(V::semantics), "Field-family semantics required");
+  static_assert(detail::alg_has_qr_order(V::alg_cfg()), "algebraic qr-order semantics required");
   using Bits = typename V::bits_type;
   using LaneBits = detail::bits_lane_t<Bits>;
   using Scalar = Value<typename V::element_type, V::semantics, V::conversions>;
@@ -392,7 +406,7 @@ template <class V> static void battery_field_qr_order_vector(const char *tag) {
 
 template <class V> static void battery_fast_field(const char *tag) {
   battery_misc<V>(tag);
-  battery_field_qr_order<V>(tag);
+  battery_qr_order<V>(tag);
   battery_ring<V>(tag);
   battery_infnan<V>(tag);
   battery_transcendental<V>(tag, false);
@@ -423,8 +437,9 @@ template <class V> static void battery_supported_narrow_type(const char *tag) {
     checkf(v(7.0f) / v(7.0f) != v(1.0f), tag, "narrow type: fast division is tagged");
   else
     checkf(v(7.0f) / v(7.0f) == v(1.0f), tag, "narrow type: faithful x/x == 1");
-  if constexpr (detail::has_field_qr_order(V::semantics))
-    battery_field_qr_order<V>(tag);
+  static_assert(detail::alg_has_qr_order(V::alg_cfg()),
+                "checked-in algebraic configs must support qr-order");
+  battery_qr_order<V>(tag);
 }
 
 // Run the whole scorecard over one variant (T = a Value<...> type).
@@ -433,7 +448,11 @@ static void run_scorecard(const char *fld_tag, const char *sg_tag, const char *p
   battery_misc<Fld>(fld_tag);
   battery_misc<SG>(sg_tag);
   battery_misc<Py>(py_tag);
-  battery_field_qr_order<Fld>(fld_tag);
+  battery_qr_order<Fld>(fld_tag);
+  battery_qr_order<SG>(sg_tag);
+  battery_qr_order<Py>(py_tag);
+  battery_qr_small_primes<SG>(sg_tag, true, true);
+  battery_qr_small_primes<Py>(py_tag, true, false);
   battery_ring<Fld>(fld_tag);
   battery_ring<SG>(sg_tag);
   battery_ring<Py>(py_tag);
@@ -560,20 +579,42 @@ int main() {
   checkf(F<Semantics::Field2>{0.5f}.fpsan_payload() ==
              F<Semantics::FieldFast2>{0.5f}.fpsan_payload(),
          "field mirror", "Field2 and FieldFast2 share finite fingerprints");
-  battery_field_qr_order<F<Semantics::FieldWithMulCasts>>("fieldWithMulCasts");
-  battery_field_qr_order<F<Semantics::FieldWithMulCasts2>>("fieldWithMulCasts2");
-  battery_field_qr_order<Value<fp8_e4m3, Semantics::Field, Conversions::Explicit>>(
-      "fp8 e4m3 field");
-  battery_field_qr_order<Value<fp8_e5m2, Semantics::Field, Conversions::Explicit>>(
-      "fp8 e5m2 field");
-  battery_field_qr_order<Value<fp8_e4m3, Semantics::FieldFast, Conversions::Explicit>>(
+  battery_qr_order<F<Semantics::FieldWithMulCasts>>("fieldWithMulCasts");
+  battery_qr_order<F<Semantics::FieldWithMulCasts2>>("fieldWithMulCasts2");
+  battery_qr_order<Value<fp8_e4m3, Semantics::Field, Conversions::Explicit>>("fp8 e4m3 field");
+  battery_qr_order<Value<fp8_e5m2, Semantics::Field, Conversions::Explicit>>("fp8 e5m2 field");
+  battery_qr_order<Value<fp8_e4m3, Semantics::FieldFast, Conversions::Explicit>>(
       "fp8 e4m3 fieldFast");
-  battery_field_qr_order<Value<fp8_e5m2, Semantics::FieldWithMulCasts, Conversions::Explicit>>(
+  battery_qr_order<Value<fp8_e5m2, Semantics::FieldWithMulCasts, Conversions::Explicit>>(
       "fp8 e5m2 fieldWithMulCasts");
-  battery_field_qr_order_vector<VF<Semantics::Field>>("vector field");
-  battery_field_qr_order_vector<VF<Semantics::Field2>>("vector field2");
-  battery_field_qr_order_vector<VF<Semantics::FieldFast>>("vector fieldFast");
-  battery_field_qr_order_vector<VF<Semantics::FieldWithMulCasts>>("vector fieldWithMulCasts");
+  battery_qr_order<Value<fp8_e4m3, Semantics::SophieGermainRing, Conversions::Explicit>>(
+      "fp8 e4m3 SophieGermain");
+  battery_qr_order<Value<fp8_e5m2, Semantics::SophieGermainRing, Conversions::Explicit>>(
+      "fp8 e5m2 SophieGermain");
+  battery_qr_order<Value<fp8_e4m3, Semantics::SophieGermainRing2, Conversions::Explicit>>(
+      "fp8 e4m3 SophieGermain2");
+  battery_qr_order<Value<fp8_e5m2, Semantics::SophieGermainRing2, Conversions::Explicit>>(
+      "fp8 e5m2 SophieGermain2");
+  battery_qr_order<Value<fp8_e4m3, Semantics::PythagoreanRing, Conversions::Explicit>>(
+      "fp8 e4m3 Pythagorean");
+  battery_qr_order<Value<fp8_e5m2, Semantics::PythagoreanRing, Conversions::Explicit>>(
+      "fp8 e5m2 Pythagorean");
+  battery_qr_order<Value<fp8_e4m3, Semantics::PythagoreanRing2, Conversions::Explicit>>(
+      "fp8 e4m3 Pythagorean2");
+  battery_qr_order<Value<fp8_e5m2, Semantics::PythagoreanRing2, Conversions::Explicit>>(
+      "fp8 e5m2 Pythagorean2");
+  battery_qr_small_primes<Value<fp8_e4m3, Semantics::SophieGermainRing, Conversions::Explicit>>(
+      "fp8 e4m3 SophieGermain", true, true);
+  battery_qr_small_primes<Value<fp8_e4m3, Semantics::SophieGermainRing2, Conversions::Explicit>>(
+      "fp8 e4m3 SophieGermain2", true, true);
+  battery_qr_small_primes<Value<fp8_e4m3, Semantics::PythagoreanRing, Conversions::Explicit>>(
+      "fp8 e4m3 Pythagorean", true, false);
+  battery_qr_small_primes<Value<fp8_e4m3, Semantics::PythagoreanRing2, Conversions::Explicit>>(
+      "fp8 e4m3 Pythagorean2", true, false);
+  battery_qr_order_vector<VF<Semantics::Field>>("vector field");
+  battery_qr_order_vector<VF<Semantics::Field2>>("vector field2");
+  battery_qr_order_vector<VF<Semantics::FieldFast>>("vector fieldFast");
+  battery_qr_order_vector<VF<Semantics::FieldWithMulCasts>>("vector fieldWithMulCasts");
   checkf(F<Semantics::SophieGermainRing>{0.5f}.fpsan_payload() !=
              F<Semantics::SophieGermainRing2>{0.5f}.fpsan_payload(),
          "re-rollable", "SophieGermain vs twin distinct moduli");
@@ -992,8 +1033,8 @@ int main() {
                                                 "dbl Pythagorean2");
   battery_fast_field<D<Semantics::FieldFast>>("dbl fieldFast");
   battery_fast_field<D<Semantics::FieldFast2>>("dbl fieldFast2");
-  battery_field_qr_order<D<Semantics::FieldWithMulCasts>>("dbl fieldWithMulCasts");
-  battery_field_qr_order<D<Semantics::FieldWithMulCasts2>>("dbl fieldWithMulCasts2");
+  battery_qr_order<D<Semantics::FieldWithMulCasts>>("dbl fieldWithMulCasts");
+  battery_qr_order<D<Semantics::FieldWithMulCasts2>>("dbl fieldWithMulCasts2");
   check(D<Semantics::Field>{0.5}.fpsan_payload() != D<Semantics::Field2>{0.5}.fpsan_payload(),
         "dbl field/field2 use distinct moduli");
 #if FPSAN_HAS_FLOAT16
@@ -1007,6 +1048,10 @@ int main() {
   battery_supported_narrow_type<H<Semantics::SophieGermainRing2>>("f16 SophieGermain2");
   battery_supported_narrow_type<H<Semantics::PythagoreanRing>>("f16 Pythagorean");
   battery_supported_narrow_type<H<Semantics::PythagoreanRing2>>("f16 Pythagorean2");
+  battery_qr_small_primes<H<Semantics::SophieGermainRing>>("f16 SophieGermain", true, true);
+  battery_qr_small_primes<H<Semantics::SophieGermainRing2>>("f16 SophieGermain2", true, true);
+  battery_qr_small_primes<H<Semantics::PythagoreanRing>>("f16 Pythagorean", true, false);
+  battery_qr_small_primes<H<Semantics::PythagoreanRing2>>("f16 Pythagorean2", true, false);
 #endif
 #if FPSAN_HAS_BF16
   battery_supported_narrow_type<Bf<Semantics::Field>>("bf16 field");
@@ -1019,6 +1064,10 @@ int main() {
   battery_supported_narrow_type<Bf<Semantics::SophieGermainRing2>>("bf16 SophieGermain2");
   battery_supported_narrow_type<Bf<Semantics::PythagoreanRing>>("bf16 Pythagorean");
   battery_supported_narrow_type<Bf<Semantics::PythagoreanRing2>>("bf16 Pythagorean2");
+  battery_qr_small_primes<Bf<Semantics::SophieGermainRing>>("bf16 SophieGermain", true, true);
+  battery_qr_small_primes<Bf<Semantics::SophieGermainRing2>>("bf16 SophieGermain2", true, true);
+  battery_qr_small_primes<Bf<Semantics::PythagoreanRing>>("bf16 Pythagorean", true, false);
+  battery_qr_small_primes<Bf<Semantics::PythagoreanRing2>>("bf16 Pythagorean2", true, false);
 #endif
 
   std::printf("passed %ld, failed %ld\n", pass, fail);

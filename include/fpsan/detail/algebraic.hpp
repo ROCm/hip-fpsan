@@ -178,51 +178,53 @@ FPSAN_HOST_DEVICE constexpr u64 alg_field_root(AlgVariant v, unsigned w) {
 // group has order p-1, divisible by d, so a genuine order-d rotation exists).
 // g is the order-d exp/log generator (d | p-1), omega the order-d rotation
 // element of (Z/n)[i] -- a rotation in the F_p factor, identity in the F_d
-// factor. d is ~sqrt(2) smaller than in the SophieGermainRing family at the
-// same width, which is the collision cost paid for sin/cos laws. The
-// number-theoretic constraints are discussed in docs/reducing-floats-mod-p.tex.
+// factor. The checked-in d factors are 7 mod 24, which keeps the selected
+// qr-order factor 2-positive. d is ~sqrt(2) smaller than in the
+// SophieGermainRing family at the same width, which is the collision cost paid
+// for sin/cos laws. The number-theoretic constraints are discussed in
+// docs/reducing-floats-mod-p.tex.
 FPSAN_HOST_DEVICE constexpr AlgModulus alg_pythagorean_pair(AlgVariant v, unsigned w) {
   const bool p1 = (v == AlgVariant::Pythagorean1);
   switch (w) {
   case 8:
     return p1 ? AlgModulus{203u, 190u, 7u, true, 134u, 140u, true}
-              : AlgModulus{39u, 16u, 3u, true, 19u, 24u, true};
+              : AlgModulus{203u, 190u, 7u, true, 134u, 140u, true};
   case 16:
     return p1 ? AlgModulus{64643u, 57024u, 127u, true, 36831u, 62992u, true}
-              : AlgModulus{37733u, 31914u, 97u, true, 20856u, 11252u, true};
+              : AlgModulus{25043u, 20304u, 79u, true, 13431u, 17854u, true};
   case 32:
-    return p1 ? AlgModulus{4279024103u, 4277061684u, 32707u, true, 2673470181u, 2323668815u, true}
-              : AlgModulus{4263339083u, 4261380264u, 32647u, true, 2663668731u, 1327688196u, true};
+    return p1 ? AlgModulus{4263339083u, 4261380264u, 32647u, true, 2663668731u, 1327688196u, true}
+              : AlgModulus{4219574243u, 4217625504u, 32479u, true, 2636320431u, 181102904u, true};
   case 64:
-    // p = 4d+1, d == 3 (mod 4) so the r^(d+1) log projection lands in <g>;
+    // p = 4d+1, d == 7 (mod 24) so the r^(d+1) log projection lands in <g>;
     // omega is the order-d rotor in (Z/n)[i] (identity in the F_d factor).
-    return p1 ? AlgModulus{18446733956915472983ull, 18446733828066489444ull, 2147483059ull, true,
-                           11529208662674209581ull, 9560073116094198325ull,  true}
-              : AlgModulus{18446693549896360103ull, 18446693421047517684ull, 2147480707ull, true,
-                           11529183408287330181ull, 8946606739803700719ull,  true};
+    return p1 ? AlgModulus{18446679324986898443ull, 18446679196138105704ull, 2147479879ull, true,
+                           11529174517718939931ull, 8531841841793833212ull,  true}
+              : AlgModulus{18446671903297182683ull, 18446671774448415864ull, 2147479447ull, true,
+                           11529169879162879731ull, 2934161963579244570ull,  true};
   default:
     return {};
   }
 }
 FPSAN_HOST_DEVICE constexpr AlgModulus alg_sophie_germain_pair(AlgVariant v, unsigned w) {
-  // Two independent Sophie Germain pairs (p = 2d+1) per width; g has
-  // order d in (Z/n)^*. The first variant uses the largest pair, the
-  // second the next -- distinct moduli so the two variants are genuinely
-  // independent runs.
+  // Sophie Germain pairs (p = 2d+1) with d == 11 mod 12, so the safe-prime
+  // qr-order factor makes both 2 and 3 positive. The 8-bit second variant
+  // reuses the only such pair that fits; wider widths use distinct pairs.
+  // g has order d in (Z/n)^*.
   const bool sg1 = (v == AlgVariant::SophieGermain1);
   switch (w) {
   case 8:
-    return sg1 ? AlgModulus{253u, 188u, 11u, true} : AlgModulus{55u, 26u, 5u, true};
+    return sg1 ? AlgModulus{253u, 188u, 11u, true} : AlgModulus{253u, 188u, 11u, true};
   case 16:
-    return sg1 ? AlgModulus{64261u, 63188u, 179u, true} : AlgModulus{60031u, 58994u, 173u, true};
+    return sg1 ? AlgModulus{64261u, 63188u, 179u, true} : AlgModulus{34453u, 33668u, 131u, true};
   case 32:
-    return sg1 ? AlgModulus{4274287111u, 4274009738u, 46229u, true}
-               : AlgModulus{4268741401u, 4268464208u, 46199u, true};
+    return sg1 ? AlgModulus{4268741401u, 4268464208u, 46199u, true}
+               : AlgModulus{4226711653u, 4226435828u, 45971u, true};
   case 64:
-    // p = 2d+1 (Sophie Germain), d == 2 (mod 3) so 3 stays coprime to the
-    // group exponent and cbrt remains a perfect power map. g has order d.
-    return sg1 ? AlgModulus{18446739472945029403ull, 18446739454723028678ull, 3037000121ull, true}
-               : AlgModulus{18446728393970250571ull, 18446728375748255318ull, 3036999209ull, true};
+    // p = 2d+1 (Sophie Germain), d == 11 (mod 12) so 3 stays coprime to the
+    // group exponent, cbrt remains a perfect power map, and 2/3 are positive.
+    return sg1 ? AlgModulus{18446723947803676141ull, 18446723929581683084ull, 3036998843ull, true}
+               : AlgModulus{18446715930127601161ull, 18446715911905612064ull, 3036998183ull, true};
   default:
     return {};
   }
@@ -457,11 +459,25 @@ template <class U = u64> FPSAN_HOST_DEVICE constexpr bool alg_is_nan(const AlgCo
 template <class U = u64> FPSAN_HOST_DEVICE constexpr bool alg_is_fin(const AlgConfig &c, U p) {
   return p < static_cast<U>(c.n);
 }
+FPSAN_HOST_DEVICE constexpr u64 alg_qr_order_modulus(const AlgConfig &c) {
+  return c.two_moduli ? (c.has_sin_cos ? c.d : c.n / c.d) : c.n;
+}
+FPSAN_HOST_DEVICE constexpr bool alg_has_qr_order(const AlgConfig &c) {
+  return alg_qr_order_modulus(c) % 4 == 3;
+}
 template <class U = u64>
 FPSAN_HOST_DEVICE constexpr bool alg_is_nonzero_qr(const AlgConfig &c, U p) {
-  if (!alg_is_fin<U>(c, p) || p == 0)
+  // The qr-order only needs a sign-canonical positive class, not full
+  // quadratic residuosity in every CRT component. Field semantics use their
+  // prime field. SophieGermain rings use the safe-prime factor p=n/d where
+  // -1 is a non-square. Pythagorean rings use the d factor when it has that
+  // property. Thus for ordinary units exactly one of x and -x is qr-positive,
+  // matching the field behavior whenever alg_has_qr_order(c) holds.
+  const U q = static_cast<U>(alg_qr_order_modulus(c));
+  const U r = static_cast<U>(p % q);
+  if (!alg_is_fin<U>(c, p) || r == 0)
     return false;
-  return alg_powmod<U>(p, static_cast<U>((c.n - 1) / 2), static_cast<U>(c.n)) == 1;
+  return alg_powmod<U>(r, static_cast<U>((q - 1) / 2), q) == 1;
 }
 template <class U = u64>
 FPSAN_HOST_DEVICE constexpr bool alg_qr_less(const AlgConfig &c, U a, U b) {

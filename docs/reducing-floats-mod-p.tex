@@ -245,7 +245,9 @@ after clearing powers of \(2\), their difference has numerator divisible by the
 chosen modulus.  The suffix-2 variants exist so that a suspected collision can
 be checked against a different set of primes or composite moduli:
 \texttt{Field2}, \texttt{FieldFast2}, \texttt{SophieGermainRing2}, and
-\texttt{PythagoreanRing2} have entirely different nonzero collision sets.
+\texttt{PythagoreanRing2} usually have different nonzero collision sets.  The
+8-bit composite variants deliberately share the only 2-positive modulus that
+fits their construction.
 
 \section{Several primes and characteristic-zero recovery}
 
@@ -391,7 +393,12 @@ Together, Constraints~\ref{con:sqrt} and~\ref{con:cbrt} give
 \[
   p\equiv 11\pmod {12}.
 \]
-That congruence is the root-related constraint on the Field primes.
+That congruence is the root-related constraint on the Field primes.  The Field
+families do not additionally require \(2\) to be a quadratic residue; the prime
+choices also serve density, same-width sentinel, and cast-tower constraints, so
+the qr-order sign of \(2\) is mixed across widths and variants.  The composite
+families below have another factor available and use it to make \(2\) positive
+in the selected qr-order factor.
 
 The composite algebraic modes use the same power-map idea with the exponent of
 the unit group of \(\Z/N\Z\).  The Sophie Germain choices keep \(3\) invertible
@@ -610,20 +617,24 @@ semantics for finite algebraic arithmetic, but not for exp/log laws.
 
 At widths \(8,16,32,64\), the actual Sophie Germain choices are as follows;
 variant \(1\) is the unsuffixed semantics and variant \(2\) is
-\texttt{SophieGermainRing2}.
+\texttt{SophieGermainRing2}.  The choices require \(d\equiv11\pmod {12}\),
+equivalently \(p\equiv23\pmod {24}\).  This keeps the perfect cube-root
+condition and also makes both \(2\) and \(3\) positive in the selected qr-order
+factor \(p\).  At 8 bits only one pair satisfying these constraints fits, so
+variant 2 intentionally shares variant 1 there.
 \begin{center}
 \small
 \begin{tabular}{c|c|r|r|r}
 variant & \(w\) & \(d\) & \(p=2d+1\) & \(n=pd\)\\
 \hline
 1 & 8  & 11 & 23 & 253\\
-2 & 8  & 5 & 11 & 55\\
+2 & 8  & 11 & 23 & 253\\
 1 & 16 & 179 & 359 & 64261\\
-2 & 16 & 173 & 347 & 60031\\
-1 & 32 & 46229 & 92459 & 4274287111\\
-2 & 32 & 46199 & 92399 & 4268741401\\
-1 & 64 & 3037000121 & 6074000243 & 18446739472945029403\\
-2 & 64 & 3036999209 & 6073998419 & 18446728393970250571
+2 & 16 & 131 & 263 & 34453\\
+1 & 32 & 46199 & 92399 & 4268741401\\
+2 & 32 & 45971 & 91943 & 4226711653\\
+1 & 64 & 3036998843 & 6073997687 & 18446723947803676141\\
+2 & 64 & 3036998183 & 6073996367 & 18446715930127601161
 \end{tabular}
 \end{center}
 
@@ -663,6 +674,14 @@ denominator is a zero-divisor, the implementation returns the algebraic NaN
 fingerprint.  At the sizes used here, zero-divisors are rare compared with the
 zero-divisors in Triton's \(\Z/2^w\Z\), but they are real.
 
+For order and absolute value, Sophie Germain rings use the safe-prime CRT
+factor \(p=n/d\) as the selected factor in the qr-order of
+Section~\ref{sec:order-abs-selection}.  Since \(p=2d+1\) with odd \(d\), this
+factor is \(3\bmod4\), so the selected-factor sign convention is available at
+the composite widths.  The stronger \(p\equiv23\pmod {24}\) choice above makes
+\(2\) and \(3\) quadratic residues in that selected factor.  At sub-\(8\)-bit
+widths, the Field-family fallback uses its prime modulus as the selected factor.
+
 \section{The Pythagorean ring}
 
 \texttt{Semantics::PythagoreanRing} takes its target ring to be
@@ -686,20 +705,25 @@ arithmetic and roots follow the Field-family behavior.
 
 At widths \(8,16,32,64\), the actual Pythagorean choices are as follows; variant
 \(1\) is the unsuffixed semantics and variant \(2\) is
-\texttt{PythagoreanRing2}.
+\texttt{PythagoreanRing2}.  The checked-in choices require
+\(d\equiv7\pmod {24}\).  This makes \(2\) positive in the selected qr-order
+factor \(d\).  Since \(p=4d+1\) prime forces \(d\equiv1\pmod 3\) for
+\(d>3\), these same choices necessarily make \(3\) a non-residue in \(d\).  At
+8 bits only one pair satisfying the 2-positive constraint fits, so variant 2
+intentionally shares variant 1 there.
 \begin{center}
 \small
 \begin{tabular}{c|c|r|r|r}
 variant & \(w\) & \(d\) & \(p=4d+1\) & \(n=pd\)\\
 \hline
 1 & 8  & 7 & 29 & 203\\
-2 & 8  & 3 & 13 & 39\\
+2 & 8  & 7 & 29 & 203\\
 1 & 16 & 127 & 509 & 64643\\
-2 & 16 & 97 & 389 & 37733\\
-1 & 32 & 32707 & 130829 & 4279024103\\
-2 & 32 & 32647 & 130589 & 4263339083\\
-1 & 64 & 2147483059 & 8589932237 & 18446733956915472983\\
-2 & 64 & 2147480707 & 8589922829 & 18446693549896360103
+2 & 16 & 79 & 317 & 25043\\
+1 & 32 & 32647 & 130589 & 4263339083\\
+2 & 32 & 32479 & 129917 & 4219574243\\
+1 & 64 & 2147479879 & 8589919517 & 18446679324986898443\\
+2 & 64 & 2147479447 & 8589917789 & 18446671903297182683
 \end{tabular}
 \end{center}
 
@@ -744,6 +768,14 @@ This variant gives up perfect cube roots.  If \(d>3\) is prime and
 small \(d=3\) case, \(3\mid p-1\).  In either case the unit-group exponent has a
 factor of \(3\), so the cube map is not globally invertible by a power map.
 \texttt{cbrt} is therefore represented as a tag in the Pythagorean semantics.
+
+For order and absolute value, Pythagorean rings use the \(d\) CRT factor as the
+selected factor.  At sub-\(8\)-bit widths, the Field-family fallback uses its
+prime modulus as the selected factor.  All checked-in composite-width choices
+have \(d\equiv7\pmod {24}\), so the selected-factor sign convention is
+available throughout the Pythagorean family and \(2\) is positive.  The same
+prime-shape constraint that enables the Pythagorean construction makes \(3\) a
+selected-factor non-residue in the composite cases.
 
 \section{Tags and genuinely opaque functions}
 
@@ -829,73 +861,105 @@ finite residues never overflow; among the basic arithmetic operations on finite
 values, the only source of infinity is \(x/0\) with \(x\ne 0\).
 
 \section{Order, absolute value, and selection}
+\label{sec:order-abs-selection}
 
 No finite ring can carry a total order compatible with its addition and
 multiplication.  Consequently the algebraic semantics do not model IEEE-754
 numeric ordering.  Comparisons, \texttt{min}, \texttt{max}, and \texttt{abs}
 are therefore fingerprint operations, not magnitude operations.
 
-For the Field-family prime moduli, the implementation uses the quadratic
-residue split as a canonical sign convention.  A quadratic residue modulo \(p\)
-is a nonzero residue that is a square: \(x\) is a quadratic residue when
-\(x=y^2\) for some nonzero \(y\in\F_p\).  We call exactly these finite nonzero
-residues positive.  Zero is not positive; neither are the infinity and NaN
-sentinels.  Since the Field primes satisfy \(p\equiv 3\pmod 4\), \(-1\) is not
-a square, so exactly one of \(x\) and \(-x\) is positive for every finite
-nonzero \(x\).  This gives a canonical absolute value
+The implementation uses the quadratic-residue split as a canonical sign
+convention whenever it can select a prime factor \(q\equiv3\pmod4\).  In the
+Field family, \(q\) is the whole prime modulus.  In the Sophie Germain rings,
+\(q=p=n/d\), the safe-prime CRT factor.  In the Pythagorean rings, \(q=d\).
+The checked-in algebraic modulus tables select such a factor in every case.
+They also tune the composite factors so \(2\) is qr-positive in both Sophie
+Germain and Pythagorean families.  In the Sophie Germain family, \(3\) is
+qr-positive as well.  In the Pythagorean composite family, \(3\) is necessarily
+a selected-factor non-residue: the condition \(p=4d+1\) with \(p,d\) prime
+forces \(d\equiv1\pmod3\) for \(d>3\), while the 2-positive qr-order choice
+uses \(d\equiv7\pmod {24}\).
+
+Write \(\pi_q\) for reduction to the selected factor.  In this section,
+``quadratic residue'' means a nonzero square after applying
+\(\pi_q\colon\Z/n\Z\to\F_q\).  For composite rings this is deliberately not the
+same as being a square in every CRT component of \(\Z/n\Z\).  Requiring all
+components to be squares would fail to choose a sign in many cases, because the
+unselected factor can have the opposite quadratic-residue status for \(x\) and
+\(-x\).  The selected factor is a deterministic sign convention, not a full
+ordered-ring structure.
+
+Thus a finite payload \(x\) is positive when its selected component is a
+nonzero quadratic residue in \(\F_q\): \(\pi_q(x)=y^2\) for some nonzero
+\(y\in\F_q\).  Zero is not positive; neither are infinity, NaN, values whose
+selected component is zero, or selected-factor non-residues.  Since
+\(q\equiv3\pmod4\), \(-1\) is not a square in \(\F_q\), so exactly one of
+\(x\) and \(-x\) is positive whenever \(\pi_q(x)\ne0\).  In the Field family
+this covers every finite nonzero value.  In the composite rings, finite
+zero-divisors with \(\pi_q(x)=0\) lie outside the positive class for both signs.
+This gives a canonical absolute value on the selected-factor nonzero case:
 \[
   |x|_{\mathrm{qr}} =
   \begin{cases}
-    x, & x\text{ a quadratic residue},\\
+    x, & x\text{ positive},\\
     -x, & \text{otherwise},
   \end{cases}
 \]
-with \(|x|_{\mathrm{qr}}=|-x|_{\mathrm{qr}}\) for finite nonzero \(x\).  In
-terms of the Legendre symbol \(\chi(x)\in\{\pm1\}\), this is
-\(|x|_{\mathrm{qr}}=\chi(x)x\) for finite nonzero \(x\).  The extension to the
-special cases is by the same implementation rule: since zero and the sentinels
-are not positive, \texttt{abs} negates them, and negation fixes them in this
-model.  Thus \(\texttt{abs}(0)=0\), \(\texttt{abs}(\infty)=\infty\), and
+with \(|x|_{\mathrm{qr}}=|-x|_{\mathrm{qr}}\) whenever \(\pi_q(x)\ne0\).  In
+the Field-family case, in terms of the Legendre symbol
+\(\chi(x)\in\{\pm1\}\), this is \(|x|_{\mathrm{qr}}=\chi(x)x\) for finite
+nonzero \(x\).  The extension to the special cases is by the same
+implementation rule: since zero and the sentinels are not positive,
+\texttt{abs} negates them, and negation fixes them in this model.  Thus
+\(\texttt{abs}(0)=0\), \(\texttt{abs}(\infty)=\infty\), and
 \(\texttt{abs}(\mathrm{NaN})=\mathrm{NaN}\).
 
-This sign convention is compatible with multiplication on finite nonzero
-residues.  Products of two positive residues and products of two negative
-residues are positive, while a positive times a negative is negative:
+This sign convention is compatible with multiplication whenever the selected
+components are nonzero.  Products of two positive residues and products of two
+negative residues are positive, while a positive times a negative is negative:
 \[
   Q\cdot Q\subset Q,\qquad N\cdot N\subset Q,\qquad Q\cdot N\subset N,
 \]
 where \(Q\) is the set of quadratic residues and \(N\) is the set of
-non-residues.  Equivalently, \(\chi(xy)=\chi(x)\chi(y)\).  Consequently
+non-residues in \(\F_q^\times\).  Equivalently,
+\(\chi(\pi_q(xy))=\chi(\pi_q(x))\chi(\pi_q(y))\).  Consequently
 \[
   |xy|_{\mathrm{qr}}=|x|_{\mathrm{qr}}\,|y|_{\mathrm{qr}}
 \]
-for finite nonzero \(x,y\).  Every finite nonzero square is positive, and the
-Field square-root power map \(S\) from Constraint~\ref{con:sqrt} is exact on
-squares in the canonical sense:
+when \(\pi_q(x)\) and \(\pi_q(y)\) are nonzero.  Every square with nonzero
+selected component is positive.  In the Field-family case, the square-root
+power map \(S\) from Constraint~\ref{con:sqrt} is exact on squares in the
+canonical sense:
 \[
   S(x^2)=|x|_{\mathrm{qr}},\qquad |x|_{\mathrm{qr}}^2=x^2.
 \]
+For composite rings, the root power maps are the componentwise maps described
+above; the qr-order only adds a selected-factor sign convention and does not
+remove the usual zero-divisor caveat.
 
 The associated comparison is only a two-class preorder:
 \[
   a < b \quad\Longleftrightarrow\quad a\notin Q\ \text{and}\ b\in Q.
 \]
-Here \(Q\) still means only finite nonzero quadratic residues; zero, infinities,
-NaNs, and finite non-residues all lie outside \(Q\).  The non-strict comparison
-is not the same relation as the strict comparison.  It is defined in the usual
-C++ way, \(a\le b\) iff not \(b<a\), hence
+Here \(Q\) still means only finite values with positive selected component;
+zero, infinities, NaNs, selected-component zero values, and selected-factor
+non-residues all lie outside \(Q\).  The non-strict comparison is not the same
+relation as the strict comparison.  It is defined in the usual C++ way,
+\(a\le b\) iff not \(b<a\), hence
 \[
   a \le b \quad\Longleftrightarrow\quad b\in Q\ \text{or}\ a\notin Q.
 \]
 Therefore \(a<b\) implies \(a\le b\), but many pairs satisfy \(a\le b\) without
 satisfying \(a<b\).  For example \(0\le n\) and \(n\le0\) both hold for a
-finite non-residue \(n\), while neither \(0<n\) nor \(n<0\) holds.
+finite selected-factor non-residue \(n\), while neither \(0<n\) nor \(n<0\)
+holds.
 
 The \texttt{min} and \texttt{max} operations use the same positive/non-positive
 split, with deterministic payload tie-breaking inside a class.  This tie-break
 is a selection convention, not an additional comparison law.  In particular,
 \texttt{max} prefers a positive residue over zero or a non-residue, and all
-finite nonzero values become positive after \texttt{abs}.
+finite values with nonzero selected component become positive after
+\texttt{abs}.
 
 This convention is not a magnitude order, and it does not make ordered-field
 algebra possible.  It is nevertheless useful operationally in rank-revealing
@@ -904,18 +968,22 @@ chosen pivot or normalization denominator is nonzero; the real-valued fact that
 it is the largest magnitude candidate is secondary for FPSan's exact-equivalence
 purpose.  With the \(\mathrm{qr}\) absolute value,
 \(\max_i |a_i|_{\mathrm{qr}}\) is nonzero
-whenever any finite \(a_i\) is nonzero.  Likewise, if a routine compares
-candidate denominators represented as exact squares \(r_i^2\), the nonzero
-candidates are positive, the chosen square root is the canonical
-\(|r_i|_{\mathrm{qr}}\), and division by the selected value is ordinary field
-division rather than an opaque tag or a zero fallback.  This is the algebraic
-analogue of choosing a largest pivot or largest \(L^2\)-norm denominator: the
-selection is deterministic and preserves the square/root/nonzero relationships
-that the algorithm needs, while making no claim to reproduce numerical magnitude
-order.
+whenever any candidate has nonzero selected component.  Likewise, if a routine
+compares candidate denominators represented as exact squares \(r_i^2\), the
+candidates with nonzero selected component are positive, and in the Field-family
+case the chosen square root is the canonical \(|r_i|_{\mathrm{qr}}\).  In
+composite modes, the same selected-factor convention helps avoid artificial
+order divergences, while division still has the genuine ring caveat: a selected
+value that is a zero-divisor in the full ring produces the algebraic NaN
+fingerprint.  This is the algebraic analogue of choosing a largest pivot or
+largest \(L^2\)-norm denominator: the selection is deterministic and preserves
+the square/root/nonzero relationships available in the selected factor, while
+making no claim to reproduce numerical magnitude order.
 
-Triton FPSan and the composite algebraic modes keep signed-payload fingerprint
-ordering instead of this qr convention.
+Triton FPSan uses the signed-payload fallback path instead: comparisons,
+\texttt{min}, and \texttt{max} use signed-payload order, and \texttt{abs}
+selects between \(x\) and \(-x\) by comparing \(x\) with zero in that same
+order.
 
 \section{Extension to irrational number schemes}
 

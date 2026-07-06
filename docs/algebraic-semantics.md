@@ -48,9 +48,9 @@ algebraic equivalence, not bitwise floating-point equivalence.
 | `FieldWithMulCasts` | `Field1` | same prime `p` as `Field` | finite field, multiplicative casts |
 | `FieldWithMulCasts2` | `Field2` | same prime `p` as `Field2` | second collision set with multiplicative casts |
 | `SophieGermainRing` | `SophieGermain1` | `n = p*d`, `p = 2*d + 1` | exp/log channel |
-| `SophieGermainRing2` | `SophieGermain2` | different `p*d` | second collision set for Sophie Germain |
+| `SophieGermainRing2` | `SophieGermain2` | usually different `p*d` | second collision set for Sophie Germain; shared at 8-bit to keep `2` positive |
 | `PythagoreanRing` | `Pythagorean1` | `n = p*d`, `p = 4*d + 1` | exp/log plus sin/cos channel |
-| `PythagoreanRing2` | `Pythagorean2` | different `p*d` | second collision set for Pythagorean |
+| `PythagoreanRing2` | `Pythagorean2` | usually different `p*d` | second collision set for Pythagorean; shared at 8-bit to keep `2` positive |
 
 The Field-family variants deliberately share prime tables: `Field`, `FieldFast`,
 and `FieldWithMulCasts` have the same finite fingerprints for input
@@ -181,19 +181,38 @@ all residues in `Field`.
 prime choices so its finite fingerprints match `Field`, but `sqrt`, `rsqrt`, and
 `cbrt` are deterministic tags there.
 
-### Field-family order and `abs`
+### Algebraic qr-order and `abs`
 
-No finite field admits an order compatible with both addition and
-multiplication, so Field-family comparisons still do not model IEEE-754 numeric
-magnitude. They do, however, use the same quadratic-residue split that appears in
-the square-root discussion above.
+No finite ring can carry an order compatible with both addition and
+multiplication, so algebraic comparisons still do not model IEEE-754 numeric
+magnitude. They are deterministic fingerprint operations. Some algebraic
+configurations use a quadratic-residue split as a canonical sign convention.
 
-For `Semantics::Field`, `Semantics::FieldFast`, and
-`Semantics::FieldWithMulCasts` (and their `2` variants), a finite nonzero
-residue is treated as "positive" when it is a quadratic residue modulo `p`.
-Zero, infinity, NaN, and finite non-residues are not qr-positive. Because the
-Field primes are `3 mod 4`, `-1` is a non-residue, so exactly one of `x` and
-`-x` is qr-positive for every finite nonzero `x`.
+The convention is enabled when the implementation can select a prime factor `q`
+with `q == 3 mod 4`:
+
+- Field-family semantics use the whole prime field, so `q = n`.
+- Sophie Germain rings use the safe-prime CRT factor, so `q = n / d`.
+- Pythagorean rings use the `d` CRT factor when that factor is `3 mod 4`.
+
+For composite rings, this is deliberately not a test for being a square in every
+CRT factor. Requiring every component to be a square would fail to choose between
+`x` and `-x` in the cases where the unselected factor has the opposite
+quadratic-residue status. The selected factor is only a sign convention.
+
+The checked-in composite choices tune this selected factor further. In the
+Sophie Germain family, `p == 23 mod 24`, so both `2` and `3` are qr-positive.
+In the Pythagorean family, `d == 7 mod 24`, so `2` is qr-positive. The same
+`p = 4*d + 1` constraint forces `3` to be a selected-factor non-residue there.
+
+A finite payload is qr-positive when its reduction modulo `q` is a nonzero
+quadratic residue. Zero, infinity, NaN, finite values whose selected component
+is zero, and selected-factor non-residues are not qr-positive. Because
+`q == 3 mod 4`, `-1` is a non-residue modulo `q`, so exactly one of `x` and
+`-x` is qr-positive whenever the selected component of `x` is nonzero. Field
+semantics have no finite zero-divisors, so this covers every finite nonzero
+value. Composite rings have rare finite zero-divisors; if the selected component
+is zero, neither sign is qr-positive.
 
 The resulting `abs` is canonical:
 
@@ -202,9 +221,10 @@ abs(x) = x   if x is qr-positive
 abs(x) = -x  otherwise
 ```
 
-Thus `abs(x) == abs(-x)` for finite nonzero residues, and the result is the qr
-representative of `{x, -x}`. Because zero is not qr-positive but `-0 == 0` in
-the algebraic model, `abs(0) == 0`.
+Thus `abs(x) == abs(-x)` whenever the selected component is nonzero, and the
+result is the qr representative of `{x, -x}`. Because zero is not qr-positive
+but `-0 == 0` in the algebraic model, `abs(0) == 0`. The infinity and NaN
+sentinels are also non-positive, and negation fixes them in the algebraic model.
 
 The comparison operators expose the same two-class preorder. Strict `<` detects
 only a move from the non-positive class to the qr-positive class:
@@ -214,8 +234,10 @@ not the same relation; it is the usual `!(b < a)`, so `a <= b` is true whenever
 `n <= 0` both hold for a finite non-residue `n`, while neither `0 < n` nor
 `n < 0` holds. The `min`/`max` helpers prefer non-positive and qr-positive
 residues respectively, with a deterministic payload tie-break inside each class.
-This convention can keep rank-revealing algebraic algorithms from collapsing all
-pivots to zero, while remaining deliberately non-numeric.
+For values with nonzero selected components, finite nonzero squares are
+qr-positive and `abs(x*y) == abs(x) * abs(y)`. This convention can keep
+rank-revealing algebraic algorithms from collapsing all pivots to zero, while
+remaining deliberately non-numeric.
 
 ### FieldFast semantics
 
@@ -357,6 +379,15 @@ The discrete log is a small scan for the 8-, 16-, and 32-bit cases. For the
 64-bit cases, where `d` is about `2^31`, the implementation uses Pollard's rho
 for the order-`d` channel.
 
+For order and `abs`, Sophie Germain rings use the safe-prime CRT factor
+`p = n/d` as the selected factor in the qr-order described above. Since `p` is
+`3 mod 4`, this gives the same sign-canonical split as Field semantics for
+values whose selected component is nonzero. The checked-in composite choices
+use `d == 11 mod 12`, equivalently `p == 23 mod 24`, so both `2` and `3` are
+qr-positive in that selected factor. The 8-bit `Ring2` variant shares the
+unsuffixed modulus because only one such 2-positive Sophie Germain pair fits;
+wider `Ring2` variants use distinct moduli.
+
 ## Pythagorean ring
 
 `Semantics::PythagoreanRing` uses:
@@ -397,6 +428,14 @@ tag in this variant.
 
 The Pythagorean `d` is also smaller than the Sophie Germain `d` at the same
 fingerprint width, so exp/trig image collisions are somewhat more likely.
+
+For order and `abs`, Pythagorean rings use the `d` CRT factor as the selected
+factor. The checked-in choices all have `d == 7 mod 24`, giving a
+sign-canonical split for values whose selected component is nonzero and making
+`2` qr-positive. For prime `d > 3`, `p = 4*d + 1` also forces `d == 1 mod 3`;
+therefore these selected factors have `3` as a non-residue. The 8-bit `Ring2`
+variant shares the unsuffixed modulus because only one such 2-positive
+Pythagorean pair fits; wider `Ring2` variants use distinct moduli.
 
 ## Tags
 

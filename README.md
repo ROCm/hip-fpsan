@@ -101,8 +101,8 @@ want the fingerprint arithmetic to preserve.
 FPSan-family semantics implement deterministic fingerprint operations: some
 preserve useful identities, while the rest produce operation-distinguishing tags.
 Triton behavior is introduced in [`docs/triton-fpsan.md`](docs/triton-fpsan.md);
-algebraic behavior, including Field-family quadratic-residue-positive
-`abs`/selection, is summarized in
+algebraic behavior, including quadratic-residue-positive `abs`/selection for
+Field and supported composite-ring configurations, is summarized in
 [`docs/algebraic-fpsan.md`](docs/algebraic-fpsan.md).
 
 ## AMD GPU intrinsic support
