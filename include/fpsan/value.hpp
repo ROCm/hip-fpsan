@@ -286,9 +286,10 @@ public:
 
   // ---- comparisons ---------------------------------------------------------
   // == / != compare payloads in FPSan-family semantics (exact) and the floats
-  // otherwise. Field-family `<` uses the experimental qr-positive two-class
-  // relation: finite nonzero quadratic residues are positive; zero, sentinels,
-  // and non-residues are not. `<=` is `!(b < a)`, not the same relation as `<`.
+  // otherwise. Algebraic `<` uses the experimental qr-positive two-class
+  // relation: finite nonzero residues that are squares in the selected
+  // qr-order factor are positive; zero, sentinels, and non-residues are not.
+  // `<=` is `!(b < a)`, not the same relation as `<`.
   // Other payload modes use the *signed integer* order of payloads (Triton's
   // min/max contract), NOT IEEE float order. Vector Values return per-lane
   // masks.
@@ -372,7 +373,7 @@ private:
 
   FPSAN_HOST_DEVICE constexpr cmp_t eq(Value o) const { return storage_ == o.storage_; }
   FPSAN_HOST_DEVICE constexpr cmp_t less(Value o) const {
-    if constexpr (is_fpsan && is_algebraic && detail::has_field_qr_order(semantics)) {
+    if constexpr (is_fpsan && is_algebraic && detail::alg_has_qr_order(alg_cfg())) {
       if constexpr (is_vector) {
         using MaskLane = detail::vector_element_t<cmp_t>;
         cmp_t out{};

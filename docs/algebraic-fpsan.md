@@ -46,9 +46,9 @@ inside their supported algebraic fragment.
 | `Semantics::Field` | The cleanest algebraic model for rational/polynomial code: exact `+ - * /`, no zero-divisors, multiplicative `sqrt`/`cbrt`, and quadratic-residue-based `abs`/selection. | Division and `sqrt`/`cbrt` can be slow; `exp`, `log`, `sin`, and `cos` are opaque tags; mixed-width casts are cheap deterministic conventions, not homomorphisms; comparisons are not IEEE numeric order. |
 | `Semantics::FieldFast` | The same primes and finite fingerprints as `Field`, but expensive operations such as division and roots use deterministic tags. | Keeps the core `+ - *` value identities and cheap casts, but gives up `x/x == 1`, multiplicative roots, and field-inverse division. |
 | `Semantics::FieldWithMulCasts` | The same Field primes and arithmetic, but with multiplicative casts across the supported width tower, including same-width format changes such as `f16`↔`bf16` and `e4m3`↔`e5m2`. | Casts compute discrete logarithms and can be much slower, especially `f32`↔`f64`. |
-| `Semantics::SophieGermainRing` | The algebraic value model plus exact `exp`/`exp2`/`exp10` and `log`/`log2`/`log10` laws. | The modulus is composite, so rare zero-divisors exist; casts lose the Field family's optional multiplicative structure. |
-| `Semantics::PythagoreanRing` | The Sophie Germain-style exp/log channel plus exact `sin`/`cos` angle-addition identities. | Slightly more collisions than Sophie Germain, rare zero-divisors, no perfect `cbrt`, and no multiplicative casts. |
-| Any `*2` variant | A second run with different primes under the same design constraints. | Same semantics family, different collision set. Use it to reroll a suspicious equality. |
+| `Semantics::SophieGermainRing` | The algebraic value model plus exact `exp`/`exp2`/`exp10` and `log`/`log2`/`log10` laws, with qr-positive `abs`/selection through the safe-prime CRT factor; checked-in factors make both `2` and `3` positive. | The modulus is composite, so rare zero-divisors exist; casts lose the Field family's optional multiplicative structure. |
+| `Semantics::PythagoreanRing` | The Sophie Germain-style exp/log channel plus exact `sin`/`cos` angle-addition identities, with qr-positive `abs`/selection through the `d` CRT factor; checked-in factors make `2` positive. | Slightly more collisions than Sophie Germain, rare zero-divisors, no perfect `cbrt`, `3` is not positive in the composite selected factor, and no multiplicative casts. |
+| Any `*2` variant | A second run with different primes under the same design constraints, except that the 8-bit composite modes share the only 2-positive modulus that fits. | Same semantics family, usually a different collision set. Use it to reroll a suspicious equality when the modulus is distinct. |
 
 ```mermaid
 flowchart LR
@@ -191,7 +191,7 @@ Markers:
 | fingerprint source | scramble of IEEE-754 bits | value residue | value residue | value residue | value residue | value residue |
 | fingerprint ring | `Z/2^w` | `F_p` | `F_p` | `F_p` | `Z/(p*d)` | `Z/(p*d)` |
 | same footprint as the float type | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| second-prime reroll available | N/A | ✅ `Field2` | ✅ `FieldFast2` | ✅ `FieldWithMulCasts2` | ✅ `SophieGermainRing2` | ✅ `PythagoreanRing2` |
+| second-prime reroll available | N/A | ✅ `Field2` | ✅ `FieldFast2` | ✅ `FieldWithMulCasts2` | ⚠️ `SophieGermainRing2`, shared at 8-bit | ⚠️ `PythagoreanRing2`, shared at 8-bit |
 | **Core algebra** | | | | | | |
 | deterministic and platform-independent | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | reassociation, commutativity, distributivity | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
@@ -209,11 +209,13 @@ Markers:
 | indeterminate forms produce `NaN` | ❌ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | `NaN` is absorbing and deterministic | ❌ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | **Order and selection** | | | | | | |
-| deterministic comparison, `min`, `max`, and `abs`; not IEEE magnitude order | ✅ signed payload | ✅ qr-positive | ✅ qr-positive | ✅ qr-positive | ✅ signed payload | ✅ signed payload |
-| finite nonzero squares are positive | ❌ | ✅ qr-positive | ✅ qr-positive | ✅ qr-positive | ❌ | ❌ |
-| `abs(x) == abs(-x)` for finite nonzero `x` | ❌ | ✅ qr representative | ✅ qr representative | ✅ qr representative | ❌ | ❌ |
-| `abs(x*y) == abs(x)*abs(y)` for finite nonzero `x,y` | ❌ | ✅ | ✅ | ✅ | ❌ | ❌ |
-| `max(positive, non-positive)` selects the positive value | ❌ | ✅ qr-positive | ✅ qr-positive | ✅ qr-positive | ❌ | ❌ |
+| deterministic comparison, `min`, `max`, and `abs`; not IEEE magnitude order | ✅ signed payload | ✅ qr-positive | ✅ qr-positive | ✅ qr-positive | ✅ qr-positive via selected CRT factor | ✅ qr-positive via selected CRT factor |
+| finite nonzero squares are positive | ❌ | ✅ | ✅ | ✅ | ⚠️ units, selected factor | ⚠️ units, selected factor |
+| `abs(x) == abs(-x)` for finite nonzero `x` | ❌ | ✅ canonical representative | ✅ canonical representative | ✅ canonical representative | ⚠️ units, selected factor | ⚠️ units, selected factor |
+| `abs(x*y) == abs(x)*abs(y)` for finite nonzero `x,y` | ❌ | ✅ | ✅ | ✅ | ⚠️ units, selected factor | ⚠️ units, selected factor |
+| `max(positive, non-positive)` selects the positive value | ❌ | ✅ | ✅ | ✅ | ✅ selected factor | ✅ selected factor |
+| `2` is positive | ❌ | ⚠️ mixed by width/variant | ⚠️ mixed by width/variant | ⚠️ mixed by width/variant | ✅ | ✅ |
+| `3` is positive | ❌ | ✅ | ✅ | ✅ | ✅ | ❌ forced non-residue |
 | **Roots** | | | | | | |
 | `sqrt(x*y) == sqrt(x)*sqrt(y)` | ❌ tag | ✅ | ❌ tag | ✅ | ✅ | ✅ |
 | `rsqrt == 1/sqrt` | ❌ tag | ✅ | ❌ tag | ✅ | ✅ | ✅ |
@@ -249,17 +251,31 @@ Notes:
   `Semantics::FieldWithMulCasts` use the same primes and therefore
   the same finite fingerprints for input values. `FieldFast` differs in
   division and roots; `FieldWithMulCasts` differs in casts.
-- Field-family comparisons and `min`/`max` do not model magnitude. They split
-  finite nonzero residues into quadratic residues and non-residues, treating the
-  qr half as "positive"; zero, infinity, NaN, and non-residues are not
-  qr-positive. Strict `<` is true only from the non-positive class to the
-  qr-positive class, while `<=` is its reflexive preorder (`!(b < a)`). Thus
-  `0 <= n` and `n <= 0` both hold for a finite non-residue `n`, but neither is
-  strictly less than the other. `abs(x)` returns the canonical qr representative
-  of `{x, -x}`, finite nonzero squares are qr-positive, and `abs` is
-  multiplicative on finite nonzero values. This is useful for algebraic sign
-  choices and nonzero pivot/norm selection in rank-revealing code, but it is
-  still only deterministic fingerprint order.
+- Algebraic qr-order comparisons and `min`/`max` do not model magnitude. They
+  split finite nonzero residues into quadratic residues and non-residues,
+  treating the qr half as "positive"; zero, infinity, NaN, and non-residues are
+  not qr-positive. Field-family semantics use their prime field. Sophie Germain
+  rings use the safe-prime CRT factor `p = n/d`. Pythagorean rings use the `d`
+  CRT factor, checked in as `d == 7 mod 24`. This is deliberately not a test for being a
+  square in every CRT factor. Strict `<` is true only from the non-positive
+  class to the qr-positive class, while `<=` is its reflexive preorder
+  (`!(b < a)`). Thus `0 <= n` and `n <= 0` both hold for a finite non-residue
+  `n`, but neither is strictly less than the other. `abs(x)` returns the
+  canonical qr representative of `{x, -x}` when the selected factor is nonzero.
+  In the Field family this covers every finite nonzero value. In composite
+  rings it covers the ordinary unit case; finite zero-divisors whose selected
+  factor is zero lie in the non-positive class and do not have a canonical sign
+  through that factor. Within the selected-factor unit case, finite nonzero
+  squares are qr-positive and `abs` is multiplicative. This is useful for
+  algebraic sign choices and nonzero pivot/norm selection in rank-revealing
+  code, but it is still only deterministic fingerprint order.
+- The checked-in composite moduli intentionally make `2` qr-positive in the
+  selected factor. Sophie Germain choices also make `3` qr-positive. Pythagorean
+  composite choices cannot do both: with `p = 4*d + 1` prime, `d` is forced to
+  make `3` a selected-factor non-residue. This small-prime behavior is one place
+  where the composite families are more tuned than the Field-family primes,
+  whose stronger cast/root constraints leave `2` mixed across widths and
+  variants.
 - Performance rows are order-of-magnitude summaries from the checked-in
   microbenchmarks. Exact factors still vary by target.
 - `Semantics::FieldWithMulCasts` casts are the expensive outlier because they
@@ -285,8 +301,8 @@ implementation.
 - It intentionally ignores overflow magnitude. A finite algebraic sum remains a
   finite residue; infinity comes from division by true zero.
 - Its comparisons, `min`, `max`, and `abs` are fingerprint operations, not
-  IEEE-754 magnitude/order operations. Field-family scalars use the
-  qr-positive convention described above.
+  IEEE-754 magnitude/order operations. The checked-in algebraic modulus tables
+  use the qr-positive convention above.
 - Algebraic fingerprints do not decode back to useful floats. `to_float()` is
   deliberately unavailable in algebraic semantics.
 - Collisions are possible because a fixed-width residue cannot injectively

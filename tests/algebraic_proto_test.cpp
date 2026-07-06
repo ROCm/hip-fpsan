@@ -44,9 +44,9 @@ template <class FT> static void test_width(const char *name, AlgVariant field, A
   check(emb<FT>(cf, static_cast<FT>(-1)) == cf.n - 1, "phi(-1)=-1");
   check(emb<FT>(cf, static_cast<FT>(0.5)) == cf.inv2, "phi(1/2)=inv2");
 
-  // Field-family order primitives: nonzero quadratic residues are the
-  // "positive" half. Since the Field primes are 3 mod 4, -1 is not a square,
-  // so exactly one of x and -x is qr for every finite nonzero x.
+  // qr-order primitives: nonzero residues that are squares in the selected
+  // prime factor are the "positive" half. The selected factor has -1 as a
+  // non-square, so exactly one of x and -x is qr for ordinary nonzero x.
   u64 non_qr = 0;
   for (u64 r = 2; r < cf.n && non_qr == 0; ++r)
     if (!alg_is_nonzero_qr(cf, r))

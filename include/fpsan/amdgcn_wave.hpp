@@ -13,10 +13,10 @@
 //     the algebraic Z/nZ variants), so a butterfly reduce produces the same
 //     payload as a sequential reduce once the lane exchange covers the full
 //     wave. Strategy and tree shape are irrelevant in FPSan mode.
-//   - FPSan fmin/fmax use fpsan::min/max. Triton and non-field algebraic rings
-//     keep signed-payload order; Field-family semantics use QR-positive order
-//     with deterministic same-class tie-breaking. The same butterfly works
-//     because the selected min/max operation is associative and commutative.
+//   - FPSan fmin/fmax use fpsan::min/max. Triton keeps signed-payload order;
+//     algebraic semantics use qr-positive order with deterministic same-class
+//     tie-breaking. The same butterfly works because the selected min/max
+//     operation is associative and commutative.
 //
 // The wrappers are emitted by the FPSAN_DEFINE_WAVE_REDUCE macro; new (op,
 // type) pairs are one-liners.
