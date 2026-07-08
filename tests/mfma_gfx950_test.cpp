@@ -611,8 +611,8 @@ template <class T> void run_legf32_layout() {
       for (int j = 0; j < T::N; ++j) {
         double acc = m.C[(b * T::M + i) * T::N + j];
         for (int k = 0; k < T::K; ++k)
-          acc += static_cast<double>(host_legf32_a_value)<T>(m.A, b, i, k) *
-                 static_cast<double>(host_legf32_b_value)<T>(m.B, b, k, j);
+          acc += static_cast<double>(host_legf32_a_value<T>(m.A, b, i, k)) *
+                 static_cast<double>(host_legf32_b_value<T>(m.B, b, k, j));
         ref[(b * T::M + i) * T::N + j] = static_cast<float>(acc);
       }
   float *dA = to_dev(m.A), *dB = to_dev(m.B), *dC = to_dev(m.C), *dD;
@@ -845,8 +845,8 @@ template <class T> void run_legf16_layout() {
       for (int j = 0; j < T::N; ++j) {
         double acc = m.C[(b * T::M + i) * T::N + j];
         for (int k = 0; k < T::K; ++k)
-          acc += static_cast<double>(host_legf16_a_value)<T>(m.A, b, i, k) *
-                 static_cast<double>(host_legf16_b_value)<T>(m.B, b, k, j);
+          acc += static_cast<double>(host_legf16_a_value<T>(m.A, b, i, k)) *
+                 static_cast<double>(host_legf16_b_value<T>(m.B, b, k, j));
         ref[(b * T::M + i) * T::N + j] = static_cast<float>(acc);
       }
   float *dA = to_dev(m.A), *dB = to_dev(m.B), *dC = to_dev(m.C), *dD;
